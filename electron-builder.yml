@@ -1,0 +1,24 @@
+appId: com.ffxi.zoneviewer
+productName: FFXI Zone Viewer
+directories:
+  output: release
+  buildResources: build
+files:
+  - out/**/*
+  - package.json
+win:
+  target:
+    - portable
+    - nsis
+  artifactName: FFXI-Zone-Viewer-${version}-${os}-${arch}.${ext}
+  # The app is unsigned. Skipping the sign/edit step also avoids electron-builder
+  # unpacking its winCodeSign bundle, which needs symlink privileges Windows only
+  # grants to admins or with Developer Mode on.
+  signAndEditExecutable: false
+portable:
+  artifactName: FFXI-Zone-Viewer-${version}-portable.exe
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  artifactName: FFXI-Zone-Viewer-${version}-setup.exe

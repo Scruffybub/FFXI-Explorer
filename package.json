@@ -1,0 +1,39 @@
+{
+  "name": "ffxi-zone-viewer",
+  "version": "1.0.0",
+  "description": "Standalone 3D viewer for Final Fantasy XI zone models with modern lighting",
+  "main": "./out/main/index.js",
+  "author": "",
+  "private": true,
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "start": "electron-vite preview",
+    "dist": "electron-vite build && electron-builder --win portable",
+    "dist:installer": "electron-vite build && electron-builder --win nsis"
+  },
+  "dependencies": {
+    "@react-three/drei": "^10.7.7",
+    "@react-three/fiber": "^9.5.0",
+    "@react-three/postprocessing": "^3.0.4",
+    "three": "^0.183.2"
+  },
+  "devDependencies": {
+    "@types/node": "^24.12.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@types/three": "^0.183.1",
+    "@vitejs/plugin-react": "^5.0.0",
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8",
+    "electron-vite": "^2.3.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "typescript": "~5.9.3",
+    "vite": "^5.4.0"
+  },
+  "allowScripts": {
+    "electron@33.4.11": true,
+    "esbuild@0.21.5": true
+  }
+}
