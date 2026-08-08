@@ -614,3 +614,20 @@ select {
   cursor: pointer;
 }
 .anim-buttons button:hover { border-color: var(--accent); }
+
+/* Character builder: scrolls independently of the sidebar head. */
+.builder-scroll { overflow-y: auto; flex: 1; min-height: 0; }
+.builder { padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+.builder .control span { color: var(--muted); }
+.builder select { width: 100%; }
+.clear-equip {
+  margin-top: 4px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--muted);
+  padding: 7px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.clear-equip:hover { color: var(--text); border-color: var(--accent-dim); }

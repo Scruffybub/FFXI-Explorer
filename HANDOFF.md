@@ -375,6 +375,36 @@ remembering for open problem 4b: five attempts failed there because they all
 measured *how much* was transparent, and genuine cutouts and terrain sit in the
 same band. A cutout has contiguous transparent regions and rarely alternates.
 
+### Player characters are assembled, not loaded
+
+`lib/characterModel.ts` builds a PC from a race skeleton plus one DAT per
+visible piece. Unlike an NPC or monster — one self-contained file with its own
+skeleton — a character's skeleton is a separate file and every piece is
+transformed into place by its bind-pose matrices. That is what
+`parseDatFile`'s `skelMatrices` argument exists for.
+
+Tables: `resources/model-dat-paths.json` keyed `"race:slot"` → model index →
+path, and `face-paths.json` keyed by race. Both from Vanalytics.
+
+**Slot numbering is inferred, not documented.** Slots 2–9 are the eight visible
+slots the game's 20-byte "look" struct carries. The counts settle it: slot 7 has
+675 models (main weapons, the largest set) and slot 9 has 129 (ranged, the
+smallest). Race 1's skeleton is `ROM/27/82.dat` and its slot-2 models start at
+`ROM/27/103.dat`, the same ROM directory. Order taken as head, body, hands,
+legs, feet, main, sub, ranged.
+
+**Model index 0 is "nothing equipped"** — it parses with no mesh blocks, so the
+Head slot reports as failed when you select it. That is correct game behaviour,
+not a bug.
+
+Texture indices are per-file and get rebased as pools are concatenated, or every
+piece would sample the first one's textures. A piece that fails to load is
+reported rather than thrown: a missing glove should not cost the character.
+
+Not done: player animations. Equipment DATs carry none — PC animations live in
+separate files (Vanalytics' `animation-paths.json`), so characters stand in bind
+pose while NPCs and monsters animate.
+
 ### Animation playback
 
 `AnimationParser.ts` reads 0x2B blocks; `lib/skinning.ts` holds the maths, split
