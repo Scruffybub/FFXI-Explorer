@@ -38,7 +38,43 @@ interface BuiltModel {
   triangles: number
 }
 
+/**
+ * True when a texture's alpha is a high-frequency dither rather than a cutout
+ * mask.
+ *
+ * FFXI inherits the PS2's trick of faking translucency with a stipple pattern:
+ * Gigas skin is a literal checkerboard, 50.0% of texels below the alpha
+ * threshold with 100% alternation between horizontal neighbours. Alpha-testing
+ * that punches out every other texel and the model renders as mesh netting.
+ *
+ * Alternation is the signal that alpha *coverage* alone could never provide —
+ * the same distinction defeated five attempts on the zone side, where genuine
+ * cutout terrain and real foliage both sit around 50% transparent. A cutout has
+ * contiguous transparent regions and so alternates rarely; a dither alternates
+ * almost every texel.
+ */
+function isDitheredAlpha(t: { width: number; height: number; rgba: Uint8Array }): boolean {
+  let below = 0
+  let alternations = 0
+  let comparisons = 0
+  for (let y = 0; y < t.height; y++) {
+    for (let x = 0; x < t.width; x++) {
+      const a = t.rgba[(y * t.width + x) * 4 + 3] < 128
+      if (a) below++
+      if (x + 1 < t.width) {
+        if (a !== (t.rgba[(y * t.width + x + 1) * 4 + 3] < 128)) alternations++
+        comparisons++
+      }
+    }
+  }
+  if (comparisons === 0) return false
+  const share = below / (t.width * t.height)
+  // Needs real transparency to matter, and needs to be flipping constantly.
+  return share > 0.15 && alternations / comparisons > 0.6
+}
+
 function buildModel(dat: ParsedDatFile): BuiltModel {
+  const dithered = dat.textures.map(isDitheredAlpha)
   const textures = dat.textures.map(t => {
     const tex = new THREE.DataTexture(t.rgba, t.width, t.height, THREE.RGBAFormat)
     tex.needsUpdate = true
@@ -88,10 +124,10 @@ function buildModel(dat: ParsedDatFile): BuiltModel {
     const texture = textures[m.materialIndex]
     const mat = new THREE.MeshStandardMaterial({
       map: texture ?? null,
-      // Character and monster art leans on cutout alpha far more than terrain
-      // does, and unlike the zone case these meshes have no blending flag to
-      // gate on — alpha testing everything is right here.
-      alphaTest: 0.5,
+      // Cutouts get alpha tested; dithered alpha is treated as solid, since the
+      // stipple encodes translucency rather than holes. Testing it would shred
+      // the surface into netting.
+      alphaTest: dithered[m.materialIndex] ? 0 : 0.5,
       side: THREE.DoubleSide,
       roughness: 0.85,
       metalness: 0,
@@ -121,6 +157,25 @@ function buildModel(dat: ParsedDatFile): BuiltModel {
   }
 
   if (MODEL_DEBUG) {
+    dat.textures.forEach((t, i) => {
+      let below = 0, alternations = 0, comparisons = 0
+      for (let y = 0; y < t.height; y++) {
+        for (let x = 0; x < t.width; x++) {
+          const a = t.rgba[(y * t.width + x) * 4 + 3]
+          if (a < 128) below++
+          if (x + 1 < t.width) {
+            const b = t.rgba[(y * t.width + x + 1) * 4 + 3]
+            if ((a < 128) !== (b < 128)) alternations++
+            comparisons++
+          }
+        }
+      }
+      const px = t.width * t.height
+      console.log(
+        `[Model] tex${i} ${t.width}x${t.height} below128=${((below / px) * 100).toFixed(1)}% ` +
+        `alternation=${((alternations / comparisons) * 100).toFixed(1)}%`,
+      )
+    })
     const size = bounds.isEmpty() ? new THREE.Vector3() : bounds.getSize(new THREE.Vector3())
     console.log(
       `[Model] ${meshes.length} meshes, ${Math.round(triangles)} tris, ` +
