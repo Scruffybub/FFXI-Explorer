@@ -31,6 +31,8 @@ export default function ModelBrowser({
   const [selected, setSelected] = useState<ModelEntry | null>(null)
   const [load, setLoad] = useState<LoadState>({ status: 'idle' })
   const [stats, setStats] = useState<ModelStats | null>(null)
+  const [playing, setPlaying] = useState(true)
+  const [speed, setSpeed] = useState(1)
 
   const filtered = useMemo(
     () => searchModels(search, category).slice(0, 400),
@@ -134,7 +136,24 @@ export default function ModelBrowser({
               model={load.model}
               background={BACKGROUND}
               onStats={onStats}
+              playing={playing}
+              speed={speed}
             />
+            {!uiHidden && stats && stats.animations > 0 && (
+              <div className="anim-bar">
+                <button onClick={() => setPlaying(p => !p)}>
+                  {playing ? 'Pause' : 'Play'}
+                </button>
+                <label>
+                  Speed
+                  <input
+                    type="range" min={0.1} max={3} step={0.1} value={speed}
+                    onChange={e => setSpeed(Number(e.target.value))}
+                  />
+                  <span>{speed.toFixed(1)}x</span>
+                </label>
+              </div>
+            )}
             {!uiHidden && (
               <div className="hud">
                 <strong>{selected?.name}</strong>
@@ -143,7 +162,9 @@ export default function ModelBrowser({
                     {stats.triangles.toLocaleString()} triangles · {stats.meshes} meshes ·{' '}
                     {stats.textures} textures
                     {stats.hasSkeleton ? ` · ${stats.bones} bones` : ' · no skeleton'}
-                    {load.animated ? ' · has animations' : ''}
+                    {stats.animations > 0
+                      ? ` · ${stats.animations} anim clip${stats.animations > 1 ? 's' : ''}`
+                      : ''}
                   </span>
                 )}
               </div>

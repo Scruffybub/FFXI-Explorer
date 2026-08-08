@@ -2,7 +2,8 @@ import { DatReader } from './DatReader'
 import { parseTextureBlock } from './TextureParser'
 import { parseVertexBlock } from './MeshParser'
 import { parseSkeleton } from './SkeletonParser'
-import type { ParsedDatFile, ParsedMesh, ParsedTexture, ParsedSkeleton } from './types'
+import { parseAnimationDat } from './AnimationParser'
+import type { ParsedDatFile, ParsedMesh, ParsedTexture, ParsedSkeleton, ParsedAnimation } from './types'
 
 /**
  * Loads an FFXI DAT file containing a 3D model — NPCs, monsters, equipment,
@@ -13,9 +14,8 @@ import type { ParsedDatFile, ParsedMesh, ParsedTexture, ParsedSkeleton } from '.
  * (`parseVertexBlock`, `parseSkeleton`, `parseTextureBlock`) already came
  * across with that port and has been sitting unused.
  *
- * Animation blocks (0x2B) are recognised but not yet decoded — `AnimationParser`
- * is the other file still to port. `animations` is always empty for now, which
- * is why models load in their bind pose.
+ * Animation blocks (0x2B) are decoded too, so NPC and monster DATs come back
+ * with their clips attached.
  */
 
 const BLOCK_IMG = 0x20
@@ -120,7 +120,13 @@ export function parseDatFile(
     }
   }
 
-  return { meshes, textures, skeleton: embeddedSkeleton, animations: [] }
+  // Animations live in the same buffer; a DAT without 0x2B blocks yields none.
+  let animations: ParsedAnimation[] = []
+  if (blocks.some(b => b.type === BLOCK_ANIM)) {
+    try { animations = parseAnimationDat(buffer) } catch { /* keep the model */ }
+  }
+
+  return { meshes, textures, skeleton: embeddedSkeleton, animations }
 }
 
 /** True if this DAT carries animation blocks, even though we cannot decode them yet. */

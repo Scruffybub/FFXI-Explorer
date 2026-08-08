@@ -569,3 +569,32 @@ select {
   word-break: break-all;
 }
 .inspector dd.warn { color: var(--danger); }
+
+/* Playback controls for animated models. Sits above the HUD, bottom-left. */
+.anim-bar {
+  position: absolute;
+  left: 16px;
+  bottom: 78px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  background: rgba(11, 13, 18, 0.85);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 12px;
+}
+.anim-bar button {
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--text);
+  padding: 5px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  min-width: 62px;
+}
+.anim-bar button:hover { border-color: var(--accent); }
+.anim-bar label { display: flex; align-items: center; gap: 8px; color: var(--muted); }
+.anim-bar input[type=range] { width: 110px; }
+.anim-bar span { color: var(--text); min-width: 30px; }

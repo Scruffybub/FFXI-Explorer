@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react'
-import { Canvas, useThree } from '@react-three/fiber'
+import { useState, useEffect, useMemo, useRef } from 'react'
+import { Canvas, useThree, useFrame } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
 import * as THREE from 'three'
 import type { ParsedDatFile } from '../lib/ffxi-dat'
+import { invertRigidMatrix4, poseSkeleton, skinMeshes, type SkinTarget } from '../lib/skinning'
 
 /**
  * Renders a single parsed model DAT.
@@ -12,10 +13,10 @@ import type { ParsedDatFile } from '../lib/ffxi-dat'
  * is no MZB instance list, no water, no sky, and the scale is metres rather
  * than the thousands of units a zone spans.
  *
- * Meshes arrive already posed. `parseVertexBlock` transforms vertices into
- * world space using the skeleton's bind-pose matrices, so there is no skinning
- * to do at draw time — and no animation either until `AnimationParser` is
- * ported.
+ * Meshes arrive in bind pose: `parseVertexBlock` transforms vertices into world
+ * space using the skeleton's bind-pose matrices. When the DAT carries animation
+ * blocks, `Animator` re-skins those vertices on the CPU every frame — see
+ * `lib/skinning.ts` for why that happens on the CPU rather than in a shader.
  */
 
 /**
@@ -36,6 +37,8 @@ interface BuiltModel {
   center: THREE.Vector3
   radius: number
   triangles: number
+  /** Per-mesh data for per-frame CPU skinning. Empty when the model has no bones. */
+  skinTargets: SkinTarget[]
 }
 
 /**
@@ -86,6 +89,7 @@ function buildModel(dat: ParsedDatFile): BuiltModel {
   })
 
   const meshes: THREE.Mesh[] = []
+  const skinTargets: SkinTarget[] = []
   const bounds = new THREE.Box3()
   let triangles = 0
   let badNormals = 0
@@ -134,6 +138,24 @@ function buildModel(dat: ParsedDatFile): BuiltModel {
     })
 
     meshes.push(new THREE.Mesh(geo, mat))
+
+    // Only meshes with bone assignments can be skinned. The parser hands back
+    // bone-local positions for dual-bone vertices, which is what makes joints
+    // bend correctly rather than collapsing.
+    if (m.boneIndices.length >= (m.vertices.length / 3) * 4) {
+      skinTargets.push({
+        positions: geo.getAttribute('position').array as Float32Array,
+        origPositions: m.vertices.slice(),
+        boneIndices: m.boneIndices,
+        dualBone: (m.dualBoneLocalPos1 && m.dualBoneLocalPos2 && m.dualBoneWeights)
+          ? {
+              localPos1: m.dualBoneLocalPos1,
+              localPos2: m.dualBoneLocalPos2,
+              weights: m.dualBoneWeights,
+            }
+          : undefined,
+      })
+    }
   }
 
   const center = new THREE.Vector3()
@@ -143,17 +165,15 @@ function buildModel(dat: ParsedDatFile): BuiltModel {
     radius = Math.max(bounds.getSize(new THREE.Vector3()).length() / 2, 0.001)
   }
 
-  // Bake centring and the Y flip into the geometry rather than wrapping the
-  // meshes in transformed groups, so each mesh is a plain scene child sitting
-  // at the origin. Fewer moving parts, and the bounding spheres used for
-  // frustum culling then describe where the geometry actually is.
-  const toOrigin = new THREE.Matrix4()
-    .makeRotationX(Math.PI)
-    .multiply(new THREE.Matrix4().makeTranslation(-center.x, -center.y, -center.z))
+  // Centring and the Y flip live on the wrapping groups, not baked into the
+  // geometry: skinning rewrites vertex positions every frame from the parser's
+  // own bind-pose and bone-local data, which would overwrite anything baked in.
+  //
+  // Frustum culling has to be switched off for skinned meshes. The bounding
+  // sphere describes the bind pose, and a raised arm or a lunge can put geometry
+  // outside it — which makes limbs blink out at the screen edge.
   for (const mesh of meshes) {
-    mesh.geometry.applyMatrix4(toOrigin)
-    mesh.geometry.computeBoundingBox()
-    mesh.geometry.computeBoundingSphere()
+    mesh.frustumCulled = false
   }
 
   if (MODEL_DEBUG) {
@@ -186,7 +206,53 @@ function buildModel(dat: ParsedDatFile): BuiltModel {
     )
   }
 
-  return { meshes, center, radius, triangles }
+  return { meshes, center, radius, triangles, skinTargets }
+}
+
+/**
+ * Advances the animation and rewrites skinned vertex positions each frame.
+ *
+ * Inverse bind matrices are computed once per model — they depend only on the
+ * skeleton, and inverting 69 matrices every frame is pure waste.
+ */
+function Animator({
+  built, model, playing, speed, onFrame,
+}: {
+  built: BuiltModel
+  model: ParsedDatFile
+  playing: boolean
+  speed: number
+  onFrame?: (frame: number, total: number) => void
+}) {
+  const time = useRef(0)
+  const inverseBind = useMemo(
+    () => model.skeleton?.matrices.map(invertRigidMatrix4) ?? null,
+    [model.skeleton],
+  )
+
+  useFrame((_, delta) => {
+    const skeleton = model.skeleton
+    if (!skeleton || !inverseBind || model.animations.length === 0) return
+    if (built.skinTargets.length === 0) return
+
+    if (playing) time.current += delta * speed
+
+    const pose = poseSkeleton(skeleton, model.animations, inverseBind, time.current)
+    skinMeshes(built.skinTargets, pose)
+
+    for (const mesh of built.meshes) {
+      const attr = mesh.geometry.getAttribute('position')
+      attr.needsUpdate = true
+    }
+
+    const clip = model.animations[0]
+    if (onFrame && clip.frameCount > 1) {
+      const total = clip.frameCount - 1
+      onFrame(((time.current * clip.speed * 30) % total + total) % total, total)
+    }
+  })
+
+  return null
 }
 
 /**
@@ -223,14 +289,18 @@ export interface ModelStats {
   textures: number
   hasSkeleton: boolean
   bones: number
+  animations: number
 }
 
 export function ModelViewer({
-  model, background, onStats,
+  model, background, onStats, playing = true, speed = 1, onFrame,
 }: {
   model: ParsedDatFile | null
   background: string
   onStats?: (stats: ModelStats | null) => void
+  playing?: boolean
+  speed?: number
+  onFrame?: (frame: number, total: number) => void
 }) {
   // Build and dispose in the *same* effect, so the two are always paired.
   //
@@ -269,6 +339,7 @@ export function ModelViewer({
       textures: model.textures.length,
       hasSkeleton: !!model.skeleton,
       bones: model.skeleton?.bones.length ?? 0,
+      animations: model.animations.length,
     })
   }, [model, built, onStats])
 
@@ -292,9 +363,27 @@ export function ModelViewer({
           creates its camera. This reframes once it arrives. */}
       {built && <FrameCamera radius={built.radius} />}
 
-      {built?.meshes.map((mesh, i) => (
-        <primitive key={i} object={mesh} />
-      ))}
+      {built && model && (
+        <Animator
+          built={built}
+          model={model}
+          playing={playing}
+          speed={speed}
+          onFrame={onFrame}
+        />
+      )}
+
+      {/* Two groups: centre the model in its own space, then flip Y. Doing it
+          the other way round swings the recentred model back off-origin. */}
+      {built && (
+        <group rotation={[Math.PI, 0, 0]}>
+          <group position={[-built.center.x, -built.center.y, -built.center.z]}>
+            {built.meshes.map((mesh, i) => (
+              <primitive key={i} object={mesh} />
+            ))}
+          </group>
+        </group>
+      )}
 
       <OrbitControls
         makeDefault

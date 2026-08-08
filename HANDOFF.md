@@ -364,6 +364,41 @@ live scene graph and the index range. **`?modeldebug=1`** exposes
 prints geometry, bounds, index ranges, canvas rects and `renderer.info`. When a
 model does not appear, start there, and check `idxRange` first.
 
+**Dithered alpha is not a cutout mask.** FFXI inherits the PS2 trick of faking
+translucency with a stipple pattern — Gigas skin measures 50.0% of texels below
+the alpha threshold with **100% alternation** between horizontal neighbours.
+Alpha-testing that shreds the model into netting. `isDitheredAlpha()` treats
+above 15% transparent *and* above 60% alternation as solid.
+
+Alternation is the signal alpha coverage alone cannot give, and it is worth
+remembering for open problem 4b: five attempts failed there because they all
+measured *how much* was transparent, and genuine cutouts and terrain sit in the
+same band. A cutout has contiguous transparent regions and rarely alternates.
+
+### Animation playback
+
+`AnimationParser.ts` reads 0x2B blocks; `lib/skinning.ts` holds the maths, split
+from React so it can be tested alone. Skinning runs on the **CPU** because
+`parseVertexBlock` hands back vertices already in world space plus per-vertex
+bone-local positions — rebuilding that into a three.js SkinnedMesh would mean
+undoing work the parser already did.
+
+Details that matter:
+
+- Keyframe indices count floats from the start of the descriptor array, so the
+  pool is interleaved after it, not a separate section.
+- An index of 0 means constant, and takes the descriptor's stored default. Not a
+  hardcoded 0 or 1 — a constant quaternion component of each is a wildly
+  different pose.
+- Composition order is `animQ * bindQ`, because R(A)*R(B) = R(B*A).
+- Dual-bone vertices weight the *translation* too (the homogeneous coordinate
+  carries the weight). Treating it as a plain lerp pulls joints inward.
+- **Frustum culling is off for skinned meshes.** The bounding sphere describes
+  the bind pose, so a raised arm can leave it and blink out at the screen edge.
+
+Verified by sampling vertex positions 0.9s apart: Goblin 1 moves a maximum of
+0.108 units against a model radius of 1.05, with no non-finite values.
+
 One real bug found on the way: creating three.js resources in `useMemo` and
 disposing them in a `useEffect` cleanup is broken under StrictMode — React runs
 the cleanup on its simulated unmount, disposing everything, then remounts and
