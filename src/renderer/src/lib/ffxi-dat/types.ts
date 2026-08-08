@@ -4,7 +4,7 @@ export interface ParsedMesh {
   vertices: Float32Array
   normals: Float32Array
   uvs: Float32Array
-  indices: Uint16Array
+  indices: Uint32Array
   boneIndices: Uint8Array
   boneWeights: Float32Array
   materialIndex: number

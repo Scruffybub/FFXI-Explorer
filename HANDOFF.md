@@ -334,6 +334,41 @@ setting became `NaN` and silently did nothing — `scene_cameraMode=walk`, tone
 mapping names, and colours like `light_sunColor=#fff4e0` were all affected. It
 now keeps non-numeric values as strings.
 
+### The model viewer, and the all-zero index buffer
+
+`Models` in the top-left switch replaces the whole window: `ModelBrowser` owns
+its own sidebar and viewport, sharing only the FFXI install path with the zone
+side. 2,473 NPC/monster/object models from `resources/npc-model-paths.json`.
+
+`DatFile.ts` is the loader Vanalytics had and the original port left behind —
+block `0x20` textures, `0x29` bone, `0x2A` vertex, `0x2B` animation. Everything
+it calls was already here and unused. Animations are detected but not decoded;
+`AnimationParser.ts` is still to port, which is why models sit in bind pose.
+
+**`MeshParser` allocated its index buffers and never filled them.** Every model
+rendered nothing, in the most misleading way possible: meshes present in the
+scene, camera aimed correctly, materials fine, and `renderer.info` reporting
+7 draw calls and 2,358 triangles. All indices were 0, so every triangle was
+degenerate and covered no pixels. three.js does not warn about this, and the
+triangle counter counts *submitted* geometry, not surviving fragments.
+
+Vanalytics never hit it because it draws these meshes non-indexed. `expandFaces`
+emits one vertex per face corner already in draw order, so the indices are just
+0..n-1 — now filled by `sequentialIndices()`, in a Uint32Array because expanded
+character meshes can pass 65,535 corners.
+
+Time was lost ruling out plausible-but-wrong causes here — alpha, normals,
+StrictMode disposal, group transforms. What actually found it was dumping the
+live scene graph and the index range. **`?modeldebug=1`** exposes
+`window.__modelScene`, `__modelCam` and `__modelGl`; `scripts/model-test.cjs`
+prints geometry, bounds, index ranges, canvas rects and `renderer.info`. When a
+model does not appear, start there, and check `idxRange` first.
+
+One real bug found on the way: creating three.js resources in `useMemo` and
+disposing them in a `useEffect` cleanup is broken under StrictMode — React runs
+the cleanup on its simulated unmount, disposing everything, then remounts and
+renders the disposed resources. Build and dispose in the *same* effect.
+
 ### Smaller ones
 
 - `vColor` is declared `vec4` in this three.js version even without

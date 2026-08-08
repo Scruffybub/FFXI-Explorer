@@ -23,6 +23,24 @@ function applyMirrorFlag(m: number[], flg: number): number[] {
 }
 
 /**
+ * Sequential indices 0..count-1.
+ *
+ * `expandFaces` emits one vertex per face corner, already in draw order, so the
+ * index buffer is simply "every vertex once". This used to be allocated at the
+ * right length and left full of zeros, which makes every triangle degenerate:
+ * the GPU dutifully submits them and draws nothing at all. Silent — no error,
+ * no warning, correct-looking triangle counts in `renderer.info`.
+ *
+ * Uint32 rather than Uint16: expanded character meshes can exceed 65,535
+ * corners, and wrapping would corrupt the tail of the model rather than fail.
+ */
+function sequentialIndices(count: number): Uint32Array {
+  const out = new Uint32Array(count)
+  for (let i = 0; i < count; i++) out[i] = i
+  return out
+}
+
+/**
  * Convert a triangle strip index array to a triangle list.
  * Every 3 consecutive indices form a triangle, with alternating winding.
  * Degenerate triangles (used as strip separators) are skipped.
@@ -610,7 +628,7 @@ export function parseVertexBlock(
     const { positions, normals, uvs } = expandFaces(rawVerts, faces, false)
     meshes.push({
       vertices: positions, normals, uvs,
-      indices: new Uint16Array(positions.length / 3),
+      indices: sequentialIndices(positions.length / 3),
       boneIndices: new Uint8Array(0), boneWeights: new Float32Array(0),
       materialIndex,
     })
@@ -626,7 +644,7 @@ export function parseVertexBlock(
     const orig = expandFaces(origVerts, faces, false, skin.boneIndices, skin.boneWeights, dualBone)
     meshes.push({
       vertices: orig.positions, normals: orig.normals, uvs: orig.uvs,
-      indices: new Uint16Array(orig.positions.length / 3),
+      indices: sequentialIndices(orig.positions.length / 3),
       boneIndices: orig.boneIndices, boneWeights: orig.boneWeights,
       materialIndex,
       dualBoneLocalPos1: orig.dualBoneLocalPos1,
@@ -649,7 +667,7 @@ export function parseVertexBlock(
       const mirror = expandFaces(mirrorVerts, faces, true, mirrorSkin.boneIndices, mirrorSkin.boneWeights, mirrorDualBone)
       meshes.push({
         vertices: mirror.positions, normals: mirror.normals, uvs: mirror.uvs,
-        indices: new Uint16Array(mirror.positions.length / 3),
+        indices: sequentialIndices(mirror.positions.length / 3),
         boneIndices: mirror.boneIndices, boneWeights: mirror.boneWeights,
         materialIndex,
         dualBoneLocalPos1: mirror.dualBoneLocalPos1,

@@ -3,5 +3,8 @@ export { parseTextures, parseTextureBlock, decompressDXT1, decompressDXT3 } from
 export { parseZoneFile, parseTexturesFromDat } from './ZoneFile'
 export { parseMinimapDat } from './MinimapParser'
 export { parseMzbCollision } from './CollisionParser'
+export { parseDatFile, parseSkeletonDat, hasAnimations } from './DatFile'
+export { SKELETON_PATHS } from './SkeletonParser'
+export type { ParsedDatFile, ParsedMesh, ParsedSkeleton } from './types'
 export type { ParsedCollision } from './CollisionParser'
 export type { ParsedTexture, ParsedZoneMesh, ZoneMeshInstance, ParsedZone } from './types'

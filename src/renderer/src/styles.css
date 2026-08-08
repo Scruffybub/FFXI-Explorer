@@ -482,6 +482,40 @@ select {
   color: #fff;
 }
 
+/* Switches the whole window between the zone viewer and the model viewer.
+   Sits where the sidebar heading used to, so it reads as the view's title. */
+.view-switch { display: flex; gap: 4px; margin: 0 0 10px; }
+.view-switch button {
+  flex: 1;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--muted);
+  padding: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.view-switch button:hover { color: var(--text); }
+.view-switch button.active {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.category-select {
+  width: 100%;
+  margin-top: 8px;
+  background: #0a0c11;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--text);
+  padding: 7px 9px;
+  font-size: 12px;
+  outline: none;
+}
+.category-select:focus { border-color: var(--accent-dim); }
+
 ::-webkit-scrollbar { width: 9px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #262c3a; border-radius: 5px; }

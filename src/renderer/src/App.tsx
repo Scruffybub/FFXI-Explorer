@@ -3,6 +3,7 @@ import { ZONES, type ZoneEntry } from './lib/zoneList'
 import { parseZoneFile, parseTexturesFromDat, type ParsedZone } from './lib/ffxi-dat'
 import ZoneViewer from './components/ZoneViewer'
 import ControlPanel from './components/ControlPanel'
+import ModelBrowser from './components/ModelBrowser'
 import {
   DEFAULT_LIGHTING, DEFAULT_POST, DEFAULT_SCENE, DEFAULT_POINT_LIGHTS,
   NEW_POINT_LIGHT, PRESETS,
@@ -35,6 +36,9 @@ export default function App() {
 
   const [inspecting, setInspecting] = useState(false)
   const [surfaceInfo, setSurfaceInfo] = useState<SurfaceInfo | null>(null)
+
+  /** Which half of the app is showing. The two views share only the install path. */
+  const [view, setView] = useState<'zones' | 'models'>('zones')
 
   const [uiHidden, setUiHidden] = useState(false)
   const [fullscreen, setFullscreen] = useState(false)
@@ -301,11 +305,36 @@ export default function App() {
   }
 
   // ── Main UI ────────────────────────────────────────────────────────────
+  const viewSwitch = (
+    <div className="view-switch">
+      <button
+        className={view === 'zones' ? 'active' : ''}
+        onClick={() => setView('zones')}
+      >
+        Zones
+      </button>
+      <button
+        className={view === 'models' ? 'active' : ''}
+        onClick={() => setView('models')}
+      >
+        Models
+      </button>
+    </div>
+  )
+
+  if (view === 'models') {
+    return (
+      <div className={`app ${uiHidden ? 'ui-hidden' : ''}`}>
+        <ModelBrowser ffxiPath={ffxiPath} viewSwitch={viewSwitch} uiHidden={uiHidden} />
+      </div>
+    )
+  }
+
   return (
     <div className={`app ${uiHidden ? 'ui-hidden' : ''}`}>
       <aside className="sidebar">
         <div className="sidebar-head">
-          <h1>Zones</h1>
+          {viewSwitch}
           <input
             className="search"
             placeholder="Search zones..."
