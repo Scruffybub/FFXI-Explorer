@@ -1807,22 +1807,9 @@ export default function ZoneViewer({
       if (count > bestUsage) { bestUsage = count; fallbackTextureIndex = idx }
     }
 
-    // What the sky/weather filter is actually throwing away, by category. This
-    // is the evidence for whether FFXI's own weather is usable: the geometry is
-    // demonstrably in the files, since it is what we have been discarding.
-    const weatherCensus = new Map<string, { prefabs: number; instances: number }>()
-
     for (let prefabIdx = 0; prefabIdx < zoneData.prefabs.length; prefabIdx++) {
       const prefab = zoneData.prefabs[prefabIdx]
-
-      if (isSkyWeatherMesh(prefab)) {
-        const category = (prefab.textureName ?? '').split(/\s+/)[0].toLowerCase()
-        const entry = weatherCensus.get(category) ?? { prefabs: 0, instances: 0 }
-        entry.prefabs++
-        entry.instances += zoneData.instances.filter(i => i.meshIndex === prefabIdx).length
-        weatherCensus.set(category, entry)
-        if (!scene.showWeather) continue
-      }
+      if (isSkyWeatherMesh(prefab)) continue
 
       const isWater = isWaterPrefab(prefab, prefabIdx) && !DISABLE_WATER_SHADER
 
@@ -2123,17 +2110,6 @@ export default function ZoneViewer({
       if (added > 0) console.log(`[ZoneViewer] rendered ${added} unreferenced prefabs`)
     }
 
-    if (weatherCensus.size > 0) {
-      const summary = [...weatherCensus.entries()]
-        .sort((a, b) => b[1].prefabs - a[1].prefabs)
-        .map(([cat, c]) => `${cat}=${c.prefabs}p/${c.instances}i`)
-        .join(' ')
-      console.log(
-        `[Weather] ${weatherCensus.size} categories, ` +
-        `${[...weatherCensus.values()].reduce((n, c) => n + c.prefabs, 0)} prefabs: ${summary}`,
-      )
-    }
-
     const disposeAll = () => {
       geometries.forEach(g => g.dispose())
       materials.forEach(m => {
@@ -2150,7 +2126,7 @@ export default function ZoneViewer({
     }
     // Rebuild materials when PCSS is toggled so they compile against the
     // shadow chunk that is actually installed.
-  }, [zoneData, lit, scene.wireframe, scene.showWeather, shaderVariant])
+  }, [zoneData, lit, scene.wireframe, shaderVariant])
 
   // Live material tweaks that do not require rebuilding geometry.
   useEffect(() => {

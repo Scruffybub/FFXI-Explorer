@@ -197,8 +197,6 @@ export interface SceneSettings {
   wireframe: boolean
   /** Draw the MZB collision mesh over the zone — what walking actually stands on. */
   showCollision: boolean
-  /** Render FFXI's own sky and weather meshes instead of skipping them. */
-  showWeather: boolean
 }
 
 /**
@@ -313,7 +311,6 @@ export const DEFAULT_SCENE: SceneSettings = {
   waterTint: 0.35,
   wireframe: false,
   showCollision: false,
-  showWeather: false,
 
   // FFXI's world unit reads as roughly a metre: Chateau d'Oraguille's collision
   // spans 28 units across its floors, West Ronfaure ~1200 corner to corner. So

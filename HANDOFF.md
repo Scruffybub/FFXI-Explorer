@@ -449,17 +449,21 @@ The same six categories in the same rough proportions everywhere, which reads as
 a per-zone set of weather *states* — sunny, fine, cloud, mist, stars — that the
 game swaps between, rather than geometry meant to be drawn all at once.
 
-**Show FFXI weather** (Scene section, or `scene_showWeather=true`) renders them
-instead of skipping. Confirmed working: unreferenced prefabs go from 36 to 55 in
-West Ronfaure, exactly the 19 the census counts.
+A toggle to render them was built, measured and then **removed at the user's
+request** — the investigation is the part worth keeping, not the feature.
 
-What you get is not usable weather. It draws as a small yellow-and-black
-checkered patch on the terrain — the fallback-texture look — rather than a dome.
-So the honest state is: **the data exists and is reachable, but making it look
-like weather is a separate problem.** Next step for anyone picking this up is to
-Inspect one of those surfaces and find out whether the texture genuinely fails to
-resolve or whether these prefabs need a transform the instance list would have
-supplied. Do not assume the parser is at fault before checking that.
+It did render: unreferenced prefabs went from 36 to 55 in West Ronfaure, exactly
+the 19 the census counts, so nothing was being silently dropped. But what drew
+was a small yellow-and-black checkered patch on the terrain — the fallback-
+texture look — not a dome. **The data is reachable; presenting it as weather is
+an unsolved and separate problem.**
+
+If this is picked up again, do not start by rewriting the parser. Render those
+prefabs, Inspect one, and establish first whether the texture genuinely fails to
+resolve or whether they need a transform the instance list would normally have
+supplied. Those are different fixes. The removed implementation was a one-line
+escape in the prefab loop (`if (isSkyWeatherMesh(prefab)) continue`) plus a
+census of the skipped categories; see the commit that removed it.
 
 ### Smaller ones
 

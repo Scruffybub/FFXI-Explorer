@@ -621,12 +621,6 @@ export default function ControlPanel({
           checked={scene.showCollision}
           onChange={v => onScene({ showCollision: v })}
         />
-        <Toggle
-          label="Show FFXI weather"
-          checked={scene.showWeather}
-          onChange={v => onScene({ showWeather: v })}
-          hint="Render the game's own sky and weather domes instead of replacing them with the procedural sky."
-        />
         <p className="note small">
           Draws the collision mesh FFXI actually uses for movement. It is not the
           same as the visible geometry — it carries invisible walls and leaves out
