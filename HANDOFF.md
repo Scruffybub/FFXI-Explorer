@@ -258,6 +258,50 @@ which is the cheap check that the grid over-scan is not reading junk offsets.
 to draw it as a green wireframe. Correct collision hugs the rendered ground;
 anything mirrored or offset floats visibly away from the art.
 
+### Walking mode stands on the collision mesh
+
+`WalkCamera` in `ZoneViewer.tsx`, with queries served by `lib/CollisionWorld.ts`
+(collision converted to world space once, wrapped in a three-mesh-bvh BVH —
+~160ms for West Ronfaure's 429k triangles).
+
+Things that are the way they are on purpose:
+
+- **Time-based, not frame-based.** FlyCamera adds a per-*frame* constant, so its
+  speed depends on refresh rate. Gravity and step-up integrated that way fall
+  through floors on fast machines. `dt` is clamped to 0.1s so a long frame
+  cannot teleport you through a wall.
+- **Physics runs without pointer lock; only input needs it.** Otherwise you hang
+  in mid-air until you click, and the mode cannot be driven headlessly.
+- **Spawn snaps to the ground by raycast**, rather than spawning high and
+  falling. A zone's bounding-box centre is often underground, and "fall until you
+  land" never terminates from there.
+- **The wall probe ignores floor-like normals.** A horizontal probe on rising
+  ground hits the slope ahead; treating that as a wall cancels most of the
+  movement, and walking uphill crawled at half speed until this check existed.
+- **The overlay draws the same geometry the controller raycasts**, so what you
+  see is exactly what you collide with.
+
+`?walkdebug=1` logs body state twice a second and accepts keys without pointer
+lock (a synthetic click cannot engage lock headlessly).
+
+**`scripts/walk-test.cjs` must run with `show: true`.** Chromium throttles rAF in
+a hidden window regardless of `backgroundThrottling`, which starves the
+controller to a few frames a second and makes correct physics look broken — that
+cost a round of false debugging. Verified in Chateau d'Oraguille: spawns at
+y=11, walks off a ledge, lands at y=1.50 with `grounded=true`, and moves 1.56
+units per 0.5s against a configured 3.0/sec.
+
+Not yet done: no head/ceiling collision, no jump (deliberately out of scope), and
+no recovery if you fall through a hole in the collision — noclip is the escape
+hatch.
+
+### Query-param overrides were number-only
+
+`coerce()` in `App.tsx` ran every value through `Number()`, so any string-valued
+setting became `NaN` and silently did nothing — `scene_cameraMode=walk`, tone
+mapping names, and colours like `light_sunColor=#fff4e0` were all affected. It
+now keeps non-numeric values as strings.
+
 ### Smaller ones
 
 - `vColor` is declared `vec4` in this three.js version even without

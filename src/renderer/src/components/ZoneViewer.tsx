@@ -6,7 +6,8 @@ import {
   DepthOfField, Autofocus,
 } from '@react-three/postprocessing'
 import * as THREE from 'three'
-import type { ParsedCollision, ParsedZone } from '../lib/ffxi-dat'
+import type { ParsedZone } from '../lib/ffxi-dat'
+import { CollisionWorld } from '../lib/CollisionWorld'
 import type {
   LightingSettings, PointLightSettings, PostSettings, SceneSettings, SurfaceInfo, ToneMappingMode,
 } from '../lib/settings'
@@ -1015,33 +1016,24 @@ function RendererSettings({ post, shadows }: { post: PostSettings; shadows: bool
 /**
  * Draws the MZB collision mesh as a wireframe over the zone.
  *
- * Diagnostic, and the acceptance test for the collision parser: it sits inside
- * the same PI-rotated group as the zone, so correct collision hugs the rendered
- * ground. Anything mirrored, offset or inside-out shows up immediately as
- * wireframe that floats away from the geometry it should be tracing.
+ * Diagnostic, and the acceptance test for the collision parser: correct
+ * collision hugs the rendered ground. Anything mirrored, offset or inside-out
+ * shows up immediately as wireframe that floats away from the art it should be
+ * tracing.
  *
- * Collision has no vertex colours or UVs — a flat unlit material is all it can
- * take, and depthTest stays on so the wireframe is occluded by terrain in front
- * of it rather than drawing through the whole zone.
+ * It draws the *same* geometry CollisionWorld raycasts against — already in
+ * world space, so it sits outside the zone's PI-rotated group. That sharing is
+ * deliberate: what you see is exactly what you collide with, and the two cannot
+ * drift apart.
+ *
+ * Collision has no vertex colours or UVs, so a flat unlit material is all it
+ * can take. depthTest stays on so terrain in front occludes it.
  */
-function CollisionOverlay({ collision }: { collision: ParsedCollision | null }) {
-  const geometry = useMemo(() => {
-    if (!collision) return null
-    const geo = new THREE.BufferGeometry()
-    geo.setAttribute('position', new THREE.BufferAttribute(collision.vertices, 3))
-    geo.setIndex(new THREE.BufferAttribute(collision.indices, 1))
-    geo.computeBoundingSphere()
-    return geo
-  }, [collision])
-
-  useEffect(() => {
-    return () => { geometry?.dispose() }
-  }, [geometry])
-
-  if (!geometry) return null
+function CollisionOverlay({ world }: { world: CollisionWorld | null }) {
+  if (!world) return null
 
   return (
-    <mesh geometry={geometry} renderOrder={999}>
+    <mesh geometry={world.geometry} renderOrder={999}>
       <meshBasicMaterial
         color="#00ff88"
         wireframe
@@ -1167,6 +1159,263 @@ function FlyCamera({
     if (moveState.current.down) dir.y -= s
     dir.applyQuaternion(camera.quaternion)
     camera.position.add(dir)
+  })
+
+  return null
+}
+
+/** Body radius for wall collision. Not exposed — it is a shape, not a taste. */
+const WALK_RADIUS = 0.5
+/** Downward acceleration, world units per second squared. */
+const WALK_GRAVITY = 20
+
+/**
+ * First-person walking. Stands on the MZB collision mesh, not the art.
+ *
+ * Mouse and key handling deliberately mirrors FlyCamera, including the three
+ * fixes recorded in the handoff: yaw/pitch are the source of truth rather than
+ * being decomposed from the camera quaternion each event, pitch is clamped just
+ * short of vertical to dodge the YXZ gimbal singularity, and movement deltas
+ * over 200px are dropped because Chromium spikes them after pointer lock.
+ *
+ * Unlike FlyCamera this is time-based, not frame-based. Gravity and step-up
+ * behave differently at 30 and 144fps if you integrate per frame, and the bug
+ * that produces — falling through floors only on fast machines — is miserable
+ * to track down.
+ */
+function WalkCamera({
+  world, center, size, scene,
+}: {
+  world: CollisionWorld | null
+  center: THREE.Vector3
+  size: number
+  scene: SceneSettings
+}) {
+  const { camera, gl } = useThree()
+  const move = useRef({ forward: false, backward: false, left: false, right: false, run: false, ascend: false })
+  const locked = useRef(false)
+  const placed = useRef(false)
+  const yaw = useRef(0)
+  const pitch = useRef(0)
+  const velocityY = useRef(0)
+  const grounded = useRef(false)
+  const debugAccum = useRef(0)
+  const debugWalk = useMemo(
+    () => new URLSearchParams(window.location.search).get('walkdebug') === '1',
+    [],
+  )
+
+  // Read tuning through a ref so changing a slider does not tear down the
+  // pointer-lock listeners and drop the user out of the view mid-walk.
+  const tuning = useRef(scene)
+  tuning.current = scene
+
+  useEffect(() => {
+    // Snap straight to the ground under the middle of the zone rather than
+    // spawning high and falling: the zone's bounding-box centre can easily be
+    // underground, and from there "fall until you land" never terminates.
+    if (!placed.current) {
+      const topY = center.y + size
+      let eyeY = center.y + size * 0.05
+      if (world) {
+        const from = new THREE.Vector3(center.x, topY, center.z)
+        const hit = world.groundBelow(from, size * 2.5)
+        if (hit) eyeY = hit.y + tuning.current.walkEyeHeight
+        console.log(
+          `[Walk] spawn from (${center.x.toFixed(1)}, ${topY.toFixed(1)}, ${center.z.toFixed(1)}) ` +
+          `size=${size.toFixed(1)} hit=${hit ? hit.y.toFixed(2) : 'none'} eyeY=${eyeY.toFixed(2)}`,
+        )
+      }
+      camera.position.set(center.x, eyeY, center.z)
+      const e = new THREE.Euler(0, 0, 0, 'YXZ').setFromQuaternion(camera.quaternion)
+      yaw.current = e.y
+      pitch.current = 0
+      camera.quaternion.setFromEuler(new THREE.Euler(0, yaw.current, 0, 'YXZ'))
+      placed.current = true
+    }
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.code === 'KeyW') move.current.forward = true
+      if (e.code === 'KeyS') move.current.backward = true
+      if (e.code === 'KeyA') move.current.left = true
+      if (e.code === 'KeyD') move.current.right = true
+      if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') move.current.run = true
+      if (e.code === 'Space') move.current.ascend = true
+    }
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.code === 'KeyW') move.current.forward = false
+      if (e.code === 'KeyS') move.current.backward = false
+      if (e.code === 'KeyA') move.current.left = false
+      if (e.code === 'KeyD') move.current.right = false
+      if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') move.current.run = false
+      if (e.code === 'Space') move.current.ascend = false
+    }
+    const onClick = () => { gl.domElement.requestPointerLock() }
+    const onPointerLockChange = () => {
+      const nowLocked = !!document.pointerLockElement
+      if (nowLocked && !locked.current) {
+        const e = new THREE.Euler(0, 0, 0, 'YXZ').setFromQuaternion(camera.quaternion)
+        yaw.current = e.y
+        pitch.current = e.x
+      }
+      locked.current = nowLocked
+    }
+    const onMouseMove = (e: MouseEvent) => {
+      if (!locked.current) return
+      if (Math.abs(e.movementX) > 200 || Math.abs(e.movementY) > 200) return
+      yaw.current -= e.movementX * 0.002
+      pitch.current -= e.movementY * 0.002
+      const limit = Math.PI / 2 - 0.001
+      pitch.current = Math.max(-limit, Math.min(limit, pitch.current))
+      camera.quaternion.setFromEuler(new THREE.Euler(pitch.current, yaw.current, 0, 'YXZ'))
+    }
+
+    window.addEventListener('keydown', onKeyDown)
+    window.addEventListener('keyup', onKeyUp)
+    gl.domElement.addEventListener('click', onClick)
+    document.addEventListener('pointerlockchange', onPointerLockChange)
+    document.addEventListener('mousemove', onMouseMove)
+
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('keyup', onKeyUp)
+      gl.domElement.removeEventListener('click', onClick)
+      document.removeEventListener('pointerlockchange', onPointerLockChange)
+      document.removeEventListener('mousemove', onMouseMove)
+      if (document.pointerLockElement) document.exitPointerLock()
+    }
+  }, [camera, gl, center, size, world])
+
+  useFrame((_, rawDelta) => {
+    // Physics runs whether or not the mouse is captured — only *input* needs
+    // the lock. Otherwise you hang in mid-air until you click, and the mode
+    // cannot be exercised headlessly.
+    //
+    // walkdebug also accepts keys without pointer lock: a synthetic click in a
+    // headless window does not engage lock, so the movement path would be
+    // untestable otherwise. Pointer lock itself is unchanged in normal use.
+    const active = locked.current || debugWalk
+    // A long frame (alt-tab, a zone load) must not teleport you through a wall.
+    const dt = Math.min(rawDelta, 0.1)
+    const t = tuning.current
+
+    // ── Intent, flattened to the ground plane ──
+    // Using the full camera quaternion would make looking up fly you upward.
+    const speed = t.walkSpeed * (move.current.run ? t.walkRunMultiplier : 1)
+    const forward = new THREE.Vector3(-Math.sin(yaw.current), 0, -Math.cos(yaw.current))
+    const right = new THREE.Vector3(Math.cos(yaw.current), 0, -Math.sin(yaw.current))
+    const wish = new THREE.Vector3()
+    if (active) {
+      if (move.current.forward) wish.add(forward)
+      if (move.current.backward) wish.sub(forward)
+      if (move.current.right) wish.add(right)
+      if (move.current.left) wish.sub(right)
+    }
+    if (wish.lengthSq() > 0) wish.normalize().multiplyScalar(speed * dt)
+
+    if (t.walkNoclip || !world) {
+      // Noclip flies along the true view direction, including pitch, and Space
+      // rises — otherwise you cannot get out of a pit you clipped into.
+      const free = new THREE.Vector3()
+      const viewFwd = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion)
+      const viewRight = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion)
+      if (active) {
+      if (move.current.forward) free.add(viewFwd)
+      if (move.current.backward) free.sub(viewFwd)
+      if (move.current.right) free.add(viewRight)
+      if (move.current.left) free.sub(viewRight)
+      if (move.current.ascend) free.y += 1
+      }
+      if (free.lengthSq() > 0) free.normalize().multiplyScalar(speed * dt)
+      camera.position.add(free)
+      velocityY.current = 0
+      return
+    }
+
+    // Feet, derived from the eye. The body is a vertical segment from here up.
+    const feet = camera.position.clone()
+    feet.y -= t.walkEyeHeight
+
+    // ── Horizontal move, sliding along walls ──
+    // Two passes: the first stops the move at a wall, the second lets the
+    // remainder slide along it. Without the second pass you stick on contact
+    // and inside corners feel like glue.
+    const probeY = feet.y + Math.max(t.walkStepHeight, 0.1) + 0.1
+    for (let pass = 0; pass < 2 && wish.lengthSq() > 1e-10; pass++) {
+      const dist = wish.length()
+      const dir = wish.clone().normalize()
+      const origin = new THREE.Vector3(feet.x, probeY, feet.z)
+      const hit = world.castRay(origin, dir, dist + WALK_RADIUS)
+      if (!hit) break
+      // Ignore floor-like surfaces. A horizontal probe on rising ground hits the
+      // slope ahead, and treating that as a wall cancels most of the movement —
+      // walking uphill crawled at half speed until this check existed. Ground is
+      // the step-up and gravity code's job, not the wall code's.
+      const slopeCos = Math.cos((t.walkSlopeLimit * Math.PI) / 180)
+      if (Math.abs(hit.normal.y) >= slopeCos) break
+      const n = hit.normal.clone()
+      n.y = 0
+      if (n.lengthSq() < 1e-8) break
+      n.normalize()
+      // Remove the component heading into the surface.
+      const into = wish.dot(n)
+      if (into < 0) wish.addScaledVector(n, -into)
+      else break
+    }
+    feet.x += wish.x
+    feet.z += wish.z
+
+    // ── Ground ──
+    // Search from step height above the feet so small ledges are climbed, and
+    // far enough below to catch the floor after a drop.
+    const searchTop = new THREE.Vector3(feet.x, feet.y + t.walkStepHeight + 0.05, feet.z)
+    const fallReach = Math.max(2, Math.abs(velocityY.current) * dt + 2)
+    const ground = world.groundBelow(searchTop, t.walkStepHeight + 0.05 + fallReach)
+
+    if (ground) {
+      const slopeOk =
+        ground.normal.y >= Math.cos((t.walkSlopeLimit * Math.PI) / 180)
+      const rise = ground.y - feet.y
+
+      if (rise <= t.walkStepHeight + 0.05 && slopeOk) {
+        // Standing, or stepping up onto something low.
+        feet.y = ground.y
+        velocityY.current = 0
+        grounded.current = true
+      } else {
+        // Falling, or the surface is too steep to accept as footing.
+        velocityY.current -= WALK_GRAVITY * dt
+        feet.y += velocityY.current * dt
+        if (feet.y < ground.y && slopeOk) {
+          feet.y = ground.y
+          velocityY.current = 0
+          grounded.current = true
+        } else {
+          grounded.current = false
+        }
+      }
+    } else {
+      // Nothing underneath — a hole in the collision, or off the edge.
+      velocityY.current -= WALK_GRAVITY * dt
+      feet.y += velocityY.current * dt
+      grounded.current = false
+    }
+
+    camera.position.set(feet.x, feet.y + t.walkEyeHeight, feet.z)
+
+    // ?walkdebug=1 reports the body state once a second. There is no other way
+    // to see what the controller is doing from a headless run.
+    if (debugWalk) {
+      debugAccum.current += dt
+      if (debugAccum.current >= 0.5) {
+        debugAccum.current = 0
+        console.log(
+          `[Walk] pos(${feet.x.toFixed(1)}, ${feet.y.toFixed(2)}, ${feet.z.toFixed(1)}) ` +
+          `grounded=${grounded.current} vy=${velocityY.current.toFixed(2)} ` +
+          `locked=${locked.current} moving=${wish.lengthSq() > 0}`,
+        )
+      }
+    }
   })
 
   return null
@@ -1784,6 +2033,21 @@ export default function ZoneViewer({
     }
   }, [instancedMeshes, shadowsActive])
 
+  // Built once per zone: converts collision to world space and builds its BVH.
+  // Costs a few hundred ms on a large zone, so it must not be inside a memo
+  // that re-runs on settings changes.
+  const collisionWorld = useMemo(() => {
+    if (!zoneData.collision) return null
+    const t0 = performance.now()
+    const built = new CollisionWorld(zoneData.collision)
+    console.log(`[Collision] BVH built in ${Math.round(performance.now() - t0)}ms`)
+    return built
+  }, [zoneData.collision])
+
+  useEffect(() => {
+    return () => { collisionWorld?.dispose() }
+  }, [collisionWorld])
+
   const { center, size, farPlane } = useMemo(() => {
     const bbox = new THREE.Box3()
     for (const inst of zoneData.instances) {
@@ -1902,6 +2166,8 @@ export default function ZoneViewer({
         <CameraOrientation />
       ) : scene.cameraMode === 'orbit' ? (
         <SmartOrbitControls size={size} />
+      ) : scene.cameraMode === 'walk' ? (
+        <WalkCamera world={collisionWorld} center={center} size={size} scene={scene} />
       ) : (
         <FlyCamera center={center} size={size} onSpeedChange={onFlySpeedChange} />
       )}
@@ -1921,8 +2187,10 @@ export default function ZoneViewer({
         {instancedMeshes.map((mesh, i) => (
           <primitive key={i} object={mesh} />
         ))}
-        {scene.showCollision && <CollisionOverlay collision={zoneData.collision} />}
       </group>
+
+      {/* Already world space — deliberately outside the rotated group. */}
+      {scene.showCollision && <CollisionOverlay world={collisionWorld} />}
 
       <PostStack post={post} />
     </Canvas>

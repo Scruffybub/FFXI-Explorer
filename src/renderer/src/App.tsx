@@ -243,14 +243,19 @@ export default function App() {
     const presetIdx = params.get('preset')
     if (presetIdx !== null) applyPreset(Number(presetIdx))
 
-    const coerce = (v: string): boolean | number => {
+    // Anything that is not a boolean or a clean number stays a string. This used
+    // to be a bare Number(), which turned every string-valued setting into NaN:
+    // scene_cameraMode=walk, a tone mapping name, or a colour like #fff4e0 all
+    // silently became NaN and the setting appeared to do nothing.
+    const coerce = (v: string): boolean | number | string => {
       if (v === 'true') return true
       if (v === 'false') return false
-      return Number(v)
+      const n = Number(v)
+      return v.trim() !== '' && Number.isFinite(n) ? n : v
     }
-    const postPatch: Record<string, boolean | number> = {}
-    const lightPatch: Record<string, boolean | number> = {}
-    const scenePatch: Record<string, boolean | number> = {}
+    const postPatch: Record<string, boolean | number | string> = {}
+    const lightPatch: Record<string, boolean | number | string> = {}
+    const scenePatch: Record<string, boolean | number | string> = {}
     params.forEach((value, key) => {
       if (key.startsWith('post_')) postPatch[key.slice(5)] = coerce(value)
       if (key.startsWith('light_')) lightPatch[key.slice(6)] = coerce(value)

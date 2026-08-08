@@ -138,12 +138,53 @@ export default function ControlPanel({
           >
             Fly
           </button>
+          <button
+            className={scene.cameraMode === 'walk' ? 'active' : ''}
+            onClick={() => onScene({ cameraMode: 'walk' })}
+          >
+            Walk
+          </button>
         </div>
         {scene.cameraMode === 'fly' && (
           <p className="note small">
             Click the view to capture the mouse. WASD to move, E/Space up, Q/Shift down,
             scroll to change speed, Esc to release.
           </p>
+        )}
+        {scene.cameraMode === 'walk' && (
+          <>
+            <p className="note small">
+              Click the view to capture the mouse. WASD to walk, Shift to run,
+              Esc to release. You stand on FFXI's own collision mesh, so walls
+              block you and the ground is where the game puts it.
+            </p>
+            <Slider
+              label="Eye height" value={scene.walkEyeHeight} min={0.5} max={4} step={0.1}
+              onChange={v => onScene({ walkEyeHeight: v })}
+            />
+            <Slider
+              label="Walk speed" value={scene.walkSpeed} min={0.5} max={20} step={0.5}
+              onChange={v => onScene({ walkSpeed: v })}
+            />
+            <Slider
+              label="Run multiplier" value={scene.walkRunMultiplier} min={1} max={6} step={0.1}
+              onChange={v => onScene({ walkRunMultiplier: v })}
+            />
+            <Slider
+              label="Step height" value={scene.walkStepHeight} min={0} max={2} step={0.05}
+              onChange={v => onScene({ walkStepHeight: v })}
+            />
+            <Slider
+              label="Slope limit" value={scene.walkSlopeLimit} min={10} max={85} step={1}
+              onChange={v => onScene({ walkSlopeLimit: v })}
+            />
+            <Toggle
+              label="Noclip"
+              checked={scene.walkNoclip}
+              onChange={v => onScene({ walkNoclip: v })}
+              hint="Detach from the ground and move freely. Space rises."
+            />
+          </>
         )}
       </div>
 

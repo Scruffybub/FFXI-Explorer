@@ -173,8 +173,21 @@ export interface PostSettings {
 export interface SceneSettings {
   timeOfDay: number
   fogDensity: number
-  cameraMode: 'orbit' | 'fly'
+  cameraMode: 'orbit' | 'fly' | 'walk'
   showSky: boolean
+
+  /** Camera height above the ground you are standing on, in world units. */
+  walkEyeHeight: number
+  /** Horizontal walking speed, world units per second. */
+  walkSpeed: number
+  /** Speed multiplier while the run key is held. */
+  walkRunMultiplier: number
+  /** Ledges up to this height are climbed without a jump. */
+  walkStepHeight: number
+  /** Steepest ground you can stand on, degrees from horizontal. */
+  walkSlopeLimit: number
+  /** Detach from the ground and move freely, ignoring collision. */
+  walkNoclip: boolean
   /** How much of FFXI's baked vertex colour tints water surfaces. */
   waterTint: number
   wireframe: boolean
@@ -256,6 +269,20 @@ export const DEFAULT_SCENE: SceneSettings = {
   waterTint: 0.35,
   wireframe: false,
   showCollision: false,
+
+  // FFXI's world unit reads as roughly a metre: Chateau d'Oraguille's collision
+  // spans 28 units across its floors, West Ronfaure ~1200 corner to corner. So
+  // 2.0 is about the asked-for 6ft eye height. Adjust here if that reads wrong
+  // in a zone you know well — it is one constant, not a calibration exercise.
+  walkEyeHeight: 2.0,
+  // The fly camera's slowest speed is 0.05 units per *frame*, which is 3.0
+  // units/sec at 60fps. Walking is time-based instead, so this matches that
+  // pace without being hostage to the refresh rate.
+  walkSpeed: 3.0,
+  walkRunMultiplier: 2.5,
+  walkStepHeight: 0.6,
+  walkSlopeLimit: 50,
+  walkNoclip: false,
 }
 
 /** Presets that show off what the lighting controls can do. */
