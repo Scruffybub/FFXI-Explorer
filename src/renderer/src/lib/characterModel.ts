@@ -1,8 +1,11 @@
 import rawEquip from '../../../../resources/model-dat-paths.json'
 import rawFaces from '../../../../resources/face-paths.json'
+import rawItemNames from '../../../../resources/item-names.json'
+import rawAnims from '../../../../resources/animation-paths.json'
 import {
   parseDatFile, parseSkeletonDat, SKELETON_PATHS,
-  type ParsedDatFile, type ParsedMesh, type ParsedTexture,
+  parseAnimationDat,
+  type ParsedDatFile, type ParsedMesh, type ParsedTexture, type ParsedAnimation,
 } from './ffxi-dat'
 
 /**
@@ -61,19 +64,97 @@ type FaceTable = Record<string, { name: string; path: string }[]>
 const EQUIP = rawEquip as EquipTable
 const FACES = rawFaces as FaceTable
 
-export interface ModelOption { index: number; path: string }
+export interface ModelOption {
+  index: number
+  path: string
+  /** Items known to use this model, shortest name first. Empty if unknown. */
+  names: string[]
+  /** What to show in a dropdown: the item name, or the bare index. */
+  label: string
+}
 
-/** Every model available for a race and slot, ordered by model index. */
+type NameTable = Record<string, Record<string, string[]>>
+const ITEM_NAMES = rawItemNames as NameTable
+
+/**
+ * Every model available for a race and slot, ordered by model index.
+ *
+ * Names come from LandSandBoat's `item_equipment` table, which carries an
+ * `MId` per item — many items share one model, so each index maps to a list.
+ * The DATs themselves hold no names at all, so this is the only way to label
+ * them. Roughly a tenth of indices have no known item and keep the raw number.
+ */
 export function equipOptions(race: number, slot: number): ModelOption[] {
   const table = EQUIP[`${race}:${slot}`]
   if (!table) return []
+  const names = ITEM_NAMES[String(slot)] ?? {}
+
   return Object.entries(table)
-    .map(([index, path]) => ({ index: Number(index), path }))
+    .map(([index, path]) => {
+      const known = names[index] ?? []
+      // Not "+N": FFXI's own item names end in +1, +2, +3, so that suffix would
+      // read as an item rank rather than a count of other items sharing the model.
+      const extra = known.length > 1 ? ` (${known.length - 1} more)` : ''
+      return {
+        index: Number(index),
+        path,
+        names: known,
+        label: known.length > 0 ? `${known[0]}${extra}` : `Model ${index}`,
+      }
+    })
     .sort((a, b) => a.index - b.index)
 }
 
 export function faceOptions(race: number): { name: string; path: string }[] {
   return FACES[String(race)] ?? []
+}
+
+export interface AnimationEntry {
+  name: string
+  category: string
+  paths: string[]
+}
+
+type AnimTable = Record<string, AnimationEntry[]>
+const ANIMS = rawAnims as AnimTable
+
+/**
+ * Animation sets available to a race, around 300 of them across 24 categories.
+ *
+ * Player animations are not in the equipment DATs — they live in their own
+ * files, which is why a composed character stands still while an NPC moves.
+ *
+ * Tarutaru Female (race 6) has no table of its own and falls back to Tarutaru
+ * Male, the same sharing SKELETON_PATHS already does for the skeleton itself.
+ */
+export function animationOptions(race: number): AnimationEntry[] {
+  return ANIMS[String(race)] ?? ANIMS[String(race === 6 ? 5 : race)] ?? []
+}
+
+/**
+ * Load every DAT in one animation set and return the clips they hold.
+ *
+ * A set can span ten files — "Battle" does — and each file can carry several
+ * blocks, so this can produce a lot of clips. The clip selector in the panel is
+ * what picks among them; playing all of them at once is rarely what you want
+ * here, unlike the composed upper/lower body split inside a single NPC DAT.
+ */
+export async function loadAnimationSet(
+  ffxiPath: string,
+  race: number,
+  entryIndex: number,
+): Promise<ParsedAnimation[]> {
+  const entry = animationOptions(race)[entryIndex]
+  if (!entry) return []
+
+  const clips: ParsedAnimation[] = []
+  for (const path of entry.paths) {
+    try {
+      const buffer = await window.ffxi.readDat(ffxiPath, path)
+      clips.push(...parseAnimationDat(buffer))
+    } catch { /* a missing file should not lose the rest of the set */ }
+  }
+  return clips
 }
 
 /** Which pieces the character is wearing. Slot id → model index. */
@@ -84,6 +165,8 @@ export interface CharacterSpec {
   /** Index into `faceOptions(race)`, or null for no face. */
   face: number | null
   equipment: Equipment
+  /** Index into `animationOptions(race)`, or null to stand in bind pose. */
+  animation: number | null
 }
 
 export interface ComposedCharacter extends ParsedDatFile {
@@ -149,7 +232,9 @@ export async function composeCharacter(
     }
   }
 
-  // Equipment DATs carry no animation; player animations live in separate files
-  // (Vanalytics' animation-paths.json), which is a later step.
-  return { meshes, textures, skeleton, animations: [], loaded, failed }
+  const animations = spec.animation === null
+    ? []
+    : await loadAnimationSet(ffxiPath, spec.race, spec.animation)
+
+  return { meshes, textures, skeleton, animations, loaded, failed }
 }

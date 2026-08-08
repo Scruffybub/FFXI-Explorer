@@ -401,9 +401,30 @@ Texture indices are per-file and get rebased as pools are concatenated, or every
 piece would sample the first one's textures. A piece that fails to load is
 reported rather than thrown: a missing glove should not cost the character.
 
-Not done: player animations. Equipment DATs carry none — PC animations live in
-separate files (Vanalytics' `animation-paths.json`), so characters stand in bind
-pose while NPCs and monsters animate.
+**Player animations come from separate files.** Equipment DATs carry none, so a
+composed character needs its own animation source: `animation-paths.json`, keyed
+by race, ~300 sets across 24 categories. A set can span ten DATs ("Battle" does)
+and each can hold several blocks, so a set yields many clips.
+
+Because of that, selecting a character animation defaults the clip picker to the
+*first* clip rather than "all together". Composing is right inside one NPC DAT —
+there the blocks are an upper/lower body split of a single pose — and meaningless
+across a set of separate animations.
+
+Race 6 (Tarutaru Female) has no animation table and falls back to race 5, the
+same sharing `SKELETON_PATHS` already does for the skeleton.
+
+**Item names** come from LandSandBoat's `item_equipment` table, which carries an
+`MId` and a slot bitfield per item. `scripts/build-item-names.cjs` turns that SQL
+into `resources/item-names.json` (170 KB); the SQL itself is not vendored. Slot
+bits map 1→main, 2→sub, 4→ranged, 16→head, 32→body, 64→hands, 128→legs,
+256→feet, which independently confirms the inferred slot numbering above: body
+model 5 resolves to Chainmail / Hexed Haubert, and the source row for
+`hexed_haubert` is indeed `MId 5, slot 32`.
+
+Many items share one model, so the label shows the shortest name plus
+`(N more)` — **not** `+N`, because FFXI's own item names end in +1/+2/+3 and that
+suffix reads as a rank.
 
 ### Animation playback
 

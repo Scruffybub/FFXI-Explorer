@@ -45,7 +45,7 @@ export default function ModelBrowser({
   const [settings, setSettings] = useState<ModelSettings>(DEFAULT_MODEL)
 
   const [mode, setMode] = useState<'browse' | 'character'>('browse')
-  const [spec, setSpec] = useState<CharacterSpec>({ race: 1, face: 0, equipment: {} })
+  const [spec, setSpec] = useState<CharacterSpec>({ race: 1, face: 0, equipment: {}, animation: null })
   const [charLoad, setCharLoad] = useState<CharState>({ status: 'idle' })
 
   // Recompose whenever the outfit changes. `cancelled` guards against a slow
@@ -91,6 +91,14 @@ export default function ModelBrowser({
   }, [ffxiPath])
 
   const onStats = useCallback((s: ModelStats | null) => setStats(s), [])
+
+  // An animation set can span ten files and yield dozens of clips, so default to
+  // the first rather than "all together". Composing them is right inside a
+  // single NPC DAT, where the blocks are an upper/lower body split of one pose;
+  // it is meaningless across a set of separate animations.
+  useEffect(() => {
+    setClipIndex(spec.animation === null ? null : 0)
+  }, [spec.animation])
 
   // Keyed on the outfit so the viewer rebuilds when a piece changes, but not
   // when a lighting slider moves.
