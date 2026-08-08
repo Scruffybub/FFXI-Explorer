@@ -560,6 +560,16 @@ export default function ControlPanel({
         </p>
         <Toggle label="Show sky" checked={scene.showSky} onChange={v => onScene({ showSky: v })} />
         <Toggle label="Wireframe" checked={scene.wireframe} onChange={v => onScene({ wireframe: v })} />
+        <Toggle
+          label="Show collision"
+          checked={scene.showCollision}
+          onChange={v => onScene({ showCollision: v })}
+        />
+        <p className="note small">
+          Draws the collision mesh FFXI actually uses for movement. It is not the
+          same as the visible geometry — it carries invisible walls and leaves out
+          decoration — so it will not match the art everywhere.
+        </p>
       </Section>
     </div>
   )

@@ -224,6 +224,40 @@ files carry per-vertex normals at all — a purely baked renderer would have no
 use for them. Defaults `gameSunIntensity: 0.68`, `gameAmbient: 0.42` were tuned
 against in-game screenshots.
 
+### Collision geometry is in the MZB block, not the render geometry
+
+FFXI ships real collision data — what the game actually walks and bumps
+against, including invisible walls and excluding decoration. It lives in the
+**same MZB block** `MzbParser.ts` already decrypts, behind header fields that
+parser ignores. `CollisionParser.ts` reads it.
+
+Reference: `Common/dat/Types/MZB.cs` in LandSandBoat/FFXI-NavMesh-Builder, which
+descends from Vulture's dat.cs. Its zone loader skips MMB entirely — *"dont need
+mmb for collision mesh"*.
+
+Three deliberate deviations from that reference, all documented at length in the
+file header. Do not "fix" them back:
+
+- **Y is not negated.** The reference negates it to emit a Y-up OBJ; we live
+  under `rotation={[Math.PI,0,0]}`, so negating would double-flip.
+- **Every vertex is kept.** The reference's `> -99329` cull skips vertices while
+  still numbering indices as though all were kept — it desynchronises topology
+  whenever it fires.
+- **(visEntry, geometry) pairs are deduplicated.** The reference over-scans the
+  grid 10× per axis; without dedup the same mesh is emitted many times over.
+
+Its `ParseMesh()` is dead code — it advances a cursor and discards what it reads.
+All geometry comes from the grid entries.
+
+Verified across four zones, including the two the reference's comments flag as
+problem cases: West Ronfaure 429,001 tris, North Gustaberg 587,475, Port Jeuno
+96,491, Chateau d'Oraguille 34,112. Bounds stay inside plausible zone extents,
+which is the cheap check that the grid over-scan is not reading junk offsets.
+
+**Turn on "Show collision" in the Scene section** (or `scene_showCollision=true`)
+to draw it as a green wireframe. Correct collision hugs the rendered ground;
+anything mirrored or offset floats visibly away from the art.
+
 ### Smaller ones
 
 - `vColor` is declared `vec4` in this three.js version even without

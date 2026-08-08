@@ -6,7 +6,7 @@ import {
   DepthOfField, Autofocus,
 } from '@react-three/postprocessing'
 import * as THREE from 'three'
-import type { ParsedZone } from '../lib/ffxi-dat'
+import type { ParsedCollision, ParsedZone } from '../lib/ffxi-dat'
 import type {
   LightingSettings, PointLightSettings, PostSettings, SceneSettings, SurfaceInfo, ToneMappingMode,
 } from '../lib/settings'
@@ -1012,6 +1012,47 @@ function RendererSettings({ post, shadows }: { post: PostSettings; shadows: bool
   return null
 }
 
+/**
+ * Draws the MZB collision mesh as a wireframe over the zone.
+ *
+ * Diagnostic, and the acceptance test for the collision parser: it sits inside
+ * the same PI-rotated group as the zone, so correct collision hugs the rendered
+ * ground. Anything mirrored, offset or inside-out shows up immediately as
+ * wireframe that floats away from the geometry it should be tracing.
+ *
+ * Collision has no vertex colours or UVs — a flat unlit material is all it can
+ * take, and depthTest stays on so the wireframe is occluded by terrain in front
+ * of it rather than drawing through the whole zone.
+ */
+function CollisionOverlay({ collision }: { collision: ParsedCollision | null }) {
+  const geometry = useMemo(() => {
+    if (!collision) return null
+    const geo = new THREE.BufferGeometry()
+    geo.setAttribute('position', new THREE.BufferAttribute(collision.vertices, 3))
+    geo.setIndex(new THREE.BufferAttribute(collision.indices, 1))
+    geo.computeBoundingSphere()
+    return geo
+  }, [collision])
+
+  useEffect(() => {
+    return () => { geometry?.dispose() }
+  }, [geometry])
+
+  if (!geometry) return null
+
+  return (
+    <mesh geometry={geometry} renderOrder={999}>
+      <meshBasicMaterial
+        color="#00ff88"
+        wireframe
+        transparent
+        opacity={0.55}
+        side={THREE.DoubleSide}
+      />
+    </mesh>
+  )
+}
+
 function SmartOrbitControls({ size }: { size: number }) {
   const { camera } = useThree()
   const target = useMemo(() => {
@@ -1880,6 +1921,7 @@ export default function ZoneViewer({
         {instancedMeshes.map((mesh, i) => (
           <primitive key={i} object={mesh} />
         ))}
+        {scene.showCollision && <CollisionOverlay collision={zoneData.collision} />}
       </group>
 
       <PostStack post={post} />

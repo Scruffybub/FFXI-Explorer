@@ -2,6 +2,7 @@ import { DatReader } from './DatReader'
 import { parseTextureBlock } from './TextureParser'
 import { decodeMzb, decodeMmb } from './ZoneDecrypt'
 import { parseMzbBlock } from './MzbParser'
+import { parseMzbCollision, type ParsedCollision } from './CollisionParser'
 import { parseMmbBlock } from './MmbParser'
 import type { ParsedZone, ParsedZoneMesh, ParsedTexture, ZoneMeshInstance } from './types'
 
@@ -221,6 +222,7 @@ export function parseZoneFile(
 
   let mzbTotal = 0
   let mzbMatched = 0
+  const collisionParts: ParsedCollision[] = []
 
   for (const block of mzbBlocks) {
     const start = block.dataOffset + BLOCK_PADDING
@@ -231,6 +233,15 @@ export function parseZoneFile(
       const decryptedData = decodeMzb(blockData)
       const rawInstances = parseMzbBlock(decryptedData)
       mzbTotal += rawInstances.length
+
+      // Collision geometry lives further into this same decrypted block.
+      // Failure here must not cost us the zone, so it is isolated.
+      try {
+        const part = parseMzbCollision(decryptedData)
+        if (part) collisionParts.push(part)
+      } catch (err) {
+        onProgress?.(`Warning: collision parse failed — ${err}`)
+      }
 
       for (const inst of rawInstances) {
         const mappings = mmbNameMap.get(inst.name)
@@ -253,9 +264,69 @@ export function parseZoneFile(
   }
 
   const unmatchedCount = { total: mzbTotal, matched: mzbMatched }
+  const collision = mergeCollision(collisionParts)
+
+  // Console, not just onProgress: onProgress only paints a transient loading
+  // message, and collision counts are the thing to check when walking feels
+  // wrong in a zone.
+  if (collision) {
+    // Bounds are the cheap check for the grid over-scan reading junk offsets:
+    // stray geometry lands far outside the zone and blows the box up.
+    const v = collision.vertices
+    let minX = Infinity, minY = Infinity, minZ = Infinity
+    let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity
+    for (let i = 0; i < v.length; i += 3) {
+      if (v[i] < minX) minX = v[i]; if (v[i] > maxX) maxX = v[i]
+      if (v[i + 1] < minY) minY = v[i + 1]; if (v[i + 1] > maxY) maxY = v[i + 1]
+      if (v[i + 2] < minZ) minZ = v[i + 2]; if (v[i + 2] > maxZ) maxZ = v[i + 2]
+    }
+    const r = (n: number) => Math.round(n)
+    console.log(
+      `[Collision] ${collision.indices.length / 3} tris, ${v.length / 3} verts, ` +
+      `from ${collisionParts.length} MZB block(s), ` +
+      `bounds x[${r(minX)},${r(maxX)}] y[${r(minY)},${r(maxY)}] z[${r(minZ)},${r(maxZ)}]`,
+    )
+  } else {
+    console.log(`[Collision] none parsed from ${mzbBlocks.length} MZB block(s)`)
+  }
 
   onProgress?.(`Instances: ${instances.length} (${unmatchedCount.matched}/${unmatchedCount.total} MZB entries matched MMB names)`)
+  onProgress?.(
+    collision
+      ? `Collision: ${collision.indices.length / 3} triangles, ${collision.vertices.length / 3} vertices`
+      : `Collision: none found`,
+  )
   onProgress?.(`Result: ${prefabs.length} prefabs, ${instances.length} instances, ${textures.length} textures`)
 
-  return { prefabs, instances, textures }
+  return { prefabs, instances, textures, collision }
+}
+
+/** Concatenate collision from every MZB block in the file, rebasing indices. */
+function mergeCollision(parts: ParsedCollision[]): ParsedCollision | null {
+  if (parts.length === 0) return null
+  if (parts.length === 1) return parts[0]
+
+  const vertexCount = parts.reduce((n, p) => n + p.vertices.length, 0)
+  const indexCount = parts.reduce((n, p) => n + p.indices.length, 0)
+  const faceCount = parts.reduce((n, p) => n + p.faceFlags.length, 0)
+
+  const vertices = new Float32Array(vertexCount)
+  const indices = new Uint32Array(indexCount)
+  const faceFlags = new Uint16Array(faceCount)
+  const indexFlags = new Uint8Array(faceCount)
+
+  let vOff = 0, iOff = 0, fOff = 0
+  for (const part of parts) {
+    vertices.set(part.vertices, vOff)
+    for (let i = 0; i < part.indices.length; i++) {
+      indices[iOff + i] = part.indices[i] + vOff / 3
+    }
+    faceFlags.set(part.faceFlags, fOff)
+    indexFlags.set(part.indexFlags, fOff)
+    vOff += part.vertices.length
+    iOff += part.indices.length
+    fOff += part.faceFlags.length
+  }
+
+  return { vertices, indices, faceFlags, indexFlags }
 }

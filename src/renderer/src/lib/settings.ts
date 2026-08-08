@@ -178,6 +178,8 @@ export interface SceneSettings {
   /** How much of FFXI's baked vertex colour tints water surfaces. */
   waterTint: number
   wireframe: boolean
+  /** Draw the MZB collision mesh over the zone — what walking actually stands on. */
+  showCollision: boolean
 }
 
 export const DEFAULT_LIGHTING: LightingSettings = {
@@ -253,6 +255,7 @@ export const DEFAULT_SCENE: SceneSettings = {
   showSky: true,
   waterTint: 0.35,
   wireframe: false,
+  showCollision: false,
 }
 
 /** Presets that show off what the lighting controls can do. */

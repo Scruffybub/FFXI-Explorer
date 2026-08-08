@@ -1,3 +1,5 @@
+import type { ParsedCollision } from './CollisionParser'
+
 export interface ParsedMesh {
   vertices: Float32Array
   normals: Float32Array
@@ -59,6 +61,7 @@ export interface ParsedZone {
   prefabs: ParsedZoneMesh[]       // unique MMB mesh prefabs
   instances: ZoneMeshInstance[]    // MZB placement transforms
   textures: ParsedTexture[]       // reused from entity pipeline
+  collision: ParsedCollision | null // MZB collision mesh, raw DAT space
 }
 
 export interface AnimationBone {
