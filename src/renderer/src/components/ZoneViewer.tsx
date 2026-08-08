@@ -1411,6 +1411,36 @@ function WalkCamera({
     feet.x += wish.x
     feet.z += wish.z
 
+    // ── Depenetration ──
+    // The ray probe above stops you walking *into* a wall head-on, but it
+    // cannot stop you sliding into one at an angle: once the slide leaves you
+    // travelling nearly parallel, the ray no longer hits and the body creeps
+    // sideways through the geometry. This gives the body volume and pushes it
+    // back out, whatever direction it arrived from.
+    //
+    // Two heights, because a single sphere at mid-body can slip under a low
+    // lip or over a high one.
+    // Iterated: one push resolves a simple wall, but in a corner or a crevice
+    // escaping one face can leave you touching another, so it repeats until
+    // clear. Three passes is plenty for shallow contact and bounds the cost.
+    const pushProbe = new THREE.Vector3()
+    for (const h of [t.walkEyeHeight * 0.45, t.walkEyeHeight * 0.85]) {
+      for (let iter = 0; iter < 3; iter++) {
+        pushProbe.set(feet.x, feet.y + h, feet.z)
+        const push = world.depenetrate(pushProbe, WALK_RADIUS, slopeCos)
+        if (!push) break
+        feet.x += push.x
+        feet.z += push.z
+        if (debugWalk && wallProbeLog.current < 30) {
+          wallProbeLog.current++
+          console.log(
+            `[Walk] depenetrate h=${h.toFixed(2)} iter=${iter} ` +
+            `push=(${push.x.toFixed(3)}, ${push.z.toFixed(3)})`,
+          )
+        }
+      }
+    }
+
     // ── Ground ──
     // Search from step height above the feet so small ledges are climbed, and
     // far enough below to catch the floor after a drop.

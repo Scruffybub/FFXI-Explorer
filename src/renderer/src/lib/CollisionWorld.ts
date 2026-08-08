@@ -101,6 +101,62 @@ export class CollisionWorld {
     }
   }
 
+  /**
+   * How far to push a sphere at `center` so it is no longer inside any wall.
+   * Returns a horizontal correction, or null if it is already clear.
+   *
+   * Rays alone cannot do this. A ray is a zero-thickness line along the
+   * direction of travel, so approaching a wall at an angle — where sliding
+   * leaves you moving nearly parallel to it — the ray stops hitting the wall
+   * while the body is still overlapping it, and you creep through sideways a
+   * little each frame. Giving the body real volume is the only fix.
+   *
+   * Floor-like faces are ignored: standing on the ground would otherwise
+   * register as penetration and shove you around.
+   */
+  depenetrate(
+    center: THREE.Vector3,
+    radius: number,
+    slopeCos: number,
+  ): THREE.Vector3 | null {
+    const sphere = new THREE.Sphere(center, radius)
+    const normal = new THREE.Vector3()
+    const closest = new THREE.Vector3()
+    const away = new THREE.Vector3()
+    const push = new THREE.Vector3()
+    let contacts = 0
+
+    this.bvh.shapecast({
+      intersectsBounds: (box) => box.intersectsSphere(sphere),
+      intersectsTriangle: (tri) => {
+        tri.getNormal(normal)
+        if (Math.abs(normal.y) >= slopeCos) return false // floor, not a wall
+
+        tri.closestPointToPoint(sphere.center, closest)
+        const dist = closest.distanceTo(sphere.center)
+        if (dist >= radius) return false
+
+        away.subVectors(sphere.center, closest)
+        away.y = 0
+        if (away.lengthSq() < 1e-10) {
+          // Dead centre on the face — back out along its own normal instead.
+          away.set(normal.x, 0, normal.z)
+          if (away.lengthSq() < 1e-10) return false
+        }
+        away.normalize()
+        push.addScaledVector(away, radius - dist)
+        contacts++
+        return false
+      },
+    })
+
+    if (contacts === 0) return null
+    // Corners produce several contacts at once; summing handles them, but cap
+    // the result so a pile-up cannot fling the body across the zone.
+    if (push.length() > radius) push.setLength(radius)
+    return push
+  }
+
   dispose(): void {
     this.geometry.dispose()
   }

@@ -304,6 +304,21 @@ Against 200 steep faces, the old rule detected 172, the new one 198 — and that
 understates it, because the synthetic test approaches head-on through clear air
 and cannot reproduce the ground-in-the-way case that actually broke it.
 
+**Rays alone cannot hold you out of a wall — the body needs volume.** With only
+the ray probe, walking head-on into a wall worked, but approaching at an angle
+you could wedge through: once sliding leaves you travelling nearly parallel to
+the face, the zero-thickness ray stops hitting it while the body still overlaps,
+and you creep sideways through a little each frame.
+
+`CollisionWorld.depenetrate()` sweeps a sphere via `shapecast` and pushes it back
+out, whatever direction it arrived from. Run at two heights and iterated up to
+three times, because escaping one face in a corner can leave you touching
+another. Floor-like faces are excluded or standing on the ground would shove you
+around. Measured against 300 penetrating samples in South Gustaberg: 300 detected,
+256 fully cleared after iteration (up from 166 with a single push). The remaining
+44 are samples the test itself buried inside solid rock — collision normals are
+unoriented, so half the probes push inward. No measurable frame-rate cost.
+
 Collision normals are not reliably oriented, so the slide turns the normal
 against travel before projecting. Skipping that can push you *into* the wall.
 
