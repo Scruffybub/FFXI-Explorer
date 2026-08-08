@@ -558,18 +558,42 @@ function SkyAnimator({
   return null
 }
 
-function BackgroundUpdater({ timeOfDayRef }: { timeOfDayRef: React.RefObject<number> }) {
+/**
+ * The backdrop shown with the sky dome switched off.
+ *
+ * Either a flat colour, or that colour tinted by time of day so dusk still
+ * reads as dusk. Following the clock is the older behaviour and stays the
+ * default; the picker exists for screenshots against a chosen background.
+ */
+function BackgroundUpdater({
+  timeOfDayRef, color, followTime,
+}: {
+  timeOfDayRef: React.RefObject<number>
+  color: string
+  followTime: boolean
+}) {
   const { scene } = useThree()
+
   useEffect(() => {
-    scene.background = new THREE.Color()
+    scene.background = new THREE.Color(color)
     return () => { scene.background = null }
-  }, [scene])
+  }, [scene, color])
+
   useFrame(() => {
-    if (scene.background instanceof THREE.Color) {
-      const params = getTimeOfDayParams(timeOfDayRef.current)
-      scene.background.setRGB(params.sky[0] * 0.3, params.sky[1] * 0.3, params.sky[2] * 0.3)
+    if (!(scene.background instanceof THREE.Color)) return
+    if (!followTime) {
+      scene.background.set(color)
+      return
     }
+    // Multiply rather than replace, so the picked colour still sets the hue
+    // while the clock drives how dark it gets.
+    const params = getTimeOfDayParams(timeOfDayRef.current)
+    scene.background.set(color)
+    scene.background.multiplyScalar(
+      Math.max(params.sky[0], params.sky[1], params.sky[2]) * 2.2 + 0.15,
+    )
   })
+
   return null
 }
 
@@ -1783,9 +1807,22 @@ export default function ZoneViewer({
       if (count > bestUsage) { bestUsage = count; fallbackTextureIndex = idx }
     }
 
+    // What the sky/weather filter is actually throwing away, by category. This
+    // is the evidence for whether FFXI's own weather is usable: the geometry is
+    // demonstrably in the files, since it is what we have been discarding.
+    const weatherCensus = new Map<string, { prefabs: number; instances: number }>()
+
     for (let prefabIdx = 0; prefabIdx < zoneData.prefabs.length; prefabIdx++) {
       const prefab = zoneData.prefabs[prefabIdx]
-      if (isSkyWeatherMesh(prefab)) continue
+
+      if (isSkyWeatherMesh(prefab)) {
+        const category = (prefab.textureName ?? '').split(/\s+/)[0].toLowerCase()
+        const entry = weatherCensus.get(category) ?? { prefabs: 0, instances: 0 }
+        entry.prefabs++
+        entry.instances += zoneData.instances.filter(i => i.meshIndex === prefabIdx).length
+        weatherCensus.set(category, entry)
+        if (!scene.showWeather) continue
+      }
 
       const isWater = isWaterPrefab(prefab, prefabIdx) && !DISABLE_WATER_SHADER
 
@@ -2086,6 +2123,17 @@ export default function ZoneViewer({
       if (added > 0) console.log(`[ZoneViewer] rendered ${added} unreferenced prefabs`)
     }
 
+    if (weatherCensus.size > 0) {
+      const summary = [...weatherCensus.entries()]
+        .sort((a, b) => b[1].prefabs - a[1].prefabs)
+        .map(([cat, c]) => `${cat}=${c.prefabs}p/${c.instances}i`)
+        .join(' ')
+      console.log(
+        `[Weather] ${weatherCensus.size} categories, ` +
+        `${[...weatherCensus.values()].reduce((n, c) => n + c.prefabs, 0)} prefabs: ${summary}`,
+      )
+    }
+
     const disposeAll = () => {
       geometries.forEach(g => g.dispose())
       materials.forEach(m => {
@@ -2102,7 +2150,7 @@ export default function ZoneViewer({
     }
     // Rebuild materials when PCSS is toggled so they compile against the
     // shadow chunk that is actually installed.
-  }, [zoneData, lit, scene.wireframe, shaderVariant])
+  }, [zoneData, lit, scene.wireframe, scene.showWeather, shaderVariant])
 
   // Live material tweaks that do not require rebuilding geometry.
   useEffect(() => {
@@ -2252,7 +2300,11 @@ export default function ZoneViewer({
       ) : scene.showSky ? (
         <SkyDome size={farPlane * 0.9} material={skyMaterial} />
       ) : (
-        <BackgroundUpdater timeOfDayRef={timeOfDayRef} />
+        <BackgroundUpdater
+          timeOfDayRef={timeOfDayRef}
+          color={scene.backgroundColor}
+          followTime={scene.backgroundFollowsTime}
+        />
       )}
 
       {/* A deep-linked orientation takes over from the controls, which would

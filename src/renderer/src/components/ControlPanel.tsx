@@ -600,11 +600,32 @@ export default function ControlPanel({
           values here, so a low setting keeps rivers from going black.
         </p>
         <Toggle label="Show sky" checked={scene.showSky} onChange={v => onScene({ showSky: v })} />
+        {!scene.showSky && (
+          <>
+            <ColorPick
+              label="Background"
+              value={scene.backgroundColor}
+              onChange={v => onScene({ backgroundColor: v })}
+            />
+            <Toggle
+              label="Background follows time"
+              checked={scene.backgroundFollowsTime}
+              onChange={v => onScene({ backgroundFollowsTime: v })}
+              hint="Darken the backdrop with the time-of-day slider instead of holding the picked colour."
+            />
+          </>
+        )}
         <Toggle label="Wireframe" checked={scene.wireframe} onChange={v => onScene({ wireframe: v })} />
         <Toggle
           label="Show collision"
           checked={scene.showCollision}
           onChange={v => onScene({ showCollision: v })}
+        />
+        <Toggle
+          label="Show FFXI weather"
+          checked={scene.showWeather}
+          onChange={v => onScene({ showWeather: v })}
+          hint="Render the game's own sky and weather domes instead of replacing them with the procedural sky."
         />
         <p className="note small">
           Draws the collision mesh FFXI actually uses for movement. It is not the

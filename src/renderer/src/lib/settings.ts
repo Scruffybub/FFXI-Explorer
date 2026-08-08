@@ -175,6 +175,10 @@ export interface SceneSettings {
   fogDensity: number
   cameraMode: 'orbit' | 'fly' | 'walk'
   showSky: boolean
+  /** Backdrop colour used when the sky dome is off. */
+  backgroundColor: string
+  /** Tint that backdrop by time of day instead of holding the picked colour. */
+  backgroundFollowsTime: boolean
 
   /** Camera height above the ground you are standing on, in world units. */
   walkEyeHeight: number
@@ -193,6 +197,8 @@ export interface SceneSettings {
   wireframe: boolean
   /** Draw the MZB collision mesh over the zone — what walking actually stands on. */
   showCollision: boolean
+  /** Render FFXI's own sky and weather meshes instead of skipping them. */
+  showWeather: boolean
 }
 
 /**
@@ -302,9 +308,12 @@ export const DEFAULT_SCENE: SceneSettings = {
   fogDensity: 0.35,
   cameraMode: 'orbit',
   showSky: true,
+  backgroundColor: '#10141f',
+  backgroundFollowsTime: true,
   waterTint: 0.35,
   wireframe: false,
   showCollision: false,
+  showWeather: false,
 
   // FFXI's world unit reads as roughly a metre: Chateau d'Oraguille's collision
   // spans 28 units across its floors, West Ronfaure ~1200 corner to corner. So

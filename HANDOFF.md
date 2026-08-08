@@ -434,6 +434,33 @@ disposing them in a `useEffect` cleanup is broken under StrictMode — React run
 the cleanup on its simulated unmount, disposing everything, then remounts and
 renders the disposed resources. Build and dispose in the *same* effect.
 
+### Weather: the geometry is there, the presentation is not
+
+**Answered by census, not speculation.** Every zone carries a small, consistent
+set of sky/weather prefabs, all of them *unreferenced* (zero instances):
+
+| Zone | Prefabs | Categories |
+|---|---|---|
+| West Ronfaure | 19 | effect 8, star 4, clod 2, mist 2, suny 2, fine 1 |
+| South Gustaberg | 17 | effect 6, star 4, suny 2, mist 2, clod 2, fine 1 |
+| Port Jeuno | 15 | star 4, effect 4, suny 2, mist 2, clod 2, fine 1 |
+
+The same six categories in the same rough proportions everywhere, which reads as
+a per-zone set of weather *states* — sunny, fine, cloud, mist, stars — that the
+game swaps between, rather than geometry meant to be drawn all at once.
+
+**Show FFXI weather** (Scene section, or `scene_showWeather=true`) renders them
+instead of skipping. Confirmed working: unreferenced prefabs go from 36 to 55 in
+West Ronfaure, exactly the 19 the census counts.
+
+What you get is not usable weather. It draws as a small yellow-and-black
+checkered patch on the terrain — the fallback-texture look — rather than a dome.
+So the honest state is: **the data exists and is reachable, but making it look
+like weather is a separate problem.** Next step for anyone picking this up is to
+Inspect one of those surfaces and find out whether the texture genuinely fails to
+resolve or whether these prefabs need a transform the instance list would have
+supplied. Do not assume the parser is at fault before checking that.
+
 ### Smaller ones
 
 - `vColor` is declared `vec4` in this three.js version even without
