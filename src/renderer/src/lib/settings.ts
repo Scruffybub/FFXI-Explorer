@@ -195,6 +195,42 @@ export interface SceneSettings {
   showCollision: boolean
 }
 
+/**
+ * The model viewer's own settings.
+ *
+ * Deliberately separate from the zone settings rather than reusing them: almost
+ * nothing carries over. There is no sun, no time of day, no fog, no water, and
+ * the subject is two metres across instead of twelve hundred. What a model needs
+ * is studio lighting and a backdrop.
+ */
+export interface ModelSettings {
+  background: string
+  ambientIntensity: number
+  keyIntensity: number
+  fillIntensity: number
+  /** Rotates the key light around the model, in degrees. */
+  keyAzimuth: number
+  toneMapping: ToneMappingMode
+  exposure: number
+  roughness: number
+  wireframe: boolean
+  /** Draw a ground plane and grid, for a sense of scale and footing. */
+  showGround: boolean
+}
+
+export const DEFAULT_MODEL: ModelSettings = {
+  background: '#1b1f27',
+  ambientIntensity: 0.75,
+  keyIntensity: 1.5,
+  fillIntensity: 0.5,
+  keyAzimuth: 35,
+  toneMapping: 'aces',
+  exposure: 1.0,
+  roughness: 0.85,
+  wireframe: false,
+  showGround: false,
+}
+
 export const DEFAULT_LIGHTING: LightingSettings = {
   mode: 'baked',
   bakedInfluence: 0.35,

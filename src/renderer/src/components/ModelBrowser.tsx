@@ -2,6 +2,8 @@ import { useState, useMemo, useCallback, type ReactNode } from 'react'
 import { parseDatFile, hasAnimations, type ParsedDatFile } from '../lib/ffxi-dat'
 import { MODELS, MODEL_CATEGORIES, searchModels, type ModelEntry } from '../lib/modelList'
 import { ModelViewer, type ModelStats } from './ModelViewer'
+import ModelPanel from './ModelPanel'
+import { DEFAULT_MODEL, type ModelSettings } from '../lib/settings'
 
 /**
  * The model viewer half of the app: its own sidebar and its own viewport,
@@ -17,8 +19,6 @@ type LoadState =
   | { status: 'ready'; model: ParsedDatFile; animated: boolean }
   | { status: 'error'; message: string }
 
-const BACKGROUND = '#1b1f27'
-
 export default function ModelBrowser({
   ffxiPath, viewSwitch, uiHidden,
 }: {
@@ -33,6 +33,8 @@ export default function ModelBrowser({
   const [stats, setStats] = useState<ModelStats | null>(null)
   const [playing, setPlaying] = useState(true)
   const [speed, setSpeed] = useState(1)
+  const [clipIndex, setClipIndex] = useState<number | null>(null)
+  const [settings, setSettings] = useState<ModelSettings>(DEFAULT_MODEL)
 
   const filtered = useMemo(
     () => searchModels(search, category).slice(0, 400),
@@ -134,26 +136,12 @@ export default function ModelBrowser({
             <ModelViewer
               key={`${selected?.path}/${selected?.name}`}
               model={load.model}
-              background={BACKGROUND}
+              settings={settings}
               onStats={onStats}
               playing={playing}
               speed={speed}
+              clipIndex={clipIndex}
             />
-            {!uiHidden && stats && stats.animations > 0 && (
-              <div className="anim-bar">
-                <button onClick={() => setPlaying(p => !p)}>
-                  {playing ? 'Pause' : 'Play'}
-                </button>
-                <label>
-                  Speed
-                  <input
-                    type="range" min={0.1} max={3} step={0.1} value={speed}
-                    onChange={e => setSpeed(Number(e.target.value))}
-                  />
-                  <span>{speed.toFixed(1)}x</span>
-                </label>
-              </div>
-            )}
             {!uiHidden && (
               <div className="hud">
                 <strong>{selected?.name}</strong>
@@ -172,6 +160,20 @@ export default function ModelBrowser({
           </>
         )}
       </main>
+
+      {!uiHidden && (
+        <ModelPanel
+          settings={settings}
+          onChange={patch => setSettings(s => ({ ...s, ...patch }))}
+          animations={load.status === 'ready' ? load.model.animations : []}
+          clipIndex={clipIndex}
+          onClipChange={setClipIndex}
+          playing={playing}
+          onPlayingChange={setPlaying}
+          speed={speed}
+          onSpeedChange={setSpeed}
+        />
+      )}
     </>
   )
 }

@@ -598,3 +598,19 @@ select {
 .anim-bar label { display: flex; align-items: center; gap: 8px; color: var(--muted); }
 .anim-bar input[type=range] { width: 110px; }
 .anim-bar span { color: var(--text); min-width: 30px; }
+
+/* Model panel: static section headings (no collapse) and playback buttons. */
+.section-head.static { cursor: default; }
+.section-head.static:hover { background: none; }
+.anim-buttons { display: flex; gap: 6px; }
+.anim-buttons button {
+  flex: 1;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--text);
+  padding: 6px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.anim-buttons button:hover { border-color: var(--accent); }

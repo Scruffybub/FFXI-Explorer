@@ -4,6 +4,7 @@ import { OrbitControls } from '@react-three/drei'
 import * as THREE from 'three'
 import type { ParsedDatFile } from '../lib/ffxi-dat'
 import { invertRigidMatrix4, poseSkeleton, skinMeshes, type SkinTarget } from '../lib/skinning'
+import type { ModelSettings, ToneMappingMode } from '../lib/settings'
 
 /**
  * Renders a single parsed model DAT.
@@ -216,12 +217,14 @@ function buildModel(dat: ParsedDatFile): BuiltModel {
  * skeleton, and inverting 69 matrices every frame is pure waste.
  */
 function Animator({
-  built, model, playing, speed, onFrame,
+  built, model, playing, speed, clipIndex, onFrame,
 }: {
   built: BuiltModel
   model: ParsedDatFile
   playing: boolean
   speed: number
+  /** Which clip to play, or null for all of them composed together. */
+  clipIndex: number | null
   onFrame?: (frame: number, total: number) => void
 }) {
   const time = useRef(0)
@@ -230,14 +233,23 @@ function Animator({
     [model.skeleton],
   )
 
+  // Clips compose by bone: each drives its own subset, so playing them together
+  // is the pose the game actually shows. Selecting one is for inspection.
+  const clips = useMemo(
+    () => (clipIndex === null
+      ? model.animations
+      : model.animations.slice(clipIndex, clipIndex + 1)),
+    [model.animations, clipIndex],
+  )
+
   useFrame((_, delta) => {
     const skeleton = model.skeleton
-    if (!skeleton || !inverseBind || model.animations.length === 0) return
+    if (!skeleton || !inverseBind || clips.length === 0) return
     if (built.skinTargets.length === 0) return
 
     if (playing) time.current += delta * speed
 
-    const pose = poseSkeleton(skeleton, model.animations, inverseBind, time.current)
+    const pose = poseSkeleton(skeleton, clips, inverseBind, time.current)
     skinMeshes(built.skinTargets, pose)
 
     for (const mesh of built.meshes) {
@@ -245,7 +257,7 @@ function Animator({
       attr.needsUpdate = true
     }
 
-    const clip = model.animations[0]
+    const clip = clips[0]
     if (onFrame && clip.frameCount > 1) {
       const total = clip.frameCount - 1
       onFrame(((time.current * clip.speed * 30) % total + total) % total, total)
@@ -283,6 +295,27 @@ function FrameCamera({ radius }: { radius: number }) {
   return null
 }
 
+const TONE_MAPPING: Record<ToneMappingMode, THREE.ToneMapping> = {
+  none: THREE.NoToneMapping,
+  linear: THREE.LinearToneMapping,
+  reinhard: THREE.ReinhardToneMapping,
+  cineon: THREE.CineonToneMapping,
+  aces: THREE.ACESFilmicToneMapping,
+  agx: THREE.AgXToneMapping,
+  neutral: THREE.NeutralToneMapping,
+}
+
+/** Applies renderer-level settings that are not React props on the Canvas. */
+function RendererSettings({ settings }: { settings: ModelSettings }) {
+  const { gl, invalidate } = useThree()
+  useEffect(() => {
+    gl.toneMapping = TONE_MAPPING[settings.toneMapping]
+    gl.toneMappingExposure = settings.exposure
+    invalidate()
+  }, [gl, invalidate, settings.toneMapping, settings.exposure])
+  return null
+}
+
 export interface ModelStats {
   meshes: number
   triangles: number
@@ -293,13 +326,14 @@ export interface ModelStats {
 }
 
 export function ModelViewer({
-  model, background, onStats, playing = true, speed = 1, onFrame,
+  model, settings, onStats, playing = true, speed = 1, clipIndex = null, onFrame,
 }: {
   model: ParsedDatFile | null
-  background: string
+  settings: ModelSettings
   onStats?: (stats: ModelStats | null) => void
   playing?: boolean
   speed?: number
+  clipIndex?: number | null
   onFrame?: (frame: number, total: number) => void
 }) {
   // Build and dispose in the *same* effect, so the two are always paired.
@@ -343,6 +377,18 @@ export function ModelViewer({
     })
   }, [model, built, onStats])
 
+  // Material tweaks apply in place rather than rebuilding the model — a rebuild
+  // would reallocate every geometry and restart the animation.
+  useEffect(() => {
+    if (!built) return
+    for (const mesh of built.meshes) {
+      const mat = mesh.material as THREE.MeshStandardMaterial
+      mat.wireframe = settings.wireframe
+      mat.roughness = settings.roughness
+      mat.needsUpdate = true
+    }
+  }, [built, settings.wireframe, settings.roughness])
+
   // Frame the model regardless of its size: FFXI models range from a rat to a
   // dragon, and a fixed camera distance is useless across that span.
   const dist = built ? built.radius * 3.2 : 5
@@ -351,13 +397,33 @@ export function ModelViewer({
     <Canvas
       camera={{ fov: 45, near: 0.01, far: Math.max(1000, dist * 10), position: [0, 0, dist] }}
       gl={{ antialias: true }}
+      onCreated={({ gl }) => {
+        gl.toneMapping = TONE_MAPPING[settings.toneMapping]
+        gl.toneMappingExposure = settings.exposure
+      }}
     >
-      <color attach="background" args={[background]} />
+      <color attach="background" args={[settings.background]} />
+      <RendererSettings settings={settings} />
 
-      {/* Three-point studio rig — enough to read shape without hiding texture. */}
-      <ambientLight intensity={0.75} />
-      <directionalLight position={[3, 5, 4]} intensity={1.5} />
-      <directionalLight position={[-4, 2, -3]} intensity={0.5} />
+      {/* Three-point studio rig — enough to read shape without flattening the
+          texture, which already carries most of FFXI's shading. */}
+      <ambientLight intensity={settings.ambientIntensity} />
+      <directionalLight
+        position={[
+          Math.sin((settings.keyAzimuth * Math.PI) / 180) * 5,
+          5,
+          Math.cos((settings.keyAzimuth * Math.PI) / 180) * 5,
+        ]}
+        intensity={settings.keyIntensity}
+      />
+      <directionalLight position={[-4, 2, -3]} intensity={settings.fillIntensity} />
+
+      {built && settings.showGround && (
+        <gridHelper
+          args={[built.radius * 8, 20, '#3a4152', '#242a36']}
+          position={[0, -built.radius, 0]}
+        />
+      )}
 
       {/* The model is built in an effect, so it does not exist when the Canvas
           creates its camera. This reframes once it arrives. */}
@@ -369,6 +435,7 @@ export function ModelViewer({
           model={model}
           playing={playing}
           speed={speed}
+          clipIndex={clipIndex}
           onFrame={onFrame}
         />
       )}
