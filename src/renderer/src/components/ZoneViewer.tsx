@@ -1200,6 +1200,11 @@ function WalkCamera({
   const velocityY = useRef(0)
   const grounded = useRef(false)
   const debugAccum = useRef(0)
+  const wallProbeLog = useRef(0)
+  /** Last place we were solidly on the ground, for fall recovery. */
+  const lastGrounded = useRef<THREE.Vector3 | null>(null)
+  /** Below this height you have left the world; derived from collision bounds. */
+  const floorLimit = useRef(-Infinity)
   const debugWalk = useMemo(
     () => new URLSearchParams(window.location.search).get('walkdebug') === '1',
     [],
@@ -1227,6 +1232,12 @@ function WalkCamera({
         )
       }
       camera.position.set(center.x, eyeY, center.z)
+      // A generous margin below the collision's own lowest point: anything
+      // further down is unambiguously outside the world.
+      if (world) {
+        const bs = world.geometry.boundingSphere
+        floorLimit.current = bs ? bs.center.y - bs.radius - 50 : -Infinity
+      }
       const e = new THREE.Euler(0, 0, 0, 'YXZ').setFromQuaternion(camera.quaternion)
       yaw.current = e.y
       pitch.current = 0
@@ -1340,27 +1351,62 @@ function WalkCamera({
     // Two passes: the first stops the move at a wall, the second lets the
     // remainder slide along it. Without the second pass you stick on contact
     // and inside corners feel like glue.
-    const probeY = feet.y + Math.max(t.walkStepHeight, 0.1) + 0.1
+    // Probe at several heights up the body, not one.
+    //
+    // A floor-like hit disqualifies only *that ray*; the next height up still
+    // gets to see the wall behind it. Skipping the whole probe on the first
+    // floor-like hit is what let you walk through walls: on rocky ground the
+    // low ray hits the walkable slope directly ahead, so the real wall was
+    // never tested. Measured in South Gustaberg, every direction returned
+    // |normal.y| between 0.64 and 0.88 — all above cos(50°) = 0.643, so every
+    // probe bailed out. Walking through the wall then dropped you, because
+    // inside the rock there is no floor underneath.
+    //
+    // Walkable ground belongs to the step-up and gravity code. This only blocks
+    // on surfaces too steep to climb.
+    const slopeCos = Math.cos((t.walkSlopeLimit * Math.PI) / 180)
+    const probeHeights = [
+      Math.max(t.walkStepHeight, 0.1) + 0.1,
+      t.walkEyeHeight * 0.5,
+      t.walkEyeHeight * 0.9,
+    ]
     for (let pass = 0; pass < 2 && wish.lengthSq() > 1e-10; pass++) {
       const dist = wish.length()
       const dir = wish.clone().normalize()
-      const origin = new THREE.Vector3(feet.x, probeY, feet.z)
-      const hit = world.castRay(origin, dir, dist + WALK_RADIUS)
-      if (!hit) break
-      // Ignore floor-like surfaces. A horizontal probe on rising ground hits the
-      // slope ahead, and treating that as a wall cancels most of the movement —
-      // walking uphill crawled at half speed until this check existed. Ground is
-      // the step-up and gravity code's job, not the wall code's.
-      const slopeCos = Math.cos((t.walkSlopeLimit * Math.PI) / 180)
-      if (Math.abs(hit.normal.y) >= slopeCos) break
-      const n = hit.normal.clone()
+
+      let wallNormal: THREE.Vector3 | null = null
+      let nearest = Infinity
+      for (const h of probeHeights) {
+        const origin = new THREE.Vector3(feet.x, feet.y + h, feet.z)
+        const hit = world.castRay(origin, dir, dist + WALK_RADIUS)
+        if (!hit) continue
+        if (Math.abs(hit.normal.y) >= slopeCos) continue // walkable, not a wall
+        if (hit.distance < nearest) {
+          nearest = hit.distance
+          wallNormal = hit.normal.clone()
+        }
+      }
+
+      if (debugWalk && wallProbeLog.current < 30) {
+        wallProbeLog.current++
+        console.log(
+          `[Walk] probe pass=${pass} reach=${(dist + WALK_RADIUS).toFixed(2)} ` +
+          `wall=${wallNormal ? `d=${nearest.toFixed(2)} ny=${wallNormal.y.toFixed(2)}` : 'none'}`,
+        )
+      }
+
+      if (!wallNormal) break
+
+      // Collision normals are not reliably oriented, so turn it against travel
+      // before projecting — otherwise the slide can shove you into the wall.
+      const n = wallNormal
       n.y = 0
       if (n.lengthSq() < 1e-8) break
       n.normalize()
-      // Remove the component heading into the surface.
+      if (wish.dot(n) > 0) n.negate()
       const into = wish.dot(n)
-      if (into < 0) wish.addScaledVector(n, -into)
-      else break
+      if (into >= 0) break
+      wish.addScaledVector(n, -into)
     }
     feet.x += wish.x
     feet.z += wish.z
@@ -1399,6 +1445,18 @@ function WalkCamera({
       velocityY.current -= WALK_GRAVITY * dt
       feet.y += velocityY.current * dt
       grounded.current = false
+    }
+
+    // Falling out of the world is recoverable rather than terminal. Collision
+    // has gaps, and without this the only way back is toggling noclip.
+    if (feet.y < floorLimit.current && lastGrounded.current) {
+      feet.copy(lastGrounded.current)
+      velocityY.current = 0
+      grounded.current = true
+      if (debugWalk) console.log('[Walk] fell out of the world — restored last footing')
+    } else if (grounded.current) {
+      if (!lastGrounded.current) lastGrounded.current = new THREE.Vector3()
+      lastGrounded.current.copy(feet)
     }
 
     camera.position.set(feet.x, feet.y + t.walkEyeHeight, feet.z)
@@ -2046,6 +2104,13 @@ export default function ZoneViewer({
 
   useEffect(() => {
     return () => { collisionWorld?.dispose() }
+  }, [collisionWorld])
+
+  // ?walkdebug=1 exposes the collision world so harnesses can probe it directly,
+  // rather than trying to steer the player into a wall by luck.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('walkdebug') !== '1') return
+    ;(window as unknown as { __collision?: CollisionWorld | null }).__collision = collisionWorld
   }, [collisionWorld])
 
   const { center, size, farPlane } = useMemo(() => {

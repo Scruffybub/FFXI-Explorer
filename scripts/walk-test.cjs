@@ -107,7 +107,8 @@ app.whenReady().then(async () => {
   for (const l of logs.filter(l => /\[Collision\]|\[Walk\] spawn/.test(l))) {
     console.log('LOG: ' + l)
   }
-  for (const l of walkLogs.slice(-10)) console.log('TAIL: ' + l)
+  for (const l of walkLogs.slice(-14)) console.log('TAIL: ' + l)
+  for (const l of logs.filter(l => /probe|fell out/.test(l)).slice(0, 12)) console.log('PROBE: ' + l)
 
   app.exit(0)
 })

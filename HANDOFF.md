@@ -291,9 +291,26 @@ cost a round of false debugging. Verified in Chateau d'Oraguille: spawns at
 y=11, walks off a ledge, lands at y=1.50 with `grounded=true`, and moves 1.56
 units per 0.5s against a configured 3.0/sec.
 
-Not yet done: no head/ceiling collision, no jump (deliberately out of scope), and
-no recovery if you fall through a hole in the collision — noclip is the escape
-hatch.
+**The wall probe must not give up on a floor-like hit.** The first version cast
+one ray at feet+0.7 and `break`-ed out entirely when the hit looked like floor.
+On rocky ground that ray hits the walkable slope rising ahead, so the wall behind
+it was never tested — you walked through walls and then fell, because inside the
+rock there is no floor under you. Measured in South Gustaberg: every direction
+from the zone centre returns `|normal.y|` between 0.64 and 0.88, all above
+cos(50°) = 0.643, so *every* probe bailed out.
+
+Now it probes three heights and a floor-like hit disqualifies only that ray.
+Against 200 steep faces, the old rule detected 172, the new one 198 — and that
+understates it, because the synthetic test approaches head-on through clear air
+and cannot reproduce the ground-in-the-way case that actually broke it.
+
+Collision normals are not reliably oriented, so the slide turns the normal
+against travel before projecting. Skipping that can push you *into* the wall.
+
+Falling out of the world now restores your last grounded position rather than
+dropping forever.
+
+Not yet done: no head/ceiling collision and no jump (deliberately out of scope).
 
 ### Query-param overrides were number-only
 

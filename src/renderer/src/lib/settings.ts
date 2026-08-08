@@ -275,10 +275,10 @@ export const DEFAULT_SCENE: SceneSettings = {
   // 2.0 is about the asked-for 6ft eye height. Adjust here if that reads wrong
   // in a zone you know well — it is one constant, not a calibration exercise.
   walkEyeHeight: 2.0,
-  // The fly camera's slowest speed is 0.05 units per *frame*, which is 3.0
-  // units/sec at 60fps. Walking is time-based instead, so this matches that
-  // pace without being hostage to the refresh rate.
-  walkSpeed: 3.0,
+  // Tuned by eye against the game. Started at 3.0 (the fly camera's slowest
+  // speed, 0.05 per *frame* at 60fps) and raised to 5.0, which reads as FFXI's
+  // pace. Walking is time-based, so this does not drift with refresh rate.
+  walkSpeed: 5.0,
   walkRunMultiplier: 2.5,
   walkStepHeight: 0.6,
   walkSlopeLimit: 50,
