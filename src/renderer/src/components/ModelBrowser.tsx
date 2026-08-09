@@ -1,11 +1,11 @@
-import { useState, useMemo, useCallback, useEffect, type ReactNode } from 'react'
+import { useState, useMemo, useCallback, type ReactNode } from 'react'
 import { parseDatFile, hasAnimations, type ParsedDatFile } from '../lib/ffxi-dat'
 import { MODELS, MODEL_CATEGORIES, searchModels, type ModelEntry } from '../lib/modelList'
 import { ModelViewer, type ModelStats } from './ModelViewer'
 import ModelPanel from './ModelPanel'
 import { DEFAULT_MODEL, type ModelSettings } from '../lib/settings'
 import CharacterBuilder from './CharacterBuilder'
-import { composeCharacter, RACES, type CharacterSpec, type ComposedCharacter } from '../lib/characterModel'
+import { RACES, type CharacterSpec, type ComposedCharacter } from '../lib/characterModel'
 
 /**
  * The model viewer half of the app: its own sidebar and its own viewport,
@@ -21,18 +21,17 @@ type LoadState =
   | { status: 'ready'; model: ParsedDatFile; animated: boolean }
   | { status: 'error'; message: string }
 
-type CharState =
-  | { status: 'idle' }
-  | { status: 'loading' }
-  | { status: 'ready'; model: ComposedCharacter }
-  | { status: 'error'; message: string }
-
 export default function ModelBrowser({
-  ffxiPath, viewSwitch, uiHidden,
+  ffxiPath, viewSwitch, uiHidden, spec, onSpec, character, clipIndex, onClipIndex,
 }: {
   ffxiPath: string
   viewSwitch: ReactNode
   uiHidden: boolean
+  spec: CharacterSpec
+  onSpec: (updater: (s: CharacterSpec) => CharacterSpec) => void
+  character: ComposedCharacter | null
+  clipIndex: number | null
+  onClipIndex: (i: number | null) => void
 }) {
   const [search, setSearch] = useState('')
   const [category, setCategory] = useState<string | null>(null)
@@ -41,25 +40,9 @@ export default function ModelBrowser({
   const [stats, setStats] = useState<ModelStats | null>(null)
   const [playing, setPlaying] = useState(true)
   const [speed, setSpeed] = useState(1)
-  const [clipIndex, setClipIndex] = useState<number | null>(null)
   const [settings, setSettings] = useState<ModelSettings>(DEFAULT_MODEL)
 
   const [mode, setMode] = useState<'browse' | 'character'>('browse')
-  const [spec, setSpec] = useState<CharacterSpec>({ race: 1, face: 0, equipment: {}, animation: null })
-  const [charLoad, setCharLoad] = useState<CharState>({ status: 'idle' })
-
-  // Recompose whenever the outfit changes. `cancelled` guards against a slow
-  // load landing after a newer one — flipping through races otherwise leaves
-  // you looking at whichever request happened to finish last.
-  useEffect(() => {
-    if (mode !== 'character') return
-    let cancelled = false
-    setCharLoad({ status: 'loading' })
-    composeCharacter(ffxiPath, spec)
-      .then(model => { if (!cancelled) setCharLoad({ status: 'ready', model }) })
-      .catch(err => { if (!cancelled) setCharLoad({ status: 'error', message: String(err) }) })
-    return () => { cancelled = true }
-  }, [mode, spec, ffxiPath])
 
   const filtered = useMemo(
     () => searchModels(search, category).slice(0, 400),
@@ -92,14 +75,6 @@ export default function ModelBrowser({
 
   const onStats = useCallback((s: ModelStats | null) => setStats(s), [])
 
-  // An animation set can span ten files and yield dozens of clips, so default to
-  // the first rather than "all together". Composing them is right inside a
-  // single NPC DAT, where the blocks are an upper/lower body split of one pose;
-  // it is meaningless across a set of separate animations.
-  useEffect(() => {
-    setClipIndex(spec.animation === null ? null : 0)
-  }, [spec.animation])
-
   // Keyed on the outfit so the viewer rebuilds when a piece changes, but not
   // when a lighting slider moves.
   const charKey = useMemo(
@@ -107,7 +82,7 @@ export default function ModelBrowser({
     [spec],
   )
   const activeModel = mode === 'character'
-    ? (charLoad.status === 'ready' ? charLoad.model : null)
+    ? (character)
     : (load.status === 'ready' ? load.model : null)
 
   return (
@@ -155,8 +130,8 @@ export default function ModelBrowser({
           <div className="builder-scroll">
             <CharacterBuilder
               spec={spec}
-              onChange={patch => setSpec(s => ({ ...s, ...patch }))}
-              onClear={() => setSpec(s => ({ ...s, equipment: {} }))}
+              onChange={patch => onSpec(s => ({ ...s, ...patch }))}
+              onClear={() => onSpec(s => ({ ...s, equipment: {} }))}
             />
           </div>
         )}
@@ -189,30 +164,30 @@ export default function ModelBrowser({
       <main className="viewport">
         {mode === 'character' ? (
           <>
-            {charLoad.status === 'loading' && (
+            {character === null && (
               <div className="placeholder">
                 <div className="spinner" />
                 <p>Assembling character...</p>
               </div>
             )}
-            {charLoad.status === 'error' && (
+            {false && (
               <div className="placeholder">
                 <h2>Could not build the character</h2>
-                <p className="error-text">{charLoad.message}</p>
+                <p className="error-text">{''}</p>
               </div>
             )}
-            {charLoad.status === 'ready' && charLoad.model.meshes.length === 0 && (
+            {character !== null && character.meshes.length === 0 && (
               <div className="placeholder">
                 <h2>Nothing to show</h2>
                 <p>Pick a face or an equipment piece to start building.</p>
               </div>
             )}
-            {charLoad.status === 'ready' && charLoad.model.meshes.length > 0 && (
+            {character !== null && character.meshes.length > 0 && (
               <>
                 <ModelViewer
                   // Rebuild only when the outfit changes, not on every setting.
                   key={charKey}
-                  model={charLoad.model}
+                  model={character}
                   settings={settings}
                   onStats={onStats}
                   playing={playing}
@@ -227,10 +202,10 @@ export default function ModelBrowser({
                     {stats && (
                       <span>
                         {stats.triangles.toLocaleString()} triangles · {stats.meshes} meshes ·{' '}
-                        {charLoad.model.loaded.length} piece
-                        {charLoad.model.loaded.length === 1 ? '' : 's'}
-                        {charLoad.model.failed.length > 0
-                          ? ` · failed: ${charLoad.model.failed.map(f => f.label).join(', ')}`
+                        {character.loaded.length} piece
+                        {character.loaded.length === 1 ? '' : 's'}
+                        {character.failed.length > 0
+                          ? ` · failed: ${character.failed.map(f => f.label).join(', ')}`
                           : ''}
                       </span>
                     )}
@@ -297,7 +272,7 @@ export default function ModelBrowser({
           onChange={patch => setSettings(s => ({ ...s, ...patch }))}
           animations={activeModel?.animations ?? []}
           clipIndex={clipIndex}
-          onClipChange={setClipIndex}
+          onClipChange={onClipIndex}
           playing={playing}
           onPlayingChange={setPlaying}
           speed={speed}

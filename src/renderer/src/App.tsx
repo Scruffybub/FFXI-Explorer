@@ -4,6 +4,7 @@ import { parseZoneFile, parseTexturesFromDat, type ParsedZone } from './lib/ffxi
 import ZoneViewer from './components/ZoneViewer'
 import ControlPanel from './components/ControlPanel'
 import ModelBrowser from './components/ModelBrowser'
+import { composeCharacter, type CharacterSpec, type ComposedCharacter } from './lib/characterModel'
 import {
   DEFAULT_LIGHTING, DEFAULT_POST, DEFAULT_SCENE, DEFAULT_POINT_LIGHTS,
   NEW_POINT_LIGHT, PRESETS,
@@ -39,6 +40,30 @@ export default function App() {
 
   /** Which half of the app is showing. The two views share only the install path. */
   const [view, setView] = useState<'zones' | 'models'>('zones')
+
+  // The character lives here, not in the model browser, so the one you build is
+  // the one you walk around as in the zone viewer.
+  // Dressed by default. An undressed character is just a floating head, since
+  // the face model carries the head and hair and nothing else.
+  const [charSpec, setCharSpec] = useState<CharacterSpec>({
+    race: 1, face: 0, animation: null,
+    equipment: { 3: 0, 4: 0, 5: 0, 6: 0 },
+  })
+  const [character, setCharacter] = useState<ComposedCharacter | null>(null)
+  const [charClip, setCharClip] = useState<number | null>(null)
+
+  useEffect(() => {
+    if (!ffxiPath) return
+    let cancelled = false
+    composeCharacter(ffxiPath, charSpec)
+      .then(c => { if (!cancelled) setCharacter(c) })
+      .catch(() => { if (!cancelled) setCharacter(null) })
+    return () => { cancelled = true }
+  }, [ffxiPath, charSpec])
+
+  useEffect(() => {
+    setCharClip(charSpec.animation === null ? null : 0)
+  }, [charSpec.animation])
 
   const [uiHidden, setUiHidden] = useState(false)
   const [fullscreen, setFullscreen] = useState(false)
@@ -325,7 +350,16 @@ export default function App() {
   if (view === 'models') {
     return (
       <div className={`app ${uiHidden ? 'ui-hidden' : ''}`}>
-        <ModelBrowser ffxiPath={ffxiPath} viewSwitch={viewSwitch} uiHidden={uiHidden} />
+        <ModelBrowser
+          ffxiPath={ffxiPath}
+          viewSwitch={viewSwitch}
+          uiHidden={uiHidden}
+          spec={charSpec}
+          onSpec={setCharSpec}
+          character={character}
+          clipIndex={charClip}
+          onClipIndex={setCharClip}
+        />
       </div>
     )
   }
@@ -394,6 +428,8 @@ export default function App() {
             onPlaceLight={placeLight}
             inspecting={inspecting}
             onInspectResult={setSurfaceInfo}
+            character={character}
+            characterClip={charClip}
           />
         )}
 

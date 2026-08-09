@@ -1,4 +1,4 @@
-import { useMemo, useRef, useEffect } from 'react'
+import { useMemo, useRef, useEffect, useState } from 'react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
 import {
@@ -6,7 +6,9 @@ import {
   DepthOfField, Autofocus,
 } from '@react-three/postprocessing'
 import * as THREE from 'three'
-import type { ParsedZone } from '../lib/ffxi-dat'
+import type { ParsedZone, ParsedDatFile } from '../lib/ffxi-dat'
+import { buildModel, type BuiltModel } from '../lib/modelBuild'
+import { invertRigidMatrix4, poseSkeleton, skinMeshes } from '../lib/skinning'
 import { CollisionWorld } from '../lib/CollisionWorld'
 import type {
   LightingSettings, PointLightSettings, PostSettings, SceneSettings, SurfaceInfo, ToneMappingMode,
@@ -24,6 +26,9 @@ interface ZoneViewerProps {
   inspecting?: boolean
   onInspectResult?: (info: SurfaceInfo) => void
   onFlySpeedChange?: (speed: number) => void
+  /** Player character to walk around as, if one has been built. */
+  character?: ParsedDatFile | null
+  characterClip?: number | null
 }
 
 const TONE_MAPPING: Record<ToneMappingMode, THREE.ToneMapping> = {
@@ -1188,6 +1193,24 @@ function FlyCamera({
   return null
 }
 
+/**
+ * Where the walking body is right now, shared between the controller and the
+ * avatar that draws it.
+ *
+ * A ref rather than state: this changes every frame, and re-rendering React at
+ * 60fps to move a character would be absurd. The controller writes, the avatar
+ * reads, and three.js does the rest.
+ */
+export interface WalkBodyState {
+  /** Feet position in world space. */
+  x: number
+  y: number
+  z: number
+  /** Facing, radians, same convention as the camera's yaw. */
+  yaw: number
+  moving: boolean
+}
+
 /** Body radius for wall collision. Not exposed — it is a shape, not a taste. */
 const WALK_RADIUS = 0.5
 /** Downward acceleration, world units per second squared. */
@@ -1208,12 +1231,13 @@ const WALK_GRAVITY = 20
  * to track down.
  */
 function WalkCamera({
-  world, center, size, scene,
+  world, center, size, scene, body,
 }: {
   world: CollisionWorld | null
   center: THREE.Vector3
   size: number
   scene: SceneSettings
+  body?: React.RefObject<WalkBodyState>
 }) {
   const { camera, gl } = useThree()
   const move = useRef({ forward: false, backward: false, left: false, right: false, run: false, ascend: false })
@@ -1223,6 +1247,8 @@ function WalkCamera({
   const pitch = useRef(0)
   const velocityY = useRef(0)
   const grounded = useRef(false)
+  /** Authoritative feet position. The camera is derived from this, not vice versa. */
+  const feetRef = useRef(new THREE.Vector3())
   const debugAccum = useRef(0)
   const wallProbeLog = useRef(0)
   /** Last place we were solidly on the ground, for fall recovery. */
@@ -1256,6 +1282,7 @@ function WalkCamera({
         )
       }
       camera.position.set(center.x, eyeY, center.z)
+      feetRef.current.set(center.x, eyeY - tuning.current.walkEyeHeight, center.z)
       // A generous margin below the collision's own lowest point: anything
       // further down is unambiguously outside the world.
       if (world) {
@@ -1362,14 +1389,20 @@ function WalkCamera({
       if (move.current.ascend) free.y += 1
       }
       if (free.lengthSq() > 0) free.normalize().multiplyScalar(speed * dt)
-      camera.position.add(free)
+      feetRef.current.add(free)
+      camera.position.copy(feetRef.current).setY(feetRef.current.y + t.walkEyeHeight)
       velocityY.current = 0
       return
     }
 
-    // Feet, derived from the eye. The body is a vertical segment from here up.
-    const feet = camera.position.clone()
-    feet.y -= t.walkEyeHeight
+    // The body owns its position; the camera is an output, never the source.
+    //
+    // This used to read `camera.position` back each frame, which is a stable
+    // loop only while the camera sits exactly on the head. In third person the
+    // camera is metres behind the body, so the body teleported to where the
+    // camera was, the camera moved back again, and the pair marched off across
+    // the zone at the camera distance per frame.
+    const feet = feetRef.current.clone()
 
     // ── Horizontal move, sliding along walls ──
     // Two passes: the first stops the move at a wall, the second lets the
@@ -1513,7 +1546,43 @@ function WalkCamera({
       lastGrounded.current.copy(feet)
     }
 
-    camera.position.set(feet.x, feet.y + t.walkEyeHeight, feet.z)
+    feetRef.current.copy(feet)
+
+    // Publish the body before moving the camera, so the avatar and the camera
+    // agree on where "here" is within a single frame.
+    if (body) {
+      body.current.x = feet.x
+      body.current.y = feet.y
+      body.current.z = feet.z
+      body.current.moving = wish.lengthSq() > 1e-10
+      // The avatar faces where it is going, not where the camera looks, so
+      // turning the camera in third person orbits rather than spinning the body.
+      if (body.current.moving) {
+        body.current.yaw = Math.atan2(wish.x, wish.z)
+      } else if (!t.walkThirdPerson) {
+        body.current.yaw = yaw.current
+      }
+    }
+
+    if (t.walkThirdPerson) {
+      // Orbit the head: yaw and pitch aim the camera at the body from behind
+      // rather than out of its eyes.
+      const pivotY = feet.y + t.walkEyeHeight
+      const cp = Math.cos(pitch.current)
+      const dir = new THREE.Vector3(
+        -Math.sin(yaw.current) * cp,
+        Math.sin(pitch.current),
+        -Math.cos(yaw.current) * cp,
+      )
+      camera.position.set(
+        feet.x - dir.x * t.walkCameraDistance,
+        pivotY - dir.y * t.walkCameraDistance + t.walkCameraHeight,
+        feet.z - dir.z * t.walkCameraDistance,
+      )
+      camera.lookAt(feet.x, pivotY, feet.z)
+    } else {
+      camera.position.set(feet.x, feet.y + t.walkEyeHeight, feet.z)
+    }
 
     // ?walkdebug=1 reports the body state once a second. There is no other way
     // to see what the controller is doing from a headless run.
@@ -1531,6 +1600,98 @@ function WalkCamera({
   })
 
   return null
+}
+
+/**
+ * The player character, drawn at the walking body's position.
+ *
+ * Reads the body ref every frame rather than taking props, so moving does not
+ * re-render React. Skinning is the same CPU path the model viewer uses — see
+ * `lib/skinning.ts` — which is why the character looks identical in both.
+ *
+ * Model space is metres and the zone is thousands of units across, but they
+ * share a scale: a 2-unit-tall character is right for a 2-unit eye height.
+ */
+function Avatar({
+  character, body, playing, speed, clipIndex,
+}: {
+  character: ParsedDatFile
+  body: React.RefObject<WalkBodyState>
+  playing: boolean
+  speed: number
+  clipIndex: number | null
+}) {
+  const group = useRef<THREE.Group>(null)
+  const time = useRef(0)
+  const [built, setBuilt] = useState<BuiltModel | null>(null)
+
+  // Build and dispose in one effect — the StrictMode trap documented in
+  // ModelViewer applies here identically.
+  useEffect(() => {
+    const next = buildModel(character)
+    setBuilt(next)
+    return () => {
+      for (const mesh of next.meshes) {
+        mesh.geometry.dispose()
+        const mat = mesh.material as THREE.MeshStandardMaterial
+        mat.map?.dispose()
+        mat.dispose()
+      }
+    }
+  }, [character])
+
+  const inverseBind = useMemo(
+    () => character.skeleton?.matrices.map(invertRigidMatrix4) ?? null,
+    [character.skeleton],
+  )
+  const clips = useMemo(
+    () => (clipIndex === null
+      ? character.animations
+      : character.animations.slice(clipIndex, clipIndex + 1)),
+    [character.animations, clipIndex],
+  )
+
+  useFrame((_, delta) => {
+    if (!group.current) return
+    const b = body.current
+
+    group.current.position.set(b.x, b.y, b.z)
+    // The model is authored facing -Z and the meshes sit under a PI flip, so
+    // the body's yaw goes on straight.
+    group.current.rotation.y = b.yaw
+
+    if (!built || !character.skeleton || !inverseBind || clips.length === 0) return
+    // Freeze the animation when standing still: without a proper idle clip,
+    // a walk cycle playing on the spot looks worse than a static pose.
+    if (playing && b.moving) time.current += delta * speed
+
+    const pose = poseSkeleton(character.skeleton, clips, inverseBind, time.current)
+    skinMeshes(built.skinTargets, pose)
+    for (const mesh of built.meshes) {
+      mesh.geometry.getAttribute('position').needsUpdate = true
+    }
+  })
+
+  if (!built) return null
+
+  return (
+    <group ref={group}>
+      {/* Same two-group arrangement as the model viewer: centre horizontally,
+          then flip. The vertical offset puts the model's feet on the ground
+          rather than its centre. */}
+      <group rotation={[Math.PI, 0, 0]}>
+        {/* Feet on the ground, not the centre. Under the PI flip a model-space
+            Y becomes world -Y, so the lowest world point sits at zero when the
+            offset is -bounds.max.y. Using the bounding-sphere radius instead
+            floated the character, since that radius is a diagonal. */}
+        <group position={[-built.center.x, -built.bounds.max.y, -built.center.z]}>
+          {built.meshes.map((mesh, i) => (
+            <primitive key={i} object={mesh} />
+          ))}
+        </group>
+      </group>
+    </group>
+  )
 }
 
 /** Post-processing stack. Rebuilt when the set of enabled effects changes. */
@@ -1614,7 +1775,10 @@ export default function ZoneViewer({
   zoneData, lighting, post, scene, pointLights,
   selectedLightId = null, placingLight = false, onPlaceLight,
   inspecting = false, onInspectResult, onFlySpeedChange,
+  character = null, characterClip = null,
 }: ZoneViewerProps) {
+  // Where the walking body is. Written by WalkCamera, read by Avatar.
+  const walkBody = useRef<WalkBodyState>({ x: 0, y: 0, z: 0, yaw: 0, moving: false })
   const zoneUniforms = useRef<ZoneUniforms>({
     fogHeightBase: { value: 0 },
     fogHeightRange: { value: 100 },
@@ -2290,7 +2454,7 @@ export default function ZoneViewer({
       ) : scene.cameraMode === 'orbit' ? (
         <SmartOrbitControls size={size} />
       ) : scene.cameraMode === 'walk' ? (
-        <WalkCamera world={collisionWorld} center={center} size={size} scene={scene} />
+        <WalkCamera world={collisionWorld} center={center} size={size} scene={scene} body={walkBody} />
       ) : (
         <FlyCamera center={center} size={size} onSpeedChange={onFlySpeedChange} />
       )}
@@ -2311,6 +2475,16 @@ export default function ZoneViewer({
           <primitive key={i} object={mesh} />
         ))}
       </group>
+
+      {character && scene.cameraMode === 'walk' && (
+        <Avatar
+          character={character}
+          body={walkBody}
+          playing
+          speed={1}
+          clipIndex={characterClip}
+        />
+      )}
 
       {/* Already world space — deliberately outside the rotated group. */}
       {scene.showCollision && <CollisionOverlay world={collisionWorld} />}

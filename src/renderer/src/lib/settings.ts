@@ -192,6 +192,12 @@ export interface SceneSettings {
   walkSlopeLimit: number
   /** Detach from the ground and move freely, ignoring collision. */
   walkNoclip: boolean
+  /** Show the character from behind instead of through its eyes. */
+  walkThirdPerson: boolean
+  /** How far behind the character the third-person camera sits. */
+  walkCameraDistance: number
+  /** How far above the head it sits. */
+  walkCameraHeight: number
   /** How much of FFXI's baked vertex colour tints water surfaces. */
   waterTint: number
   wireframe: boolean
@@ -325,6 +331,9 @@ export const DEFAULT_SCENE: SceneSettings = {
   walkStepHeight: 0.6,
   walkSlopeLimit: 50,
   walkNoclip: false,
+  walkThirdPerson: false,
+  walkCameraDistance: 4.5,
+  walkCameraHeight: 0.8,
 }
 
 /** Presets that show off what the lighting controls can do. */

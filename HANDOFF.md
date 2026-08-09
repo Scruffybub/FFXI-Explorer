@@ -325,6 +325,30 @@ against travel before projecting. Skipping that can push you *into* the wall.
 Falling out of the world now restores your last grounded position rather than
 dropping forever.
 
+**The body owns its position; the camera is an output.** `feetRef` is the source
+of truth. The controller originally read `camera.position` back each frame and
+subtracted eye height — a stable loop only while the camera sits exactly on the
+head. Third person puts it metres behind, so the body teleported to where the
+camera had been, the camera moved back again, and the pair marched across the
+zone at the camera distance per frame: measured 370 units per half-second with
+no input at all, falling the whole way. Never derive the body from the camera.
+
+Third person orbits the head using the same yaw/pitch, and the avatar faces its
+direction of travel rather than the camera, so turning the view swings the
+camera around a character that keeps walking where it was walking.
+
+`Avatar` draws whatever character the model viewer built — `charSpec` lives in
+`App` precisely so both halves share one character. Its feet sit on the ground
+via `-bounds.max.y`, not the bounding-sphere radius: that radius is a diagonal
+and floats the model. The animation only advances while moving, because no idle
+clip has been identified yet and a walk cycle playing on the spot looks worse
+than a held pose.
+
+**No animation in `animation-paths.json` is named "walk" or "idle".** The
+categories label *sets*, not individual motions, and the base movement clips sit
+unlabelled inside the Battle/Motion sets. Identifying them needs someone to look
+at them; a script cannot tell a walk cycle from a bow.
+
 Not yet done: no head/ceiling collision and no jump (deliberately out of scope).
 
 ### Query-param overrides were number-only

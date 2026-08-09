@@ -184,6 +184,32 @@ export default function ControlPanel({
               onChange={v => onScene({ walkNoclip: v })}
               hint="Detach from the ground and move freely. Space rises."
             />
+            <Toggle
+              label="Third person"
+              checked={scene.walkThirdPerson}
+              onChange={v => onScene({ walkThirdPerson: v })}
+              hint="Watch your character from behind. Build it in Models → Character."
+            />
+            {scene.walkThirdPerson && (
+              <>
+                <Slider
+                  label="Camera distance" value={scene.walkCameraDistance}
+                  min={1} max={20} step={0.5}
+                  onChange={v => onScene({ walkCameraDistance: v })}
+                />
+                <Slider
+                  label="Camera height" value={scene.walkCameraHeight}
+                  min={-2} max={5} step={0.1}
+                  onChange={v => onScene({ walkCameraHeight: v })}
+                />
+                <p className="note small">
+                  The character is whatever you built in Models → Character. It
+                  only animates while moving — there is no idle clip identified
+                  yet, and a walk cycle playing on the spot looks worse than a
+                  held pose.
+                </p>
+              </>
+            )}
           </>
         )}
       </div>

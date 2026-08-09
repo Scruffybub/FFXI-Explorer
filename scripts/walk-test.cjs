@@ -66,7 +66,7 @@ app.whenReady().then(async () => {
   win.webContents.on('console-message', (_e, _l, msg) => logs.push(msg))
 
   await win.loadFile(join(__dirname, '../out/renderer/index.html'), {
-    search: `zone=${zoneId}&preset=0&scene_cameraMode=walk&walkdebug=1`,
+    search: `zone=${zoneId}&preset=0&scene_cameraMode=walk&walkdebug=1${process.env.EXTRA_QUERY || ''}`,
   })
   await new Promise(r => setTimeout(r, 15000))
 
