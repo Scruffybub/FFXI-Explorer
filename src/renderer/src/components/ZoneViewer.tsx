@@ -216,6 +216,45 @@ const DISABLE_WATER_SHADER =
   typeof window !== 'undefined' &&
   new URLSearchParams(window.location.search).has('nowater')
 
+/**
+ * Diagnostic: dump every unreferenced prefab with its full texture string,
+ * material index, whether that material resolves to a real texture, and its
+ * bounding size.
+ *
+ * This is the weather investigation's measuring instrument. FFXI parks its
+ * weather domes and effect geometry in the file with no MZB instance record,
+ * so the unreferenced set is where all of it lives. The texture string packs
+ * two fields and the raw spacing is preserved here on purpose — the whole
+ * lead is that the first field reads as a weather *state* and the second as
+ * an *element* ("fogd  clod_a01", "thdr  kumori").
+ *
+ * `texOk` matters as much as the name: the first weather attempt drew domes
+ * with the fallback texture and concluded the geometry was wrong. Whether the
+ * material index resolves is the difference between a parser problem and a
+ * presentation problem, and they need different fixes.
+ */
+const CENSUS =
+  typeof window !== 'undefined' &&
+  new URLSearchParams(window.location.search).has('census')
+
+/**
+ * Diagnostic: draw *only* prefabs whose texture string contains this substring,
+ * and nothing else — terrain included.
+ *
+ * The old `showWeather` toggle drew every weather state at once on top of the
+ * zone, which is why it looked like nonsense and was removed. Isolating one
+ * name is the opposite approach and the only way to tell what a given prefab
+ * actually is: `pick=niji` in Misareaux Coast draws the rainbow alone against
+ * an empty scene.
+ *
+ * When set, `isSkyWeatherMesh` is bypassed entirely, so this can look at the
+ * geometry that filter normally hides.
+ */
+const PICK =
+  typeof window !== 'undefined'
+    ? (new URLSearchParams(window.location.search).get('pick') ?? '').toLowerCase()
+    : ''
+
 const hasCameraOverride =
   typeof window !== 'undefined' &&
   (new URLSearchParams(window.location.search).has('yaw') ||
@@ -1103,13 +1142,20 @@ function CollisionOverlay({ world }: { world: CollisionWorld | null }) {
   )
 }
 
-function SmartOrbitControls({ size }: { size: number }) {
+function SmartOrbitControls({ size, lookAt }: { size: number; lookAt?: THREE.Vector3 }) {
   const { camera } = useThree()
   const target = useMemo(() => {
+    // Isolation mode aims at the picked geometry directly. The usual guess —
+    // project forward along the camera's own facing — assumes the camera was
+    // already pointed at something, which is only true for the default view.
+    if (lookAt) {
+      camera.lookAt(lookAt)
+      return lookAt.clone()
+    }
     const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion)
     const dist = Math.min(size * 0.5, 200)
     return camera.position.clone().add(dir.multiplyScalar(dist))
-  }, [camera, size])
+  }, [camera, size, lookAt])
   return <OrbitControls target={target} maxDistance={size * 5} makeDefault />
 }
 
@@ -2002,7 +2048,11 @@ export default function ZoneViewer({
 
     for (let prefabIdx = 0; prefabIdx < zoneData.prefabs.length; prefabIdx++) {
       const prefab = zoneData.prefabs[prefabIdx]
-      if (isSkyWeatherMesh(prefab)) continue
+      if (PICK) {
+        // Isolation mode: the pick replaces the sky/weather filter rather than
+        // stacking with it, so hidden geometry can be examined.
+        if (!(prefab.textureName ?? '').toLowerCase().includes(PICK)) continue
+      } else if (isSkyWeatherMesh(prefab)) continue
 
       const isWater = isWaterPrefab(prefab, prefabIdx) && !DISABLE_WATER_SHADER
 
@@ -2241,16 +2291,51 @@ export default function ZoneViewer({
     if (degenerateNormals > 0) {
       console.log(`[ZoneViewer] replaced ${degenerateNormals} degenerate normals`)
     }
-    {
-      // Are there prefabs the instance list never references? Noesis needs a
-      // -ff11renderunref flag to show FFXI water, which implies water planes
-      // may exist in the file without being instanced.
+    if (CENSUS) {
+      // Every unreferenced prefab, in full. This is deliberately not filtered
+      // by isSkyWeatherMesh: the point is to see what that filter catches and
+      // what it misses, so it has to report the skipped ones too.
       const referenced = new Set(zoneData.instances.map(i => i.meshIndex))
-      const orphans = zoneData.prefabs
-        .map((pf, i) => ({ i, name: pf.textureName ?? '', blend: pf.blending, verts: pf.vertices.length / 3 }))
+      const census = zoneData.prefabs
+        .map((pf, i) => {
+          let minX = Infinity, minY = Infinity, minZ = Infinity
+          let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity
+          for (let v = 0; v < pf.vertices.length; v += 3) {
+            const x = pf.vertices[v], y = pf.vertices[v + 1], z = pf.vertices[v + 2]
+            if (x < minX) minX = x; if (x > maxX) maxX = x
+            if (y < minY) minY = y; if (y > maxY) maxY = y
+            if (z < minZ) minZ = z; if (z > maxZ) maxZ = z
+          }
+          const tex = zoneData.textures[pf.materialIndex]
+          return {
+            i,
+            // Raw, with its internal spacing intact — the two-field split is
+            // the entire lead and collapsing whitespace would destroy it.
+            name: pf.textureName ?? '',
+            mat: pf.materialIndex,
+            texOk: !!tex,
+            tw: tex ? tex.width : 0,
+            th: tex ? tex.height : 0,
+            blend: pf.blending,
+            w: Math.round(maxX - minX),
+            h: Math.round(maxY - minY),
+            d: Math.round(maxZ - minZ),
+            // Where it is parked, in raw prefab space. Two prefabs sharing a
+            // centre are the same effect in two states; a dome centred on the
+            // zone origin is scenery, one parked off to the side is stored.
+            cx: Math.round((minX + maxX) / 2),
+            cy: Math.round((minY + maxY) / 2),
+            cz: Math.round((minZ + maxZ) / 2),
+            verts: pf.vertices.length / 3,
+            skip: isSkyWeatherMesh(pf),
+          }
+        })
         .filter(o => !referenced.has(o.i))
-      console.log( +
-        JSON.stringify(orphans.slice(0, 20)))
+        .sort((a, b) => (b.w + b.d) - (a.w + a.d))
+      console.log(
+        `[CENSUS] ${census.length} unreferenced of ${zoneData.prefabs.length} prefabs: ` +
+        JSON.stringify(census)
+      )
     }
     // Noesis needs a -ff11renderunref flag to show FFXI water, which suggests
     // water planes may sit in the file without the instance list referencing
@@ -2383,12 +2468,33 @@ export default function ZoneViewer({
     ;(window as unknown as { __collision?: CollisionWorld | null }).__collision = collisionWorld
   }, [collisionWorld])
 
-  const { center, size, farPlane } = useMemo(() => {
+  const { center, size, camPos, farPlane } = useMemo(() => {
     const bbox = new THREE.Box3()
-    for (const inst of zoneData.instances) {
-      const prefab = zoneData.prefabs[inst.meshIndex]
-      if (!prefab) continue
-      bbox.expandByPoint(new THREE.Vector3(inst.transform[12], -inst.transform[13], -inst.transform[14]))
+    if (PICK) {
+      // Isolation mode frames the picked geometry instead of the zone. The
+      // bounds are otherwise built from the instance list, and everything worth
+      // picking — every weather dome and effect — is unreferenced, so the
+      // camera framed the whole empty zone and the subject sat off-screen.
+      // Prefab vertices are already in world space, under the same Y/Z flip the
+      // zone group applies.
+      for (const p of zoneData.prefabs) {
+        if (!(p.textureName ?? '').toLowerCase().includes(PICK)) continue
+        for (let v = 0; v + 2 < p.vertices.length; v += 3) {
+          bbox.expandByPoint(new THREE.Vector3(p.vertices[v], -p.vertices[v + 1], -p.vertices[v + 2]))
+        }
+      }
+    }
+    if (PICK) {
+      console.log(`[PICK] "${PICK}" bounds ${bbox.isEmpty() ? 'EMPTY — falling back to zone' :
+        `min(${bbox.min.x.toFixed(1)},${bbox.min.y.toFixed(1)},${bbox.min.z.toFixed(1)}) ` +
+        `max(${bbox.max.x.toFixed(1)},${bbox.max.y.toFixed(1)},${bbox.max.z.toFixed(1)})`}`)
+    }
+    if (bbox.isEmpty()) {
+      for (const inst of zoneData.instances) {
+        const prefab = zoneData.prefabs[inst.meshIndex]
+        if (!prefab) continue
+        bbox.expandByPoint(new THREE.Vector3(inst.transform[12], -inst.transform[13], -inst.transform[14]))
+      }
     }
     const center = new THREE.Vector3()
     const sizeVec = new THREE.Vector3()
@@ -2400,7 +2506,32 @@ export default function ZoneViewer({
     zoneUniforms.current.fogHeightBase.value = center.y - verticalSize * 0.3
     zoneUniforms.current.fogHeightRange.value = verticalSize * 0.7
 
-    return { center, size: diagonalSize, farPlane: Math.max(10000, diagonalSize * 3) }
+    // Isolation mode looks down the *thinnest* axis. Most of this geometry is a
+    // flat card — the Misareaux rainbow measures 0 units across X — so the
+    // default view from +Z catches it exactly edge-on and renders a scene that
+    // looks empty but is not. Viewing along the degenerate axis is the only
+    // angle that shows a card at all.
+    let camPos: [number, number, number] = [
+      center.x, center.y + diagonalSize * 0.15, center.z + diagonalSize * 0.4,
+    ]
+    if (PICK) {
+      const dist = Math.max(diagonalSize * 0.9, 5)
+      // `pickaxis` overrides the thin-axis guess. A stack of rings reads as a
+      // flat annulus from above and as a funnel from the side, so which axis
+      // you look down decides what the thing appears to be.
+      const forced = typeof window !== 'undefined'
+        ? new URLSearchParams(window.location.search).get('pickaxis')
+        : null
+      const thin = Math.min(sizeVec.x, sizeVec.y, sizeVec.z)
+      const axis = forced ?? (thin === sizeVec.x ? 'x' : thin === sizeVec.z ? 'z' : 'y')
+      if (axis === 'x') camPos = [center.x + dist, center.y, center.z]
+      else if (axis === 'z') camPos = [center.x, center.y, center.z + dist]
+      else camPos = [center.x, center.y + dist, center.z]
+      console.log(`[PICK] camera ${camPos.map(n => n.toFixed(1)).join(',')} ` +
+        `looking at ${center.toArray().map(n => n.toFixed(1)).join(',')} size ${diagonalSize.toFixed(1)}`)
+    }
+
+    return { center, size: diagonalSize, camPos, farPlane: Math.max(10000, diagonalSize * 3) }
   }, [zoneData])
 
   useEffect(() => () => { disposeAll() }, [disposeAll])
@@ -2436,7 +2567,7 @@ export default function ZoneViewer({
 
   return (
     <Canvas
-      camera={{ position: [cx, cy + size * 0.15, cz + size * 0.4], fov: 60, near: 1, far: farPlane }}
+      camera={{ position: camPos, fov: 60, near: 1, far: farPlane }}
       // Depth of field reads the depth buffer, and postprocessing cannot
       // interpret a logarithmic one — every pixel comes back at the same
       // apparent depth, so the whole frame blurs no matter where you focus.
@@ -2504,7 +2635,7 @@ export default function ZoneViewer({
       {hasCameraOverride ? (
         <CameraOrientation />
       ) : scene.cameraMode === 'orbit' ? (
-        <SmartOrbitControls size={size} />
+        <SmartOrbitControls size={size} lookAt={PICK ? center : undefined} />
       ) : scene.cameraMode === 'walk' ? (
         <WalkCamera world={collisionWorld} center={center} size={size} scene={scene} body={walkBody} />
       ) : (

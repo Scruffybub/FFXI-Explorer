@@ -7,50 +7,94 @@ Written 2026-08-03, substantially revised 2026-08-08.
 
 ## 0. Start here — the next task
 
-**Investigate the weather domes as the route to working weather.**
+**Weather: the census is done and the geometry is identified. What remains is
+deciding how to present it.**
 
-This is Ryan's call and it is a good lead. Weather was investigated once, from
-the wrong end, and abandoned — see "Weather: the geometry is there, the presentation
-is not" in §3. That attempt only found small
-`effect`/`star`/`suny` prefabs that drew as a yellow-and-black checkered patch.
+Steps 1–3 of the old plan were carried out on 2026-08-09. The findings below
+replace the guesswork; read them before touching anything.
 
-Then, while removing stray domes from zones (§3, "Sky and weather meshes"), a
-sweep turned up a **second, larger population of weather geometry that the first
-investigation never saw** — real domes, spanning whole zones:
+### What the census established
 
-| Texture string | Size (w×h×d) | Reading |
-|---|---|---|
-| `fogd  clod_a01` | 241×31×240 | fog + cloud |
-| `dark  clod_b01` | 241×31×240 | dark + cloud |
-| `thdr  clod_a01` | 241×31×240 | thunder + cloud |
-| `thdr  kumori` | 241×28×240 | thunder + 曇り (cloudy) |
-| `ukfi  strm` / `uksy  strm` | 123×48×59 | storm |
-| `squl  tenkyu01` | 80×80×80 | 天球 — celestial sphere; a perfect cube bbox, so a sphere |
-| `suny  suny_a01` | 241×31×240 | sunny |
-| `star_rivstar01` | 219×46×262 | stars |
+New tooling, all of it kept:
 
-The pattern is hard to miss: **the first field looks like a weather *state*
-(fogd, dark, thdr, suny, fine, ukfi, uksy) and the second like the *element*
-(cloud, cloudy, storm, sky-sphere, stars).** That is the shape of a system where
-the game picks one state and shows its domes. These are all unreferenced —
-no MZB instance record — which is consistent with the client choosing at runtime
-rather than the zone file placing them.
+| Switch | Effect |
+|---|---|
+| `?census=1` | Logs `[CENSUS]` — every unreferenced prefab with its full texture string, material index, whether that material resolves, texture size, bbox and centre |
+| `?pick=<substr>` | Draws **only** prefabs whose texture string contains the substring, terrain included, and frames the camera on them. Bypasses `isSkyWeatherMesh`, so it can look at hidden geometry |
+| `?pickaxis=x\|y\|z` | Overrides the view axis the pick chooses |
+| `scripts/weather-census.cjs <out.json> [N \| zone names…]` | Runs the census over many zones and writes the raw JSON so the analysis can be redone without another sweep |
 
-Where to start:
+**1. Every texture resolves. The parser is not at fault.** Abdhaljs
+Isle-Purgonorgo, Misareaux Coast and Riverne - Site #A01 report **0 prefabs with
+no usable texture** between them. The old note's leading worry — that these draw
+with the fallback texture — is dead. Whatever the first investigation saw as a
+yellow-and-black checkered patch, it was not a texture resolution failure.
+**Do not spend time on the parser.**
 
-1. `scripts/orphan-sweep.cjs` already lists these per zone. Widen it to dump
-   every sky/weather prefab with its full texture string and size, across many
-   zones, and see whether the state/element grid holds. If it does, the states
-   are enumerable and weather becomes "pick a state, draw its domes".
-2. Render one state's domes alone — not all of them at once, which is what the
-   old `showWeather` toggle did and why it looked like nonsense.
-3. The **textures** are the open question. The first investigation's domes drew
-   with the fallback texture. Find out whether these resolve properly: Inspect
-   one, or check the `[ZoneViewer] N prefabs had no usable texture` log. Do not
-   assume the parser is at fault before checking — that is the mistake those
-   notes warn about.
-4. `isSkyWeatherMesh` in `ZoneViewer.tsx` is the single switch that hides all of
-   this. Temporarily inverting it gives you a weather-only view to work in.
+**2. The state/element grid holds, and it is much larger than the word list.**
+Confirmed vocabulary, from the census plus visual isolation:
+
+| Token | Meaning | Token | Meaning |
+|---|---|---|---|
+| `suny` | sunny | `kumo` / `kumori` | 雲 cloud / 曇り cloudy |
+| `clod` | cloud | `niji` | 虹 **rainbow** |
+| `thdr` / `kaminari` | thunder / 雷 | `yuh1` `yuh2` `yuhi` | 夕日 **sunset** |
+| `fogd` | fog | `even` | evening |
+| `mist` | mist | `taki` / `kawa` / `umi` | 滝 waterfall / 川 river / 海 sea |
+| `wind` | wind | `strm` / `stomsy` | storm / storm sky |
+| `fine` | fine | `tenkyu` | 天球 celestial sphere |
+| `dark` | dark | `cldsea` | cloud sea |
+| `star` | stars | `skywll` | sky wall |
+| `warp` | warp light pillars | `baha` | Bahamut (Misareaux/Riverne only) |
+
+**3. `model` is real zone geometry and must never be filtered.** Riverne carries
+142 unreferenced `model  …` prefabs (`ba_wal01`, `lat_wf`, `jug_wk*`) that are
+the floating islands themselves. Any classifier that widens to catch weather has
+to leave `model` alone.
+
+**4. The two-field theory is proven by a duplicate.** Misareaux holds the same
+rainbow mesh twice — `effect  niji` (#581, caught by the filter) and
+`niji  niji` (#502, missed). Same size, same 88 vertices, same 32×32 texture.
+The identity really can sit in either field, and the current word list only
+catches it in one.
+
+### What each thing turned out to be
+
+Verified by isolating it with `?pick=` and looking:
+
+- **Misareaux's rainbow** is `niji  niji` — a flat card, 0 units thick in X,
+  90×95. It renders correctly and beautifully. This is what Ryan photographed;
+  it is visible in the zone today because `niji` is not in the word list.
+- **Purgonorgo's "lava"** is not lava. It is `even  yuh1` / `even  yuh2` /
+  `even  kuro` — **evening/sunset sky glow**, built as flat concentric annular
+  sectors lying horizontally (height 0–1). Orange with red streaks, plus brown
+  and mottled bands. Seen from below in a zone it reads as sunset colour across
+  the sky; seen from above in isolation it is obviously a set of rings.
+- **Riverne's `kumo  skywll`** (50 prefabs) is the **cloud sea floor** the
+  floating islands sit above.
+- **`cldsea  rond`** is a shallow cloud **basin**, not a funnel — checked from
+  the side with `pickaxis=x`. `cldsea  stomsy` is a storm cloud disc,
+  `cldsea  rfrecsn` a layered cloud sheet.
+
+**The tornado Ryan reports in Riverne - Site #A01 has not been found yet.**
+Ruled out by looking: `stomsy`, `rond`, `kumo`, `rfrecsn`. Still unexamined
+there: `1clod`, `ligthdr  limg` / `ligthdr  light`, `cldsea  fine_a01`,
+`cldsea  skywll`, and the **unnamed** prefabs. Note an unnamed prefab of exactly
+162×49×260 with 387 vertices appears in *all three* zones with identical
+geometry but a different material each time — it is shared, not zone scenery,
+and `?pick=` cannot select it because an empty name matches everything. Give the
+pick an index form (`pick=#448`) before chasing it.
+
+### What is left to decide
+
+The geometry is reachable, textured and identified. The open question is
+presentation, and it is a design question as much as a technical one:
+
+1. **Widen the filter** so the leaked effects (`niji`, `even`, `cldsea`, `warp`,
+   `kaminari*`, `baha*`, `yuhiumi`) stop drawing in ordinary zone views —
+   without catching `model`. Ryan's screenshots are that bug.
+2. **Add a weather-state selector** that draws one state's geometry deliberately.
+   The vocabulary above makes the states enumerable.
 
 Do not restore the old `showWeather` toggle as-is. It drew every state at once
 and was removed for good reason.
@@ -773,6 +817,26 @@ rather than solved.
 ---
 
 ## 6. Feature ideas not started
+
+- **Zone music.** Ryan's request, 2026-08-09: play a zone's music while it is
+  loaded. A first look says this is very achievable. The music is **not** inside
+  the ROM DAT archives — it is ordinary files on disk at
+  `<install>/sound<N>/win/music/data/musicNNN.bgw`, **224 of them** across
+  `sound`, `sound2`…`sound9` (111 in `sound` alone). They open with the ASCII
+  magic `BGMStream`. Alongside them are ~11,800 `.spw` files, which are sound
+  effects rather than music.
+
+  What is not yet known, and should be established before any player is written:
+  (a) what the BGW container actually holds — streamed ADPCM is the likely
+  answer, and if so it needs decoding to PCM before the Web Audio API will take
+  it; (b) which `musicNNN` belongs to which zone. The zone→music mapping is not
+  in the seed CSV, and LandSandBoat's zone tables are the obvious place to look,
+  the same source `resources/item-names.json` came from. Do the mapping first —
+  a decoder with nothing to point it at proves nothing.
+
+  Electron can read these directly through the existing `ffxi:readDat` IPC path;
+  it takes a root plus a relative path and does not care that the file is not a
+  DAT.
 
 - **Path-traced stills.** `three-gpu-pathtracer` renders progressively in WebGL —
   far too slow to fly around in, but viable as a "render high-quality still"
