@@ -1,16 +1,85 @@
 # FFXI Zone Viewer — Development Handoff
 
-Context for continuing work in a fresh session. Written 2026-08-03.
+Context for continuing work in a fresh session.
+Written 2026-08-03, substantially revised 2026-08-08.
+
+---
+
+## 0. Start here — the next task
+
+**Investigate the weather domes as the route to working weather.**
+
+This is Ryan's call and it is a good lead. Weather was investigated once, from
+the wrong end, and abandoned — see "Weather: the geometry is there, the presentation
+is not" in §3. That attempt only found small
+`effect`/`star`/`suny` prefabs that drew as a yellow-and-black checkered patch.
+
+Then, while removing stray domes from zones (§3, "Sky and weather meshes"), a
+sweep turned up a **second, larger population of weather geometry that the first
+investigation never saw** — real domes, spanning whole zones:
+
+| Texture string | Size (w×h×d) | Reading |
+|---|---|---|
+| `fogd  clod_a01` | 241×31×240 | fog + cloud |
+| `dark  clod_b01` | 241×31×240 | dark + cloud |
+| `thdr  clod_a01` | 241×31×240 | thunder + cloud |
+| `thdr  kumori` | 241×28×240 | thunder + 曇り (cloudy) |
+| `ukfi  strm` / `uksy  strm` | 123×48×59 | storm |
+| `squl  tenkyu01` | 80×80×80 | 天球 — celestial sphere; a perfect cube bbox, so a sphere |
+| `suny  suny_a01` | 241×31×240 | sunny |
+| `star_rivstar01` | 219×46×262 | stars |
+
+The pattern is hard to miss: **the first field looks like a weather *state*
+(fogd, dark, thdr, suny, fine, ukfi, uksy) and the second like the *element*
+(cloud, cloudy, storm, sky-sphere, stars).** That is the shape of a system where
+the game picks one state and shows its domes. These are all unreferenced —
+no MZB instance record — which is consistent with the client choosing at runtime
+rather than the zone file placing them.
+
+Where to start:
+
+1. `scripts/orphan-sweep.cjs` already lists these per zone. Widen it to dump
+   every sky/weather prefab with its full texture string and size, across many
+   zones, and see whether the state/element grid holds. If it does, the states
+   are enumerable and weather becomes "pick a state, draw its domes".
+2. Render one state's domes alone — not all of them at once, which is what the
+   old `showWeather` toggle did and why it looked like nonsense.
+3. The **textures** are the open question. The first investigation's domes drew
+   with the fallback texture. Find out whether these resolve properly: Inspect
+   one, or check the `[ZoneViewer] N prefabs had no usable texture` log. Do not
+   assume the parser is at fault before checking — that is the mistake those
+   notes warn about.
+4. `isSkyWeatherMesh` in `ZoneViewer.tsx` is the single switch that hides all of
+   this. Temporarily inverting it gives you a weather-only view to work in.
+
+Do not restore the old `showWeather` toggle as-is. It drew every state at once
+and was removed for good reason.
 
 ---
 
 ## 1. What this is
 
-A standalone Electron desktop viewer for Final Fantasy XI zone geometry, with
-modern lighting the game never had. It reads DAT files directly from a local
-FFXI installation — no server, no account, nothing uploaded.
+A standalone Electron desktop viewer for Final Fantasy XI, with modern lighting
+the game never had. It reads DAT files directly from a local FFXI installation —
+no server, no account, nothing uploaded.
 
 **Location:** `C:\Users\ryans\ffxi-zone-viewer`
+**Repo:** `Scruffybub/FFXI-Explorer` on GitHub — **private, deliberately.** FFXI
+tooling is a grey area with Square Enix. Do not make it public without asking.
+
+It has grown past its name. Three things live here now:
+
+- **Zone viewer** — 285 zones, orbit / fly / **walk** cameras. Walking stands on
+  FFXI's own MZB collision mesh, in first or third person.
+- **Model viewer** — 2,473 NPC, monster and object models, animated; plus a
+  **character builder** that assembles a player character from a race skeleton
+  and equipment DATs, with item names and ~300 animation sets per race.
+- **Shared character** — the character you build is the one you walk around
+  zones as. `charSpec` lives in `App.tsx` for exactly that reason.
+
+Roadmap status: walking (1a and 1b) done, model viewer done, **diorama not
+started** — place a posed, equipped character in a zone for stills. It shares
+most of its machinery with third-person walking.
 
 Built by porting the DAT parsers and zone renderer out of
 [Vanalytics](https://github.com/Soverance/Vanalytics) (MIT, author invited
@@ -32,12 +101,24 @@ postprocessing · electron-vite · TypeScript.
 |---|---|
 | `src/main/index.ts` | Electron main: window, native dialogs, file IPC, registry auto-detect |
 | `src/preload/index.ts` | contextBridge API (`window.ffxi.*`) |
-| `src/renderer/src/App.tsx` | Shell: zone list, loading, settings state, toolbar |
-| `src/renderer/src/components/ZoneViewer.tsx` | **The renderer.** Everything below lives here |
-| `src/renderer/src/components/ControlPanel.tsx` | Right-hand settings panel |
+| `src/renderer/src/App.tsx` | Shell: view switch, zone list, settings state, **the shared character** |
+| `src/renderer/src/components/ZoneViewer.tsx` | **The zone renderer.** Walk controller and `Avatar` live here |
+| `src/renderer/src/components/ControlPanel.tsx` | Zone settings panel |
+| `src/renderer/src/components/ModelBrowser.tsx` | Model viewer half: sidebar, viewport, Browse/Character modes |
+| `src/renderer/src/components/ModelViewer.tsx` | Single-model canvas and `Animator` |
+| `src/renderer/src/components/ModelPanel.tsx` | Model settings panel (clip, studio lighting) |
+| `src/renderer/src/components/CharacterBuilder.tsx` | Race, face, eight equipment slots, animation set |
 | `src/renderer/src/lib/settings.ts` | Settings types, defaults, presets |
-| `src/renderer/src/lib/ffxi-dat/` | DAT parsers, ported verbatim from Vanalytics |
+| `src/renderer/src/lib/modelBuild.ts` | DAT → three.js meshes. **Shared** by model viewer and zone avatar |
+| `src/renderer/src/lib/skinning.ts` | CPU skinning maths, split from React so it can be tested |
+| `src/renderer/src/lib/characterModel.ts` | Assembles a player character; equipment, face and animation tables |
+| `src/renderer/src/lib/CollisionWorld.ts` | Collision BVH: ground, wall rays, sphere depenetration |
+| `src/renderer/src/lib/ffxi-dat/` | DAT parsers, ported from Vanalytics |
 | `resources/zone-seed-data.csv` | 285-zone table (id, name, model path, map paths) |
+| `resources/model-dat-paths.json` | Equipment models keyed `"race:slot"` → index → path |
+| `resources/item-names.json` | Model index → item names, built by `scripts/build-item-names.cjs` |
+| `resources/animation-paths.json` | ~300 animation sets per race |
+| `resources/npc-model-paths.json` | 2,473 named NPC/monster models |
 
 ### Build and package
 
@@ -87,9 +168,16 @@ drive it:
 | `nowater=1` | Render water meshes with the ordinary opaque material |
 | `nounref=1` | Skip prefabs the instance list never references |
 | `waterdebug=1` | Force water to solid magenta — proves whether planes reach the screen |
+| `walkdebug=1` | Log body state twice a second, and accept keys **without pointer lock** (a synthetic click cannot engage lock headlessly) |
+| `modeldebug=1` | Log what the model builder produced, and expose `window.__modelScene`, `__modelCam`, `__modelGl` |
 | `post_<key>=<v>` | Override any `PostSettings` field |
 | `light_<key>=<v>` | Override any `LightingSettings` field |
 | `scene_<key>=<v>` | Override any `SceneSettings` field |
+
+Values are coerced: `true`/`false` become booleans, clean numbers become numbers,
+**and anything else stays a string**. That last part was a bug — a bare `Number()`
+turned `scene_cameraMode=walk`, tone-mapping names and colours like
+`light_sunColor=#fff4e0` all into `NaN`, silently.
 
 ### Test harnesses (`scripts/`)
 
@@ -102,6 +190,17 @@ All launch the built app headless via Electron and capture PNGs.
 | `preset-test.cjs <zone> <outDir>` | Click through presets, measure colourfulness — catches settings leaking between presets |
 | `dof-test.cjs <zone> <outDir>` | Capture near vs far focus, measure sharpness difference |
 | `pointlight-test.cjs <zone> <out>` | Drive real click-to-place with synthetic input events |
+| `walk-test.cjs <zone> <out> [holdMs]` | Enter walk mode, hold W, report where the body ended up. **Must run with `show: true`** |
+| `orphan-sweep.cjs [count] [waitMs]` | Load many zones, report the largest unreferenced prefab still drawn in each — how stray domes are found |
+| `model-test.cjs <name> <out>` | Load a model, dump the three.js scene graph, screenshot |
+| `character-test.cjs <raceIdx> <out>` | Build a player character with equipment, report what loaded |
+| `character-anim-test.cjs <animIdx> <out>` | Equip and animate a character, measure vertex motion |
+| `build-item-names.cjs <item_equipment.sql>` | Regenerate `resources/item-names.json` (not a test; a data build step) |
+
+**`walk-test.cjs` and the other movement harnesses need `show: true`.** Chromium
+throttles `requestAnimationFrame` in a hidden window regardless of
+`backgroundThrottling`, which starves the controller to a few frames a second
+and makes correct physics look broken. That cost a round of false debugging.
 
 `smoke.cjs` filters console output through a regex near the bottom — edit it to
 surface whatever you are hunting. **Include shader errors in that filter.** A
@@ -626,6 +725,28 @@ candidates, neither verified:
 ---
 
 ## 5. The strongest open lead
+
+> **Partly resolved, 2026-08-08.** The DXT3 alpha *decode itself was checked and
+> is correct*: nibble order and the `(a << 4) | a` expansion in
+> `decompressDXT3` both match the reference. If alpha is still wrong it is about
+> *which bytes reach that function* — the A1/81/B1 header offsets, or the
+> `guessCompressedLayout` fallback that infers the pixel offset by working
+> backwards from the end of the block. That fallback is the shakier code. Do not
+> re-check the nibbles.
+>
+> **A better lead for 4b now exists.** Model textures turned out to use PS2-style
+> *dithered* alpha — a literal checkerboard, measured at 50.0% of texels below
+> threshold with **100% alternation** between horizontal neighbours. The fix was
+> `isDitheredAlpha` in `lib/modelBuild.ts`, which separates a stipple from a
+> cutout by *alternation rate* rather than transparent share.
+>
+> That is exactly the signal 4b has been missing. All five failed attempts there
+> measured **how much** was transparent, and genuine cutouts and terrain sit in
+> the same band. A cutout has contiguous transparent regions and rarely
+> alternates. **Try the alternation metric on terrain textures.** It cost one
+> measurement to find and it works on model art.
+
+The original note follows.
 
 **The DXT3 alpha decode is probably wrong.**
 
