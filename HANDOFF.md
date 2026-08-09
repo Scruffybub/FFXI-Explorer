@@ -156,12 +156,33 @@ never drawn — that is why the pond had a hole in the ground. They render at
 identity because their vertices are already in world space. This is what
 Noesis's `-ff11renderunref` flag exists for.
 
-### Sky and weather meshes are skipped by category prefix
+### Sky and weather meshes are skipped by name, in either field
 
-`SKY_WEATHER_RE` matches the category field (before the whitespace) of the
-texture name. `clod` (cloud), `mist`, `rain`, `snow`, `kumo`, `sora` were added
-after the unreferenced-prefab fix made them visible as **large grey domes** in
-the middle of zones. If new domes appear, Inspect them and add the prefix.
+The texture string packs two fields, roughly `category  name`, and **the weather
+identity can be in either**. The original filter only tested the category, which
+left domes in a lot of zones: `fogd  clod_a01`, `dark  clod_b01`, `thdr  kumori`,
+`ukfi  strm`, `squl  tenkyu01` — all weather, under categories that mean nothing
+to the word list. `star_rivstar01` missed too, because the pattern required
+whitespace and that name uses an underscore.
+
+`isSkyWeatherMesh` now splits on whitespace *and* underscores and tests every
+part. Matching is whole-token with only a numeric variant suffix allowed
+(`clod_a01` → `clod`, `tenkyu01` → `tenkyu`), deliberately **not** a prefix
+match — a prefix test would swallow anything named "windmill" or "starboard".
+`tenkyu` is 天球, a celestial sphere; `strm` is storm.
+
+**Do not fix this by eye, one zone at a time.** `scripts/orphan-sweep.cjs` loads
+many zones and reports the largest unreferenced prefab still being drawn in each,
+which is the shape a stray dome takes. Across 18 zones it went from 8 flagged to
+3, and the 3 survivors are flat (`unk3`, height 1 — water) or thin (`spclr`), and
+render correctly. Verified visually before and after in Abdhaljs
+Isle-Purgonorgo, plus Bearclaw Pinnacle and Misareaux Coast (previously 6
+flags) for over-removal.
+
+An unnamed prefab of exactly 162×49×260 shows up in two unrelated zones and is
+still drawn. It is not a dome in either — both render correctly — but if a dome
+with no texture name ever turns up, that is the thing to look at first; no
+vocabulary can catch it.
 
 ### Custom shaders must write logarithmic depth
 

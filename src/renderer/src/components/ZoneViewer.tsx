@@ -274,10 +274,39 @@ function isWaterMesh(prefab: { textureName?: string; blending: number }): boolea
  * are stored unreferenced — once those started rendering, the cloud domes
  * appeared as large grey shells sitting in the middle of zones.
  */
-const SKY_WEATHER_RE =
-  /^(aura|fine|suny|wind|star|moon|effect|clod|mist|rain|snow|kumo|sora|lf\d+)\s/i
+const SKY_WEATHER_WORDS = [
+  'aura', 'fine', 'suny', 'wind', 'star', 'moon', 'effect',
+  'clod', 'mist', 'rain', 'snow', 'kumo', 'kumori', 'sora',
+  // Added after a sweep found domes these never caught: tenkyu is 天球, a
+  // celestial sphere, and strm is storm.
+  'tenkyu', 'strm',
+]
+const SKY_WEATHER_RE = new RegExp(
+  // A word on its own, or with a variant suffix like _a01, b01 or 01.
+  `^(?:${SKY_WEATHER_WORDS.join('|')}|lf\\d+)(?:[a-z]?\\d+)?$`,
+  'i',
+)
+
+/**
+ * True for FFXI's own sky and weather meshes, which the procedural sky replaces.
+ *
+ * The texture string packs two fields — roughly "category  name" — and the
+ * weather identity can be in **either**. Matching only the category missed a
+ * lot: `fogd  clod_a01`, `dark  clod_b01`, `thdr  kumori`, `ukfi  strm` and
+ * `squl  tenkyu01` are all weather domes under categories that mean nothing to
+ * this list. A sweep of 18 zones found 8 still drawing one.
+ *
+ * Both fields are tested, split on whitespace and underscores, so `star_rivstar01`
+ * and `clod_a01` reduce to `star` and `clod`.
+ *
+ * Matching is whole-token with only a numeric variant suffix allowed, not a
+ * prefix: a bare prefix test would swallow anything named "windmill" or
+ * "starboard".
+ */
 function isSkyWeatherMesh(prefab: { textureName?: string }): boolean {
-  return SKY_WEATHER_RE.test(prefab.textureName ?? '')
+  const raw = prefab.textureName ?? ''
+  if (!raw) return false
+  return raw.split(/[\s_]+/).some(part => part && SKY_WEATHER_RE.test(part))
 }
 
 const WATER_VERT = /* glsl */ `
@@ -2228,12 +2257,35 @@ export default function ZoneViewer({
     // them. We only build geometry from instances, so those would never render.
     {
       const referenced = new Set(zoneData.instances.map(i => i.meshIndex))
+      // Size matters as much as the name here: sky and weather domes are
+      // unreferenced prefabs that span the whole zone, and identifying them by
+      // extent is more robust than collecting texture prefixes forever.
       const orphans = zoneData.prefabs
-        .map((pf, i) => ({ i, name: pf.textureName ?? '', blend: pf.blending }))
-        .filter(o => !referenced.has(o.i))
+        .map((pf, i) => {
+          let minX = Infinity, minY = Infinity, minZ = Infinity
+          let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity
+          for (let v = 0; v < pf.vertices.length; v += 3) {
+            const x = pf.vertices[v], y = pf.vertices[v + 1], z = pf.vertices[v + 2]
+            if (x < minX) minX = x; if (x > maxX) maxX = x
+            if (y < minY) minY = y; if (y > maxY) maxY = y
+            if (z < minZ) minZ = z; if (z > maxZ) maxZ = z
+          }
+          return {
+            i,
+            name: pf.textureName ?? '',
+            blend: pf.blending,
+            w: Math.round(maxX - minX),
+            h: Math.round(maxY - minY),
+            d: Math.round(maxZ - minZ),
+            verts: pf.vertices.length / 3,
+            skipped: isSkyWeatherMesh(pf),
+          }
+        })
+        .filter(o => !referenced.has(o.i) && !o.skipped)
+        .sort((a, b) => (b.w + b.d) - (a.w + a.d))
       console.log(
-        `[ORPHANS] ${orphans.length} of ${zoneData.prefabs.length} prefabs never instanced: ` +
-        JSON.stringify(orphans.slice(0, 20))
+        `[ORPHANS] ${orphans.length} unreferenced and still drawn, largest first: ` +
+        JSON.stringify(orphans.slice(0, 6))
       )
     }
 
