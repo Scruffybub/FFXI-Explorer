@@ -11,6 +11,8 @@ interface ControlPanelProps {
   pointLights: PointLightSettings
   selectedLightId: number | null
   placingLight: boolean
+  /** Weather states the loaded zone carries geometry for; varies per zone. */
+  weatherStates: string[]
   onLighting: (patch: Partial<LightingSettings>) => void
   onPost: (patch: Partial<PostSettings>) => void
   onScene: (patch: Partial<SceneSettings>) => void
@@ -21,6 +23,39 @@ interface ControlPanelProps {
   onTogglePlacing: () => void
   onPreset: (index: number) => void
   onReset: () => void
+}
+
+/**
+ * Readable names for the weather-state tokens, which are FFXI's own truncated
+ * eight-character field. Anything not listed falls back to the raw token rather
+ * than being hidden — the vocabulary is not fully mapped and a zone showing
+ * "squl" is more useful than a zone silently missing a state.
+ */
+const WEATHER_LABELS: Record<string, string> = {
+  suny: 'Sunny',
+  fine: 'Fine',
+  clod: 'Cloudy',
+  kumo: 'Cloud (kumo)',
+  kumori: 'Overcast (kumori)',
+  mist: 'Mist',
+  fogd: 'Fog',
+  wind: 'Wind',
+  thdr: 'Thunder',
+  kaminari: 'Lightning (kaminari)',
+  dark: 'Dark',
+  star: 'Stars',
+  niji: 'Rainbow (niji)',
+  even: 'Evening',
+  yuhiumi: 'Sunset over sea',
+  cldsea: 'Cloud sea',
+  squl: 'Squall',
+  ukfi: 'Storm (ukfi)',
+  uksy: 'Storm sky (uksy)',
+  strm: 'Storm',
+  tenkyu: 'Celestial sphere',
+  effect: 'Effects (mixed)',
+  warp: 'Warp lights',
+  bahakumo: 'Bahamut cloud',
 }
 
 function Section({
@@ -109,7 +144,7 @@ function formatHour(h: number): string {
 }
 
 export default function ControlPanel({
-  lighting, post, scene, pointLights, selectedLightId, placingLight,
+  lighting, post, scene, pointLights, selectedLightId, placingLight, weatherStates,
   onLighting, onPost, onScene, onPointLights, onUpdateLight, onRemoveLight,
   onSelectLight, onTogglePlacing, onPreset, onReset,
 }: ControlPanelProps) {
@@ -604,6 +639,37 @@ export default function ControlPanel({
               <Slider label="Vignette darkness" value={post.vignetteDarkness} min={0} max={1.5} step={0.01}
                 onChange={v => onPost({ vignetteDarkness: v })} />
             )}
+          </>
+        )}
+      </Section>
+
+      <Section title="Weather">
+        {weatherStates.length === 0 ? (
+          <p className="note small">This zone carries no weather geometry.</p>
+        ) : (
+          <>
+            <div className="control-row"><span>State</span></div>
+            <select
+              value={scene.weatherState}
+              onChange={e => onScene({ weatherState: e.target.value })}
+            >
+              <option value="">None</option>
+              {weatherStates.map(s => (
+                <option key={s} value={s}>{WEATHER_LABELS[s] ?? s}</option>
+              ))}
+            </select>
+            <p className="note small">
+              FFXI stores one set of geometry per weather state and never places
+              any of it — the client picks a state at runtime, so nothing here is
+              drawn until you choose one. Only one at a time: drawing them all
+              together is what made the old weather toggle look like nonsense.
+            </p>
+            <Toggle
+              label="Follow camera"
+              checked={scene.weatherFollowsCamera}
+              onChange={v => onScene({ weatherFollowsCamera: v })}
+              hint="The domes are about 241 units across against zones of 1400, so left at the zone origin they read as a patch on the ground. Centring them on the viewer is our choice, not FFXI's data."
+            />
           </>
         )}
       </Section>

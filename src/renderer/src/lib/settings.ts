@@ -203,6 +203,33 @@ export interface SceneSettings {
   wireframe: boolean
   /** Draw the MZB collision mesh over the zone — what walking actually stands on. */
   showCollision: boolean
+
+  /**
+   * Which weather state to draw, as the raw first column of the texture string
+   * ("clod", "thdr", "suny"…), or '' for none.
+   *
+   * FFXI parks one set of geometry per weather state in the zone file and never
+   * places any of it — no MZB instance names these blocks, so the client picks
+   * a state at runtime. Drawing them all at once is what the old showWeather
+   * toggle did and why it looked like nonsense. Exactly one state at a time is
+   * the whole idea.
+   */
+  weatherState: string
+
+  /**
+   * Move the weather geometry with the camera instead of leaving it at the
+   * zone origin.
+   *
+   * **This part is our invention.** FFXI ships no placement for these meshes,
+   * so something has to decide where they go. Centring on the viewer is the
+   * reading the sizes support: the domes are ~241 units across while Misareaux
+   * Coast spans ~1400, and left at the origin a dome is a small patch lying on
+   * the terrain — which is exactly what the first weather investigation saw and
+   * described as a yellow checkered patch. At 241 units centred on the viewer
+   * it covers the sky out to about FFXI's draw distance, which is what a
+   * weather dome is for.
+   */
+  weatherFollowsCamera: boolean
 }
 
 /**
@@ -317,6 +344,8 @@ export const DEFAULT_SCENE: SceneSettings = {
   waterTint: 0.35,
   wireframe: false,
   showCollision: false,
+  weatherState: '',
+  weatherFollowsCamera: true,
 
   // FFXI's world unit reads as roughly a metre: Chateau d'Oraguille's collision
   // spans 28 units across its floors, West Ronfaure ~1200 corner to corner. So

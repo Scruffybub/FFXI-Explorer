@@ -29,6 +29,8 @@ interface ZoneViewerProps {
   /** Player character to walk around as, if one has been built. */
   character?: ParsedDatFile | null
   characterClip?: number | null
+  /** Weather states this zone carries geometry for, once it has been parsed. */
+  onWeatherStates?: (states: string[]) => void
 }
 
 const TONE_MAPPING: Record<ToneMappingMode, THREE.ToneMapping> = {
@@ -315,6 +317,19 @@ const hasCameraOverride =
  *    That most textures report near-zero opaque texels also suggests the DXT
  *    alpha decode may be wrong across the board — worth investigating.
  */
+/**
+ * The weather state a prefab belongs to: the first 8-character column of its
+ * texture string, lowercased — "clod", "thdr", "suny", "niji".
+ *
+ * Field 2 names the element mesh and field 1 the state that uses it, which is
+ * why `clod  clod_a01` and `thdr  clod_a01` are the same cloud sheet stored
+ * twice under different states. Grouping by field 1 is therefore exactly the
+ * "pick a state, draw its geometry" the client does at runtime.
+ */
+function weatherStateOf(prefab: { textureName?: string }): string {
+  return (prefab.textureName ?? '').slice(0, 8).trim().toLowerCase()
+}
+
 const WATER_NAME_RE =
   /water|wtr|sea_|umi_|wave|aqua|suimen|mizu|_ike|kawa|taki|falls/i
 
@@ -1205,6 +1220,39 @@ function CollisionOverlay({ world }: { world: CollisionWorld | null }) {
   )
 }
 
+/**
+ * Keeps the weather geometry centred on the viewer.
+ *
+ * The meshes are children of the group carrying `rotation={[Math.PI,0,0]}`, so
+ * a local z maps to world -z. Height is left alone: the authored y is where
+ * FFXI put the layer relative to the ground, and overriding it would be a
+ * second guess stacked on the first.
+ */
+function WeatherFollow({
+  meshes, enabled, cameraMode,
+}: {
+  meshes: THREE.InstancedMesh[]
+  enabled: boolean
+  cameraMode: SceneSettings['cameraMode']
+}) {
+  // Only in walk mode. Orbit and fly put the camera outside the zone looking
+  // in, so centring a 241-unit dome on it parks the dome behind you and it
+  // vanishes — measured as a mean absolute difference of exactly 0.000 against
+  // the no-weather frame, where leaving it at the origin gives 0.274. Walk is
+  // the one mode where the camera is a person standing in the world, which is
+  // the case a viewer-centred dome is actually for.
+  const follow = enabled && cameraMode === 'walk'
+  useFrame(({ camera }) => {
+    for (const mesh of meshes) {
+      if (!mesh.userData.weatherState) continue
+      if (!mesh.visible) continue
+      if (follow) mesh.position.set(camera.position.x, 0, -camera.position.z)
+      else if (mesh.position.lengthSq() > 0) mesh.position.set(0, 0, 0)
+    }
+  })
+  return null
+}
+
 function SmartOrbitControls({ size, lookAt }: { size: number; lookAt?: THREE.Vector3 }) {
   const { camera } = useThree()
   const target = useMemo(() => {
@@ -1913,7 +1961,7 @@ export default function ZoneViewer({
   zoneData, lighting, post, scene, pointLights,
   selectedLightId = null, placingLight = false, onPlaceLight,
   inspecting = false, onInspectResult, onFlySpeedChange,
-  character = null, characterClip = null,
+  character = null, characterClip = null, onWeatherStates,
 }: ZoneViewerProps) {
   // Where the walking body is. Written by WalkCamera, read by Avatar.
   const walkBody = useRef<WalkBodyState>({ x: 0, y: 0, z: 0, yaw: 0, moving: false })
@@ -2063,7 +2111,7 @@ export default function ZoneViewer({
   const gameSunActive = !lit && lighting.gameSun
   const shaderVariant = gameSunActive ? 'lambert' : 'std'
 
-  const { instancedMeshes, waterMaterials, litMaterials, disposeAll } = useMemo(() => {
+  const { instancedMeshes, waterMaterials, litMaterials, weatherStates, disposeAll } = useMemo(() => {
     const geometries: THREE.BufferGeometry[] = []
     const materials: THREE.Material[] = []
     const waterMaterials: THREE.ShaderMaterial[] = []
@@ -2077,6 +2125,10 @@ export default function ZoneViewer({
     let nonFiniteUvs = 0
     let nonFinitePositions = 0
     let blendApplied = 0
+    /** Every weather state this zone carries geometry for. */
+    const weatherStates = new Set<string>()
+    /** prefab index -> its weather state, for tagging the meshes below. */
+    const prefabWeatherState = new Map<number, string>()
     let unresolvedTextures = 0
     let vertexAlphaMeshes = 0
     let uvOverflowMeshes = 0
@@ -2115,11 +2167,20 @@ export default function ZoneViewer({
 
     for (let prefabIdx = 0; prefabIdx < zoneData.prefabs.length; prefabIdx++) {
       const prefab = zoneData.prefabs[prefabIdx]
+      // Weather geometry is now *built* rather than skipped, and tagged with
+      // the state it belongs to. Visibility is decided later and can then be
+      // switched without rebuilding the zone — a rebuild takes seconds and
+      // makes flicking between states unusable.
+      let prefabWeather = ''
       if (PICK) {
         // Isolation mode: the pick replaces the sky/weather filter rather than
         // stacking with it, so hidden geometry can be examined.
         if (!(prefab.textureName ?? '').toLowerCase().includes(PICK)) continue
-      } else if (isSkyWeatherMesh(prefab)) continue
+      } else if (isSkyWeatherMesh(prefab)) {
+        prefabWeather = weatherStateOf(prefab) || '(unnamed)'
+        weatherStates.add(prefabWeather)
+        prefabWeatherState.set(prefabIdx, prefabWeather)
+      }
 
       const isWater = isWaterPrefab(prefab, prefabIdx) && !DISABLE_WATER_SHADER
 
@@ -2538,11 +2599,18 @@ export default function ZoneViewer({
         const mesh = new THREE.InstancedMesh(geo, mat, 1)
         mesh.userData.textureName = zoneData.prefabs[prefabIdx]?.textureName ?? ''
         mesh.userData.matIdx = zoneData.prefabs[prefabIdx]?.materialIndex ?? -1
+        // Weather meshes start hidden. Nothing draws until a state is picked,
+        // which keeps the default view exactly as it was.
+        const state = prefabWeatherState.get(prefabIdx)
+        if (state) {
+          mesh.userData.weatherState = state
+          mesh.visible = false
+        }
         mesh.frustumCulled = false
         mesh.setMatrixAt(0, new THREE.Matrix4())
         mesh.instanceMatrix.needsUpdate = true
         instancedMeshes.push(mesh)
-        added++
+        if (!state) added++
       }
       if (added > 0) console.log(`[ZoneViewer] rendered ${added} unreferenced prefabs`)
     }
@@ -2557,8 +2625,14 @@ export default function ZoneViewer({
       instancedMeshes.forEach(m => m.dispose())
     }
 
+    if (weatherStates.size > 0) {
+      console.log(`[WEATHER] ${weatherStates.size} states available: ` +
+        JSON.stringify([...weatherStates].sort()))
+    }
+
     return {
       instancedMeshes, waterMaterials, litMaterials,
+      weatherStates: [...weatherStates].sort(),
       totalInstances: zoneData.instances.length, disposeAll,
     }
     // Rebuild materials when PCSS is toggled so they compile against the
@@ -2573,6 +2647,22 @@ export default function ZoneViewer({
       mat.needsUpdate = true
     }
   }, [litMaterials, lighting.roughness, lighting.metalness])
+
+  // Exactly one weather state is visible at a time, switched by a per-mesh flag
+  // so changing it costs nothing. Meshes with no weatherState tag are ordinary
+  // zone geometry and are left alone.
+  useEffect(() => {
+    for (const mesh of instancedMeshes) {
+      const state = mesh.userData.weatherState as string | undefined
+      if (!state) continue
+      mesh.visible = state === scene.weatherState
+    }
+  }, [instancedMeshes, scene.weatherState])
+
+  // Report which states this zone actually carries, so the panel can list them.
+  useEffect(() => {
+    onWeatherStates?.(weatherStates)
+  }, [weatherStates, onWeatherStates])
 
   // Shadow casting is a per-mesh flag, toggled without a rebuild.
   useEffect(() => {
@@ -2747,6 +2837,7 @@ export default function ZoneViewer({
 
       {/* Point lights only affect lit materials — the unlit ones ignore them. */}
       {lit && <PointLights settings={pointLights} selectedId={selectedLightId} />}
+      <WeatherFollow meshes={instancedMeshes} enabled={scene.weatherFollowsCamera} cameraMode={scene.cameraMode} />
       {lit && onPlaceLight && (
         <LightPlacer meshes={instancedMeshes} active={placingLight} onPlace={onPlaceLight} />
       )}

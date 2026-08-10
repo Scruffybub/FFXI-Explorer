@@ -271,6 +271,43 @@ leaving a set-difference computed against the wrong collection. It was caught
 only because the number contradicted `[ORPHANSRC]`. When two diagnostics
 disagree, suspect the diagnostic before the data.
 
+### The weather state selector — built 2026-08-09
+
+**Scene panel → Weather → State.** A per-zone dropdown listing the states that
+zone actually carries geometry for, plus a "Follow camera" toggle. Misareaux
+Coast offers 12: `bahakumo`, `clod`, `effect`, `fogd`, `kaminari`, `mist`,
+`niji`, `star`, `suny`, `thdr`, `wind`, `yuhiumi`. `WEATHER_LABELS` in
+`ControlPanel.tsx` gives readable names and **falls back to the raw token**
+rather than hiding anything the vocabulary does not cover yet.
+
+How it works, and why:
+
+- Weather geometry is now **built** rather than skipped, tagged with
+  `userData.weatherState`, and starts hidden. Switching state flips
+  `mesh.visible` — no rebuild, because a rebuild takes seconds and makes
+  flicking between states unusable.
+- Default is None, and the default frame is **byte-identical** to before the
+  change (mean absolute difference 0.000). Nothing draws until you choose.
+- One state at a time, which is the whole point. The old `showWeather` drew
+  every state at once and that is why it looked like nonsense.
+
+**Follow camera only applies in walk mode, and that was measured, not assumed.**
+Centring a 241-unit dome on the camera in orbit or fly parks it behind you and
+it disappears entirely — mean absolute difference **0.000** against the
+no-weather frame, where leaving it at the origin gives 0.274. Orbit and fly put
+the camera outside the zone looking in; walk is the one mode where the camera is
+a person standing in the world.
+
+In walk mode it works: Misareaux with `thdr` drops mean frame brightness from
+94.8 to 22.0, a difference of **75.8**, and reads as a dark churning storm sky
+overhead. `suny` gives 67.1.
+
+**What is still wrong with it.** A hard-edged polygon cuts across the sky at the
+dome boundary — the layers are flat sheets, not a closed dome, so their edges
+show. Height is left at the authored value rather than guessed at. And the
+whole placement is our invention, flagged as such in the toggle's own hint,
+because FFXI ships none.
+
 ### What is left to decide
 
 The geometry is reachable, textured and identified. The open question is

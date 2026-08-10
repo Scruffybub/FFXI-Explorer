@@ -30,6 +30,10 @@ export default function App() {
   const [lighting, setLighting] = useState<LightingSettings>(DEFAULT_LIGHTING)
   const [post, setPost] = useState<PostSettings>(DEFAULT_POST)
   const [scene, setScene] = useState<SceneSettings>(DEFAULT_SCENE)
+  // Weather states the loaded zone carries geometry for. Reported by
+  // ZoneViewer once the zone is parsed, because it is a property of the zone
+  // file rather than a setting — every zone stores a different set.
+  const [weatherStates, setWeatherStates] = useState<string[]>([])
   const [pointLights, setPointLights] = useState<PointLightSettings>(DEFAULT_POINT_LIGHTS)
   const [selectedLightId, setSelectedLightId] = useState<number | null>(null)
   const [placingLight, setPlacingLight] = useState(false)
@@ -430,6 +434,7 @@ export default function App() {
             onInspectResult={setSurfaceInfo}
             character={character}
             characterClip={charClip}
+            onWeatherStates={setWeatherStates}
           />
         )}
 
@@ -521,6 +526,7 @@ export default function App() {
         pointLights={pointLights}
         selectedLightId={selectedLightId}
         placingLight={placingLight}
+        weatherStates={weatherStates}
         onLighting={patch => setLighting(l => ({ ...l, ...patch }))}
         onPost={patch => setPost(p => ({ ...p, ...patch }))}
         onScene={patch => setScene(s => ({ ...s, ...patch }))}
