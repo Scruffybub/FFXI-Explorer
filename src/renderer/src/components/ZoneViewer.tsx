@@ -255,6 +255,25 @@ const PICK =
     ? (new URLSearchParams(window.location.search).get('pick') ?? '').toLowerCase()
     : ''
 
+/**
+ * Diagnostic, PICK-only: how the picked meshes composite —
+ * `additive`, `alpha` or `opaque`.
+ *
+ * The zone renderer has no blending mode at all today: the blend flag drives
+ * only `useAlpha = blending > 0`, which sets `alphaTest`, so FFXI's `0x0`,
+ * `0x2000` and `0x8000` all collapse to alpha-tested opaque. That is why
+ * `effect  taki`, a greyscale waterfall streak sheet, renders as dark cloth.
+ */
+const BLEND_MODE =
+  typeof window !== 'undefined'
+    ? (new URLSearchParams(window.location.search).get('blend') ?? '').toLowerCase()
+    : ''
+
+/** Diagnostic, PICK-only: drop vertex colours, which are very dark here. */
+const NO_VCOLOR =
+  typeof window !== 'undefined' &&
+  new URLSearchParams(window.location.search).has('novcolor')
+
 const hasCameraOverride =
   typeof window !== 'undefined' &&
   (new URLSearchParams(window.location.search).has('yaw') ||
@@ -2049,6 +2068,7 @@ export default function ZoneViewer({
     let nonFiniteColors = 0
     let nonFiniteUvs = 0
     let nonFinitePositions = 0
+    let blendApplied = 0
     let unresolvedTextures = 0
     let vertexAlphaMeshes = 0
     let uvOverflowMeshes = 0
@@ -2292,6 +2312,44 @@ export default function ZoneViewer({
             ? new THREE.MeshLambertMaterial(common)
             : new THREE.MeshBasicMaterial(common)
 
+        // Diagnostic: ?blend= overrides how the picked meshes composite.
+        //
+        // Deliberately gated behind PICK. The blend flag 0x8000 is carried by
+        // the weather domes, the cloud layers and the rainbow as well as the
+        // waterfall, so changing its handling globally changes many zones at
+        // once — this exists to find out what the flag means before anything
+        // global is decided.
+        if (PICK && BLEND_MODE) {
+          const m = mat as THREE.MeshBasicMaterial
+          if (BLEND_MODE === 'additive') {
+            // A greyscale streak sheet is authored to be added to what is
+            // behind it. Depth writing goes off or the ribbons occlude each
+            // other, and alphaTest goes off or the cutout eats the soft edges
+            // that make it read as spray.
+            m.transparent = true
+            m.blending = THREE.AdditiveBlending
+            m.depthWrite = false
+            m.alphaTest = 0
+          } else if (BLEND_MODE === 'alpha') {
+            m.transparent = true
+            m.blending = THREE.NormalBlending
+            m.depthWrite = false
+            m.alphaTest = 0
+          } else if (BLEND_MODE === 'opaque') {
+            m.transparent = false
+            m.blending = THREE.NormalBlending
+            m.alphaTest = 0
+          }
+          // FFXI stores very dark vertex colours on this geometry (the pond bed
+          // measures 0.07), which multiplies an additive layer down to nothing.
+          if (NO_VCOLOR) m.vertexColors = false
+          // alphaTest and vertexColors are shader defines (USE_ALPHATEST,
+          // USE_COLOR). Changing them after construction does nothing at all
+          // unless the program is rebuilt.
+          m.needsUpdate = true
+          blendApplied++
+        }
+
         if (lit) litMaterials.push(mat as THREE.MeshStandardMaterial)
         patchZoneShader(mat, zoneUniforms.current, lit, shaderVariant)
         materials.push(mat)
@@ -2351,6 +2409,9 @@ export default function ZoneViewer({
 
     if (degenerateNormals > 0) {
       console.log(`[ZoneViewer] replaced ${degenerateNormals} degenerate normals`)
+    }
+    if (PICK && BLEND_MODE) {
+      console.log(`[BLEND] mode=${BLEND_MODE} novcolor=${NO_VCOLOR} applied to ${blendApplied} materials`)
     }
     if (nonFinitePositions + nonFiniteUvs + nonFiniteColors > 0) {
       console.log(

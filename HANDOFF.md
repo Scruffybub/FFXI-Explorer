@@ -141,11 +141,46 @@ A greyscale streak texture drawn as alpha-tested opaque geometry is exactly dark
 cloth. Drawn additively — which is what a `0x8000` greyscale streak sheet is for
 — it would brighten what is behind it and read as falling water.
 
-This is one finding that touches 4a and 4b at once, and it is the first
-explanation of the water problem that is not about the water shader. **Blast
-radius is the caution**: `0x8000` is carried by the weather domes, the cloud
-layers and the rainbow as well, so changing its handling globally changes many
-zones at once. Test it behind `?pick=` first.
+**That first reading was wrong, and the correction is the useful part.**
+`WATER_NAME_RE` contains `taki` and `kawa`, and `isWaterPrefab` tests **the name
+only** — not the blend flag, not whether the prefab is referenced. So all nine
+waterfall meshes were already going down the custom water shader, and the dark
+cloth was *that shader's output*, not a missing blend mode. Proven rather than
+argued: a `[BLEND]` counter reported the override applying to **0 materials**
+until `?nowater=1` moved them off the water path, whereupon it applied to 9.
+
+Two things follow, and the second is the prize.
+
+**1. §4a's description of water selection is stale.** It says "only unreferenced
+prefabs carrying blend flag `0x2000` are treated as water". The code does not do
+that; `isWaterPrefab` is a name-regex test and ignores both the flag and the
+instance list. Trust the code.
+
+**2. Off the water path and drawn additively, the waterfall looks right.**
+`?pick=taki&nowater=1&blend=additive&novcolor=1` renders bright translucent
+wispy ribbons that read unmistakably as falling water and spray — a
+transformation from the dark cloth of the default path. Measured mean abs
+difference over the viewport: 2.78 against the water-shader render, where the
+earlier no-op attempts sat at 1.09.
+
+The recipe that worked, all three parts needed:
+
+- `AdditiveBlending` with `transparent: true` — the sheet is authored to be
+  added to what is behind it
+- `depthWrite: false` — otherwise the ribbons occlude each other
+- `alphaTest: 0` — the cutout was eating the soft edges that make it read as spray
+- vertex colours dropped — FFXI stores very dark values here and they multiply
+  an additive layer down to nothing
+
+**A caution that cost a round of debugging:** `alphaTest` and `vertexColors` are
+shader *defines* (`USE_ALPHATEST`, `USE_COLOR`). Changing them after the
+material is constructed does nothing at all without `material.needsUpdate =
+true`. Three renders came back numerically identical before that was added.
+
+**Not yet made global, deliberately.** `0x8000` is carried by the weather domes,
+the cloud layers and the rainbow as well, and `taki`/`kawa` currently divert to
+the water shader before any of this is reached. Deciding what the flag means for
+all of them is the next call, and it is Ryan's.
 
 ### What is left to decide
 
