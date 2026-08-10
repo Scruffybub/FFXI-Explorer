@@ -319,7 +319,23 @@ const SKY_WEATHER_WORDS = [
   // Added after a sweep found domes these never caught: tenkyu is 天球, a
   // celestial sphere, and strm is storm.
   'tenkyu', 'strm',
+  // Added 2026-08-09 from the census, after Ryan photographed a rainbow and a
+  // sheet of sunset glow sitting in zones that should not have been drawing.
+  // niji is 虹 (rainbow); even is evening and yuh/yuhi is 夕日, the evening sun;
+  // kaminari is 雷 (thunder); katn and smoke and thunder are states stored under
+  // clod/wind/thdr; bahakumo is Bahamut cutscene cloud.
+  'niji', 'even', 'yuh', 'yuhi', 'yuhiumi', 'kaminari', 'katn', 'smoke',
+  'thunder', 'bahakumo',
 ]
+
+/**
+ * Categories that are never weather, whatever else the name looks like.
+ *
+ * `model` is real zone geometry stored unreferenced — Riverne - Site #A01 has
+ * 142 such prefabs and they are the floating islands themselves. A widened
+ * filter that catches `model` deletes the zone.
+ */
+const NEVER_WEATHER = new Set(['model'])
 const SKY_WEATHER_RE = new RegExp(
   // A word on its own, or with a variant suffix like _a01, b01 or 01.
   `^(?:${SKY_WEATHER_WORDS.join('|')}|lf\\d+)(?:[a-z]?\\d+)?$`,
@@ -345,7 +361,27 @@ const SKY_WEATHER_RE = new RegExp(
 function isSkyWeatherMesh(prefab: { textureName?: string }): boolean {
   const raw = prefab.textureName ?? ''
   if (!raw) return false
-  return raw.split(/[\s_]+/).some(part => part && SKY_WEATHER_RE.test(part))
+
+  // The texture string is two FIXED 8-CHARACTER COLUMNS, not two whitespace-
+  // separated words. Verified against all 83 distinct names in the census:
+  // every one splits cleanly at index 8. Splitting on whitespace works only
+  // while the first field is short enough to leave padding, and silently fails
+  // whenever it fills the column — which is exactly the case for the names that
+  // kept slipping through:
+  //
+  //   "kaminarikumori" -> "kaminari" + "kumori"    (not one 14-char word)
+  //   "bahakumokum0"   -> "bahakumo" + "kum0"
+  //   "star_rivstar01" -> "star_riv" + "star01"
+  //   "niji    niji"   -> "niji"     + "niji"
+  //
+  // Underscores are still split within a field, so "star_riv" yields star, riv.
+  const fields = [raw.slice(0, 8), raw.slice(8)]
+  const tokens: string[] = []
+  for (const field of fields) {
+    for (const part of field.trim().split(/[\s_]+/)) if (part) tokens.push(part)
+  }
+  if (tokens.some(t => NEVER_WEATHER.has(t.toLowerCase()))) return false
+  return tokens.some(t => SKY_WEATHER_RE.test(t))
 }
 
 const WATER_VERT = /* glsl */ `
@@ -2010,6 +2046,9 @@ export default function ZoneViewer({
     const matMap = new Map<number, THREE.Material>()
     const waterNames: string[] = []
     let degenerateNormals = 0
+    let nonFiniteColors = 0
+    let nonFiniteUvs = 0
+    let nonFinitePositions = 0
     let unresolvedTextures = 0
     let vertexAlphaMeshes = 0
     let uvOverflowMeshes = 0
@@ -2109,8 +2148,30 @@ export default function ZoneViewer({
       // than a half-strength weight.
       if (minVertexAlpha < 0.99) vertexAlphaMeshes++
 
-      geometry.setAttribute('color', new THREE.Float32BufferAttribute(new Float32Array(vertexColors.filter((_, i) => i % 4 !== 3)), 3))
-      geometry.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(prefab.uvs), 2))
+      // Normals are sanitised above because a NaN there whites out the entire
+      // frame through bloom's mipmap downsampling. Positions, UVs and vertex
+      // colours reach the shader too and were never checked, and any one of
+      // them produces the same failure: a NaN fragment, smeared by bloom, until
+      // the whole viewport renders white. This is the "white screen in some
+      // places with bloom on" report — a symptom that only shows from the
+      // camera angles where the offending triangle is on screen, which is why
+      // an in-place angle sweep can miss it entirely.
+      const colorArray = new Float32Array(vertexColors.filter((_, i) => i % 4 !== 3))
+      for (let i = 0; i < colorArray.length; i++) {
+        if (!Number.isFinite(colorArray[i])) { colorArray[i] = 1; nonFiniteColors++ }
+      }
+      const uvArray = new Float32Array(prefab.uvs)
+      for (let i = 0; i < uvArray.length; i++) {
+        if (!Number.isFinite(uvArray[i])) { uvArray[i] = 0; nonFiniteUvs++ }
+      }
+      const posAttr = geometry.getAttribute('position') as THREE.BufferAttribute
+      const posArray = posAttr.array as Float32Array
+      for (let i = 0; i < posArray.length; i++) {
+        if (!Number.isFinite(posArray[i])) { posArray[i] = 0; nonFinitePositions++ }
+      }
+
+      geometry.setAttribute('color', new THREE.Float32BufferAttribute(colorArray, 3))
+      geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvArray, 2))
 
       // FFXI quantises these UVs to eighths and keeps a 1/8 margin at the
       // edges, so a mesh reaching past 1.0 is reaching into a neighbouring
@@ -2290,6 +2351,12 @@ export default function ZoneViewer({
 
     if (degenerateNormals > 0) {
       console.log(`[ZoneViewer] replaced ${degenerateNormals} degenerate normals`)
+    }
+    if (nonFinitePositions + nonFiniteUvs + nonFiniteColors > 0) {
+      console.log(
+        `[NANSCAN] replaced non-finite values — positions ${nonFinitePositions}, ` +
+        `uvs ${nonFiniteUvs}, colors ${nonFiniteColors}`
+      )
     }
     if (CENSUS) {
       // Every unreferenced prefab, in full. This is deliberately not filtered

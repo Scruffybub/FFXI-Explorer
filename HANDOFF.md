@@ -85,6 +85,44 @@ geometry but a different material each time — it is shared, not zone scenery,
 and `?pick=` cannot select it because an empty name matches everything. Give the
 pick an index form (`pick=#448`) before chasing it.
 
+### The leak is fixed; the feature is not
+
+The filter was widened on 2026-08-09 using the 8-column split, adding the
+confirmed weather-state words (`niji`, `even`, `yuh`, `yuhi`, `yuhiumi`,
+`kaminari`, `katn`, `smoke`, `thunder`, `bahakumo`) plus a `NEVER_WEATHER` guard
+that can never match `model`. Measured against the same three zones:
+
+| Zone | Newly hidden | Notes |
+|---|---|---|
+| Abdhaljs Isle-Purgonorgo | 14 | the sunset glow planes Ryan photographed |
+| Misareaux Coast | 55 | the rainbow, 20 lightning, 30 Bahamut cloud, thunder, smoke |
+| Riverne - Site #A01 | **0** | deliberately untouched |
+| `model` prefabs hidden | **0 of 158** | across all three; no regression |
+
+Riverne is left alone on purpose. Its `cldsea` and `kumo  skywll` meshes are the
+sea of clouds the floating islands sit above — the zone's defining feature, and
+almost certainly meant to be visible. Verified by screenshot after the change:
+islands and cloud sea both intact.
+
+### Water lives in this set too — relevant to 4a
+
+Answering Ryan's question directly: **yes, there is water geometry parked with
+the weather.** Misareaux Coast alone carries, all currently *hidden* because
+their first field is `effect`:
+
+| Name | Count | Size | Reading |
+|---|---|---|---|
+| `effect  taki` | 9 | up to 27×76×49 | 滝 waterfall — tall, clearly a falls |
+| `effect  kawa` | 8 | ~50×0×34 | 川 river — flat cards |
+| `effect  umi2` / `umi3` | 5 | ~69×0×33 | 海 sea |
+| `yuhiumi yuh1` | 2 | 11×0×22 | sunset over sea |
+
+Purgonorgo adds `effect  umi1`. **This is a live lead for open problem 4a**
+("water does not look like the game"). If FFXI's rivers and waterfalls get their
+look from these effect overlays rather than from the base surface, then every
+attempt so far has been tuning the wrong mesh. Nobody has rendered one yet —
+`?pick=taki` in Misareaux Coast is the one-line experiment.
+
 ### What is left to decide
 
 The geometry is reachable, textured and identified. The open question is
@@ -298,6 +336,28 @@ instance record**. We only build meshes from the instance list, so these were
 never drawn — that is why the pond had a hole in the ground. They render at
 identity because their vertices are already in world space. This is what
 Noesis's `-ff11renderunref` flag exists for.
+
+### The texture string is two fixed 8-character columns
+
+**Established 2026-08-09, and it retires a heuristic.** The two fields are not
+whitespace-separated words — they are fixed-width columns, field 1 at offsets
+0–7 and field 2 from offset 8. Checked against all 83 distinct names in the
+census: **83 of 83 split cleanly at index 8.**
+
+Splitting on whitespace only works while field 1 is short enough to leave
+padding. When it fills the column the two fields run together and the old
+splitter saw one long nonsense word — which is precisely the set of names that
+kept slipping through the filter:
+
+| Raw string | Actually | Not |
+|---|---|---|
+| `kaminarikumori` | `kaminari` + `kumori` | one 14-char word |
+| `bahakumokum0` | `bahakumo` + `kum0` | one 12-char word |
+| `star_rivstar01` | `star_riv` + `star01` | `star_rivstar01` |
+| `niji    niji` | `niji` + `niji` | (whitespace worked here by luck) |
+
+`isSkyWeatherMesh` now slices at 8, then splits each field on underscores, so
+`star_riv` still yields `star` and `riv`. Do not go back to a whitespace split.
 
 ### Sky and weather meshes are skipped by name, in either field
 
@@ -755,6 +815,40 @@ Best remaining hypothesis: these are **atlas sub-tiles** — several ground
 variants packed into one 512×512 sheet, selected by UV offset — and the parser
 lands on the wrong cell. Test by dumping raw UVs for a good tile versus a bad one
 and looking for a consistent fractional offset.
+
+### 4e. White screen with bloom, in some places — NOT reproduced
+
+Ryan reports that with post-processing on, the view sometimes goes pure white in
+some places in a zone; screenshot supplied for Riverne - Site #A01.
+
+The obvious suspect is the documented one — a NaN fragment smeared white by
+bloom's mipmap downsampling (§3, "Some meshes carry zero-length normals").
+**A NaN was looked for and not found**, so do not assume that is the cause:
+
+- `[NANSCAN]` (new) sanitises and counts non-finite **positions, UVs and vertex
+  colours** at geometry build, alongside the normals that were already handled.
+  It reports **nothing** in Riverne, Misareaux, Purgonorgo or zone 100 — those
+  attributes are entirely finite. The guard is kept as cheap insurance, but it
+  did not fire.
+- Census bounds confirm it independently: 0 non-finite of 479 unreferenced
+  prefabs.
+- `sweep.cjs` over Riverne peaks at mean brightness **193**, under the 200
+  blow-out threshold, so an in-place angle sweep from spawn does not reproduce
+  it. It is **position**-dependent, not angle-dependent, and the sweep only
+  rotates where it stands.
+- Suppressing every unreferenced prefab (`?nounref=1`) moves the peak from 193
+  to 189, so the stray cloud geometry is not driving it either.
+
+What has **not** been tested, and is now the strongest remaining candidate: the
+**hand-written water shader**. It computes in GLSL, so a NaN born there is
+invisible to `[NANSCAN]`, which only checks attributes. Riverne carries water
+prefabs (blend `0x2000`: `jug_wk01/02/03/07`, `rat_w02c`), and that shader has
+form — it silently dropped every draw for days over the log-depth bug.
+
+**The decisive test needs a reproduction, which needs Ryan.** When it next
+happens, the bisect is two switches: `?nowater=1` (water drawn with the ordinary
+opaque material — if the white goes, it is the water shader) and toggling Bloom
+off (confirms bloom is the amplifier rather than the source).
 
 ### 4d. Shadow strength
 

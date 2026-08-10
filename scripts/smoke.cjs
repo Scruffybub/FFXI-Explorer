@@ -111,7 +111,7 @@ app.whenReady().then(async () => {
   // permanently in the list: a silent "program not valid" hid a broken water
   // shader for days, because a failed program drops its draws without erroring.
   const errors = logs.filter(l =>
-    /CUTOUT|Collision|Walk|unreferenced|ORPHANS|PICK|CENSUS|program not valid|VALIDATE_STATUS|shader|THREE\.\w+Error|Warning:/i.test(l),
+    /NANSCAN|CUTOUT|Collision|Walk|unreferenced|ORPHANS|PICK|CENSUS|program not valid|VALIDATE_STATUS|shader|THREE\.\w+Error|Warning:/i.test(l),
   )
   if (errors.length) console.log('CONSOLE ERRORS:\n' + errors.slice(0, 25).join('\n'))
   else console.log('No console errors.')
