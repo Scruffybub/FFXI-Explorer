@@ -224,8 +224,52 @@ why the blend overrides are gated that way. The honest summary is that the
 weather geometry is fully identified and can be made to look right, and that
 what is missing is the data saying where and when the client puts it.
 
-Where placement might live: the zone DAT blocks the parsers currently skip, or a
-client-side table outside the zone file altogether. Nobody has looked.
+**Looked for, 2026-08-09. The zone file does not contain it.**
+
+Two diagnostics were added to `ZoneFile.ts`, both permanent:
+
+| Log | Reports |
+|---|---|
+| `[MZBMATCH]` | how many MZB entries matched an MMB name, and which names were dropped |
+| `[MMBNAMES]` | MMB blocks that **no** MZB entry ever names |
+| `[ORPHANSRC]` | unreferenced prefabs grouped by the MMB block they came from |
+
+The MZB instance list is the only placement data in a zone file, and it never
+names the weather geometry. Misareaux Coast: **60 of 274 MMB block names are
+never referenced**, and they are exactly the set in question — `niji`,
+`clod_a01`, `suny_a01`, `yuhi`, `kum0/1/2`, `thunder1`, `smoke01`, `star`,
+`kmi1/2/3`, `hamo`. Riverne: 131 of 266.
+
+`[ORPHANSRC]` closes the loop: every unreferenced prefab traces back to one of
+those blocks. It also reveals what the MMB block name actually is — **the second
+column of the texture string**. Texture `niji    niji` comes from MMB block
+`niji`; `clod    clod_a01` from block `clod_a01`. So field 2 names the *element*
+mesh and field 1 is the *state* it belongs to, which is the two-column reading
+confirmed from the other direction.
+
+The MZB entries that go the other way — naming blocks we have no MMB for — are
+collision proxies, not visuals: `hit_32c_coi1`, `col_kabe`,
+`kabe-atariyou` (壁 = wall, "for wall collision"), and `x`-prefixed names.
+Dropping them is correct.
+
+**Conclusion: FFXI does not ship placement for this geometry in the zone file.**
+It is a library the client instantiates at runtime — weather by state, effects
+by trigger. Anything that places it here is our invention, and that is a design
+decision rather than a parsing one.
+
+**A separate population hides in the same set.** Riverne's never-named list is
+full of `_h`/`_l` suffixed names — `_rat_w04_h`, `_tab_sugi1_h`, `bah_iwa2_l` —
+which read as high/low **LOD variants** rather than weather. If the client picks
+a detail level at runtime from a base name, those are unreferenced for an
+entirely different reason and should not be swept up with the weather.
+Unconfirmed; the `_h`/`_l` pairing is the only evidence so far.
+
+**A caution about the diagnostics themselves.** The first run of `[MMBNAMES]`
+reported `never named: 0`, which would have meant the opposite conclusion. That
+was a bug in the diagnostic — a `String.replace` that silently failed to apply,
+leaving a set-difference computed against the wrong collection. It was caught
+only because the number contradicted `[ORPHANSRC]`. When two diagnostics
+disagree, suspect the diagnostic before the data.
 
 ### What is left to decide
 

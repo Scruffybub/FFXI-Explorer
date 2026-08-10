@@ -147,6 +147,8 @@ export function parseZoneFile(
   // Map: MMB name → array of { startIdx, count } in the flat prefabs array.
   // Multiple MMB blocks can share a name (different pieces of the same area).
   const mmbNameMap = new Map<string, { startIdx: number; count: number }[]>()
+  // prefab index -> the MMB block name it came from, for diagnosing orphans
+  const prefabSource: string[] = []
 
   // MMB block names for sky objects rendered by our procedural sky instead
   const skyObjectNames = new Set(['sunsphere', 'moonsphere'])
@@ -191,6 +193,7 @@ export function parseZoneFile(
           mmbNameMap.set(name, arr)
         }
         arr.push({ startIdx, count: meshes.length })
+        for (let m = 0; m < meshes.length; m++) prefabSource[startIdx + m] = name
       }
     } catch { /* skip */ }
   }
@@ -222,6 +225,8 @@ export function parseZoneFile(
 
   let mzbTotal = 0
   let mzbMatched = 0
+  const unmatchedNames = new Map<string, number>()
+  const matchedNames = new Set<string>()
   const collisionParts: ParsedCollision[] = []
 
   for (const block of mzbBlocks) {
@@ -245,8 +250,16 @@ export function parseZoneFile(
 
       for (const inst of rawInstances) {
         const mappings = mmbNameMap.get(inst.name)
-        if (!mappings) continue
+        if (!mappings) {
+          // An MZB entry naming an MMB block we do not have is placement data
+          // being thrown away. That is the shape the weather geometry's missing
+          // positions would take, so record what was dropped rather than
+          // silently skipping it.
+          unmatchedNames.set(inst.name, (unmatchedNames.get(inst.name) ?? 0) + 1)
+          continue
+        }
         mzbMatched++
+        matchedNames.add(inst.name)
 
         // Create instances for ALL meshes across ALL MMB blocks with this name
         for (const mapping of mappings) {
@@ -264,6 +277,42 @@ export function parseZoneFile(
   }
 
   const unmatchedCount = { total: mzbTotal, matched: mzbMatched }
+
+  // Console, not onProgress: this is the question of whether FFXI ships
+  // placement for the geometry we cannot place. Also list the MMB block names
+  // that no MZB entry ever referenced — the other side of the same ledger.
+  {
+    const dropped = [...unmatchedNames.entries()].sort((a, b) => b[1] - a[1])
+    console.log(
+      `[MZBMATCH] ${mzbMatched}/${mzbTotal} MZB entries matched an MMB name; ` +
+      `${dropped.length} distinct names unmatched` +
+      (dropped.length ? `: ${JSON.stringify(dropped.slice(0, 25))}` : ''),
+    )
+    // The other side of the ledger: MMB blocks that exist but no MZB entry
+    // names. These are the prefabs that end up drawn at identity.
+    const neverNamed = [...mmbNameMap.keys()].filter(n => !matchedNames.has(n))
+    console.log(
+      `[MMBNAMES] ${mmbNameMap.size} MMB block names; ` +
+      `never named by any MZB entry: ${neverNamed.length} ` +
+      JSON.stringify(neverNamed.slice(0, 30)),
+    )
+  }
+
+  {
+    const referencedIdx = new Set(instances.map(i => i.meshIndex))
+    const bySource = new Map<string, number>()
+    for (let i = 0; i < prefabs.length; i++) {
+      if (referencedIdx.has(i)) continue
+      const src = prefabSource[i] ?? '(no MMB name recorded)'
+      bySource.set(src, (bySource.get(src) ?? 0) + 1)
+    }
+    const rows = [...bySource.entries()].sort((a, b) => b[1] - a[1])
+    console.log(
+      `[ORPHANSRC] ${prefabs.length - referencedIdx.size} of ${prefabs.length} prefabs unreferenced, by MMB block name: ` +
+      JSON.stringify(rows.slice(0, 30)),
+    )
+  }
+
   const collision = mergeCollision(collisionParts)
 
   // Console, not just onProgress: onProgress only paints a transient loading
