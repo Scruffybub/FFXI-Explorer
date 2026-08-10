@@ -350,9 +350,17 @@ const SKY_WEATHER_WORDS = [
 /**
  * Categories that are never weather, whatever else the name looks like.
  *
- * `model` is real zone geometry stored unreferenced — Riverne - Site #A01 has
- * 142 such prefabs and they are the floating islands themselves. A widened
- * filter that catches `model` deletes the zone.
+ * `model` names a geometry template, not a weather state, so a widened filter
+ * must not sweep it up on the strength of a word in its second field.
+ *
+ * An earlier version of this comment claimed Riverne - Site #A01's 142
+ * unreferenced `model` prefabs *are* the floating islands and that hiding them
+ * would delete the zone. **That was wrong.** Measured afterwards: those prefabs
+ * cluster within ~23 units of the zone origin, while the zone spans
+ * x[-884,966]; the islands come from the 18,053-entry instance list. Rendering
+ * Riverne with `?nounref=1` — every unreferenced prefab dropped — changes the
+ * frame by a mean absolute difference of **0.256** out of 255. They contribute
+ * essentially nothing.
  */
 const NEVER_WEATHER = new Set(['model'])
 const SKY_WEATHER_RE = new RegExp(

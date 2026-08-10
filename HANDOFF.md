@@ -47,10 +47,33 @@ Confirmed vocabulary, from the census plus visual isolation:
 | `star` | stars | `skywll` | sky wall |
 | `warp` | warp light pillars | `baha` | Bahamut (Misareaux/Riverne only) |
 
-**3. `model` is real zone geometry and must never be filtered.** Riverne carries
-142 unreferenced `model  …` prefabs (`ba_wal01`, `lat_wf`, `jug_wk*`) that are
-the floating islands themselves. Any classifier that widens to catch weather has
-to leave `model` alone.
+**3. All of it is a parked prefab library, not placed scenery.** This is the
+single most important thing on this page and it was established last, by
+measuring centres rather than reading names.
+
+Every unreferenced group in every zone measured sits **at the zone origin**.
+Misareaux Coast spans x[-560,840] z[-563,760]; its unreferenced groups centre
+at: `effect` (4,-5,1), `clod`/`wind` (2,-17,-3), `bahakumo` (0,0,0),
+`kaminari` (0,3,1), `niji` (0,-17,-12). Riverne's spread out to at most 23 units
+from origin against a zone spanning x[-884,966].
+
+That is the "area where the dome used to be" Ryan described: a storage yard at
+the origin holding everything the client instantiates at runtime — weather
+states, effects, cutscene geometry. **Their placement is not in the MZB instance
+list**, so drawing any of them at identity piles them at the origin. That is
+exactly the artifact in Ryan's rainbow screenshot.
+
+**A correction, because it shaped a code decision.** An earlier revision of this
+file claimed Riverne's 142 unreferenced `model  …` prefabs (`ba_wal01`,
+`lat_wf`, `jug_wk*`) *are* the floating islands, and that a filter catching
+`model` would delete the zone. **That was wrong.** They cluster at the origin
+like everything else; the islands come from the 18,053-entry instance list.
+Rendering Riverne with `?nounref=1` — every unreferenced prefab dropped —
+changes the frame by a mean absolute difference of **0.256 out of 255**.
+
+`NEVER_WEATHER` still excludes `model`, but for the modest reason that it names
+a geometry template rather than a weather state, not because the zone depends
+on it.
 
 **4. The two-field theory is proven by a duplicate.** Misareaux holds the same
 rainbow mesh twice — `effect  niji` (#581, caught by the filter) and
@@ -181,6 +204,28 @@ true`. Three renders came back numerically identical before that was added.
 the cloud layers and the rainbow as well, and `taki`/`kawa` currently divert to
 the water shader before any of this is reached. Deciding what the flag means for
 all of them is the next call, and it is Ryan's.
+
+### Should any of this be visible? Not yet — placement is the missing half
+
+Ryan asked directly whether the waterfall is supposed to show in the app. As
+things stand, **no**, and the centre measurements above are why: it is parked at
+the origin, not standing on a cliff. Drawing it in an ordinary zone view puts a
+waterfall in a heap at the zone centre.
+
+So the work splits cleanly in two, and only one half is done:
+
+| | Status |
+|---|---|
+| **Appearance** — make a prefab look like what it is | Solved for the waterfall: additive, no depth write, no alpha test, no vertex colour |
+| **Placement** — know where each one goes | **Not started, and not in the MZB instance list** |
+
+Until placement is answered, everything here belongs behind `?pick=`, which is
+why the blend overrides are gated that way. The honest summary is that the
+weather geometry is fully identified and can be made to look right, and that
+what is missing is the data saying where and when the client puts it.
+
+Where placement might live: the zone DAT blocks the parsers currently skip, or a
+client-side table outside the zone file altogether. Nobody has looked.
 
 ### What is left to decide
 
