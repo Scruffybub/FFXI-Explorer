@@ -120,8 +120,32 @@ their first field is `effect`:
 Purgonorgo adds `effect  umi1`. **This is a live lead for open problem 4a**
 ("water does not look like the game"). If FFXI's rivers and waterfalls get their
 look from these effect overlays rather than from the base surface, then every
-attempt so far has been tuning the wrong mesh. Nobody has rendered one yet —
-`?pick=taki` in Misareaux Coast is the one-line experiment.
+attempt so far has been tuning the wrong mesh.
+
+**`?pick=taki` was run, 2026-08-09. The waterfall is real.** Nine tall vertical
+ribbons of varying length, the longest falling 120 units, arranged down a cliff
+face — unmistakably a waterfall, correctly shaped and positioned, textured from
+a 256×256 sheet that resolves fine.
+
+It renders as **dark grey cloth**, and the reason is a genuine gap in the
+renderer rather than anything to do with this geometry:
+
+> **There is no blending mode anywhere in the zone renderer.** The only thing
+> the blend flag does is `const useAlpha = prefab.blending > 0`, which turns on
+> `alphaTest: 0.1` — a *cutout*. `transparent` is never set and
+> `THREE.AdditiveBlending` is never used. So every one of FFXI's three observed
+> modes (`0x0` opaque, `0x2000` translucent, `0x8000`) collapses to
+> "alpha-tested opaque".
+
+A greyscale streak texture drawn as alpha-tested opaque geometry is exactly dark
+cloth. Drawn additively — which is what a `0x8000` greyscale streak sheet is for
+— it would brighten what is behind it and read as falling water.
+
+This is one finding that touches 4a and 4b at once, and it is the first
+explanation of the water problem that is not about the water shader. **Blast
+radius is the caution**: `0x8000` is carried by the weather domes, the cloud
+layers and the rainbow as well, so changing its handling globally changes many
+zones at once. Test it behind `?pick=` first.
 
 ### What is left to decide
 
