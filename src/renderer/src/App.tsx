@@ -10,7 +10,9 @@ import {
   NEW_POINT_LIGHT, PRESETS,
   type LightingSettings, type PointLightSettings, type PointLightSpec,
   type PostSettings, type SceneSettings, type SurfaceInfo,
+  DEFAULT_MUSIC, type MusicSettings,
 } from './lib/settings'
+import { ZoneMusicPlayer, type MusicStatus } from './lib/zoneMusic'
 
 type LoadState =
   | { status: 'idle' }
@@ -34,6 +36,42 @@ export default function App() {
   // ZoneViewer once the zone is parsed, because it is a property of the zone
   // file rather than a setting — every zone stores a different set.
   const [weatherStates, setWeatherStates] = useState<string[]>([])
+  // ?music=1 turns it on at startup so harnesses can exercise the path; a
+  // headless run hears nothing, but the status says whether it got there.
+  const [music, setMusic] = useState<MusicSettings>(() => ({
+    ...DEFAULT_MUSIC,
+    enabled: typeof window !== 'undefined' &&
+      new URLSearchParams(window.location.search).get('music') === '1',
+  }))
+  const [musicStatus, setMusicStatusRaw] = useState<MusicStatus>({ state: 'silent' })
+  const setMusicStatus = useCallback((s: MusicStatus) => {
+    console.log('[MUSIC] ' + JSON.stringify(s))
+    setMusicStatusRaw(s)
+  }, [])
+  const musicPlayer = useRef<ZoneMusicPlayer | null>(null)
+  // Volume rides the gain node directly, so dragging the slider does not
+  // reload or restart the track.
+  useEffect(() => {
+    musicPlayer.current?.setVolume(music.enabled ? music.volume : 0)
+  }, [music.enabled, music.volume])
+
+  // One track per zone. Keyed on the zone id rather than the parsed data, so
+  // re-parsing the same zone does not restart the music from the top.
+  useEffect(() => {
+    if (!ffxiPath || !selected) return
+    if (!musicPlayer.current) musicPlayer.current = new ZoneMusicPlayer()
+    const player = musicPlayer.current
+    if (!music.enabled) {
+      player.stop()
+      setMusicStatus({ state: 'silent' })
+      return
+    }
+    player.setVolume(music.volume)
+    void player.playZone(ffxiPath, selected.id, setMusicStatus)
+  }, [ffxiPath, selected?.id, music.enabled])
+
+  useEffect(() => () => { musicPlayer.current?.dispose() }, [])
+
   const [pointLights, setPointLights] = useState<PointLightSettings>(DEFAULT_POINT_LIGHTS)
   const [selectedLightId, setSelectedLightId] = useState<number | null>(null)
   const [placingLight, setPlacingLight] = useState(false)
@@ -527,6 +565,9 @@ export default function App() {
         selectedLightId={selectedLightId}
         placingLight={placingLight}
         weatherStates={weatherStates}
+        music={music}
+        musicStatus={musicStatus}
+        onMusic={patch => setMusic(m => ({ ...m, ...patch }))}
         onLighting={patch => setLighting(l => ({ ...l, ...patch }))}
         onPost={patch => setPost(p => ({ ...p, ...patch }))}
         onScene={patch => setScene(s => ({ ...s, ...patch }))}

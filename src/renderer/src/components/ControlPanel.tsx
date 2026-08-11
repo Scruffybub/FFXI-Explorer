@@ -1,8 +1,10 @@
 import { useState, useMemo } from 'react'
 import type {
-  LightingSettings, PointLightSettings, PointLightSpec, PostSettings, SceneSettings,
+  LightingSettings, MusicSettings, PointLightSettings, PointLightSpec,
+  PostSettings, SceneSettings,
 } from '../lib/settings'
 import { PRESETS } from '../lib/settings'
+import type { MusicStatus } from '../lib/zoneMusic'
 
 interface ControlPanelProps {
   lighting: LightingSettings
@@ -13,6 +15,9 @@ interface ControlPanelProps {
   placingLight: boolean
   /** Weather states the loaded zone carries geometry for; varies per zone. */
   weatherStates: string[]
+  music: MusicSettings
+  musicStatus: MusicStatus
+  onMusic: (patch: Partial<MusicSettings>) => void
   onLighting: (patch: Partial<LightingSettings>) => void
   onPost: (patch: Partial<PostSettings>) => void
   onScene: (patch: Partial<SceneSettings>) => void
@@ -56,6 +61,31 @@ const WEATHER_LABELS: Record<string, string> = {
   effect: 'Effects (mixed)',
   warp: 'Warp lights',
   bahakumo: 'Bahamut cloud',
+}
+
+/**
+ * Says what the music is doing in words, including why it is not playing.
+ * "Silent" and "cannot decode" are very different states and a blank panel
+ * would make them look identical.
+ */
+function describeMusic(s: MusicStatus): string {
+  switch (s.state) {
+    case 'silent':
+      return 'This zone has no music of its own — 151 of 298 are silent in FFXI’s own tables.'
+    case 'loading':
+      return `Loading track ${s.track}…`
+    case 'playing':
+      return `Track ${s.track} · ${Math.floor(s.seconds / 60)}:` +
+        `${String(Math.round(s.seconds % 60)).padStart(2, '0')}` +
+        (s.loops ? ' · looping' : '')
+    case 'unsupported':
+      return `Track ${s.track} is encrypted ATRAC3 (codec ${s.codec}), which is not ` +
+        'decoded yet. 31 of the 74 zone tracks are in this format.'
+    case 'missing':
+      return `Track ${s.track} is not in this installation.`
+    case 'error':
+      return `Track ${s.track} failed: ${s.message}`
+  }
 }
 
 function Section({
@@ -145,6 +175,7 @@ function formatHour(h: number): string {
 
 export default function ControlPanel({
   lighting, post, scene, pointLights, selectedLightId, placingLight, weatherStates,
+  music, musicStatus, onMusic,
   onLighting, onPost, onScene, onPointLights, onUpdateLight, onRemoveLight,
   onSelectLight, onTogglePlacing, onPreset, onReset,
 }: ControlPanelProps) {
@@ -639,6 +670,24 @@ export default function ControlPanel({
               <Slider label="Vignette darkness" value={post.vignetteDarkness} min={0} max={1.5} step={0.01}
                 onChange={v => onPost({ vignetteDarkness: v })} />
             )}
+          </>
+        )}
+      </Section>
+
+      <Section title="Music">
+        <Toggle
+          label="Zone music"
+          checked={music.enabled}
+          onChange={v => onMusic({ enabled: v })}
+          hint="Plays the track FFXI assigns to this zone, read straight from the install."
+        />
+        {music.enabled && (
+          <>
+            <Slider
+              label="Volume" value={music.volume} min={0} max={1} step={0.01}
+              onChange={v => onMusic({ volume: v })}
+            />
+            <p className="note small">{describeMusic(musicStatus)}</p>
           </>
         )}
       </Section>

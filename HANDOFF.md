@@ -1116,8 +1116,35 @@ rather than solved.
 
 ## 6. Feature ideas not started
 
-- **Zone music.** Ryan's request, 2026-08-09. **The mapping is solved; the
-  decoder is not.**
+- **Zone music — PLAYING IN THE APP as of 2026-08-10.** Panel → **Music** →
+  *Zone music* (off by default) plus a volume slider and a line of status.
+  `lib/bgw.ts` decodes, `lib/zoneMusic.ts` resolves and plays, `App.tsx` starts
+  a track per zone. `?music=1` enables it at startup for harnesses, and every
+  status change logs as `[MUSIC]`.
+
+  Verified in the built app, not just compiled:
+
+  | Zone | Result |
+  |---|---|
+  | West Ronfaure (100) | track 109, playing, 263.1s, looping |
+  | Misareaux Coast (25) | track 230, playing, 232.6s, looping |
+  | Riverne - Site #A01 (30) | silent — correct, the zone has no ambient track |
+  | Aht Urhgan Whitegate (50) | `unsupported`, codec 3 — degrades, does not error |
+
+  **84 zones play, 64 are codec 3 and stay silent**, the rest have no track at
+  all. The status line says which of those three a quiet zone is, because they
+  look identical otherwise.
+
+  Details worth keeping: volume rides the gain node so dragging the slider does
+  not restart the track; loading is generation-guarded because a zone switch can
+  outrun a 23M-sample decode; music is deliberately **not** in `SceneSettings`,
+  since presets apply over `DEFAULT_SCENE` and clicking a preset would otherwise
+  stop the music as a side effect.
+
+  The remaining note below is the research that got here.
+
+- **Zone music research.** Ryan's request, 2026-08-09. **The mapping is solved;
+  ATRAC3 is not.**
 
   The music is **not** in the ROM DAT archives — it is ordinary files at
   `<install>/sound<N>/win/music/data/musicNNN.bgw`, **223 of them** spread over

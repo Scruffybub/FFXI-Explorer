@@ -170,6 +170,24 @@ export interface PostSettings {
   dofBokehScale: number
 }
 
+/**
+ * Zone music. Kept out of SceneSettings on purpose: presets apply over
+ * DEFAULT_SCENE, so a preset click would otherwise stop the music or reset the
+ * volume as a side effect of changing the lighting.
+ */
+export interface MusicSettings {
+  enabled: boolean
+  /** 0..1, applied to the output gain. */
+  volume: number
+}
+
+export const DEFAULT_MUSIC: MusicSettings = {
+  // Off by default. A viewer that starts playing audio the moment it opens a
+  // zone is startling, and 151 of 298 zones are silent anyway.
+  enabled: false,
+  volume: 0.5,
+}
+
 export interface SceneSettings {
   timeOfDay: number
   fogDensity: number
