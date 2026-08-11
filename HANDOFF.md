@@ -302,11 +302,30 @@ In walk mode it works: Misareaux with `thdr` drops mean frame brightness from
 94.8 to 22.0, a difference of **75.8**, and reads as a dark churning storm sky
 overhead. `suny` gives 67.1.
 
-**What is still wrong with it.** A hard-edged polygon cuts across the sky at the
-dome boundary — the layers are flat sheets, not a closed dome, so their edges
-show. Height is left at the authored value rather than guessed at. And the
-whole placement is our invention, flagged as such in the toggle's own hint,
-because FFXI ships none.
+**What is still wrong with it — Ryan's verdict, 2026-08-09: "none of them seem
+to work properly."** Treat that as the status. The selector is mechanically
+correct and the geometry is the right geometry, but no state yet reads as
+convincing weather. Known contributors:
+
+- The layers are flat sheets, not a closed dome, so a hard-edged polygon cuts
+  across the sky at their boundary.
+- Height is left at the authored value; nothing knows how far overhead a layer
+  should sit.
+- Scale is untouched. A 241-unit sheet may want scaling to the draw distance.
+- Placement is our invention throughout, flagged in the toggle's own hint.
+
+**`effect` is not a weather state and should probably not be in this list.**
+Ryan found the Misareaux waterfall rendering under "Effects (mixed)", which is
+correct behaviour but confusing framing: `effect` is the catch-all *category*
+holding waterfalls, rivers, sea and the rainbow, not a weather condition the
+client picks between. It earns its place for now only because it is a
+convenient way to see that geometry. If the weather list is ever cleaned up,
+split `effect` into its own control rather than deleting it.
+
+**Do not tune this further without new information.** Everything remaining is
+guesswork about intent, and the project's own history is that guesswork costs
+more than it returns. The unblocking fact would be placement or scale data, and
+§0 records that the zone file does not contain it.
 
 ### What is left to decide
 
