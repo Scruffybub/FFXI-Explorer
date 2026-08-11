@@ -1166,11 +1166,50 @@ rather than solved.
     LandSandBoat's data, not proof the game never varies music by time of day.
     Do not build a day/night crossfade on the strength of it.
 
-  **What is left: the container format.** Nothing decodes a BGW yet. Streamed
-  ADPCM is the likely answer, and if so it needs decoding to PCM before the Web
-  Audio API will take it. Header bytes seen so far: magic at 0x00, a size-like
-  uint32 at 0x10, the track id at 0x14, two more uint32s, a 16-byte block that
-  looks like a hash, then `0x30` at 0x30 which reads as a header length.
+  **The container format is solved for 143 of 222 files.**
+  `scripts/bgw-decode.cjs` decodes a BGW to WAV, and `--survey` reports the
+  codec census. Layout, following vgmstream's `meta/bgw.c`:
+
+  | Offset | Field |
+  |---|---|
+  | 0x00 | `"BGMStream"` |
+  | 0x0C | **codec** — `0` PS-ADPCM, `3` ATRAC3 (encrypted) |
+  | 0x10 | file size (matches disk; cheap integrity check) |
+  | 0x14 | track id |
+  | 0x18 | block size = frames per channel |
+  | 0x1C | loop start in frames, `<= 0` for none |
+  | 0x20 | sample rate, obfuscated: `(u32@0x20 + u32@0x24) & 0x7FFFFFFF` |
+  | 0x28 | data offset — `0x30` in every real file |
+  | 0x2E / 0x2F | channels / block align (= samples per frame) |
+
+  **Codec 0 (PS-ADPCM) — done. 143 files, 43 of the 74 ambient zone tracks.**
+  Frames are `blockAlign / 2 + 1` bytes: **one** header byte (filter index in
+  the high nibble, shift in the low), then nibbles, two samples per byte, low
+  nibble first. This is *not* standard 16-byte PS-ADPCM — there is no flag byte
+  and the frame size varies per file (4, 8, 16, 32, 64, 128 all seen). Channels
+  interleave one frame at a time.
+
+  **The one trap, and it decodes cleanly while being wrong.** vgmstream's
+  *standard* `decode_psx` sets `shift_factor = 20 - shift_factor`;
+  `decode_psx_configurable` has no such line and uses the shift directly.
+  Borrowing it produces perfectly clean, correctly-shaped audio at roughly a
+  twelfth of the right amplitude — peak 2603 of 32767 instead of 31260. Nothing
+  errors. **Always check peak and RMS**, not just that a decode ran.
+
+  Verified across five tracks: peaks 30953–31740 against a 32767 ceiling, no
+  clipping, durations 111–302s, crest factor about 7.5 (noise sits near 3).
+  Track 23 uses blockAlign 128 where the others use 16, so the variable frame
+  size is exercised.
+
+  **Codec 3 (ATRAC3) — not done. 79 files, 31 of the 74 ambient tracks.** The
+  *encryption is trivial*: XOR each byte with `key[(offset + i) % keySize]`,
+  where the key is the file's own first `frameSize * channels` bytes with the
+  first 4 bytes of each channel's frame XORed by `0xA0024E9F`
+  (vgmstream `meta/bgw_streamfile.h`, credited to Moogle Toolbox). The hard part
+  is ATRAC3 itself — a Sony MDCT codec with no browser support. Options are
+  bundling FFmpeg (adds tens of MB and an LGPL question to an 80 MB app), an
+  ATRAC3 decoder in WASM, or leaving those 31 zones silent. **This is a real
+  decision, not a small task.**
 
 - **Path-traced stills.** `three-gpu-pathtracer` renders progressively in WebGL —
   far too slow to fly around in, but viable as a "render high-quality still"
