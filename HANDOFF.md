@@ -1116,25 +1116,61 @@ rather than solved.
 
 ## 6. Feature ideas not started
 
-- **Zone music.** Ryan's request, 2026-08-09: play a zone's music while it is
-  loaded. A first look says this is very achievable. The music is **not** inside
-  the ROM DAT archives — it is ordinary files on disk at
-  `<install>/sound<N>/win/music/data/musicNNN.bgw`, **224 of them** across
-  `sound`, `sound2`…`sound9` (111 in `sound` alone). They open with the ASCII
-  magic `BGMStream`. Alongside them are ~11,800 `.spw` files, which are sound
-  effects rather than music.
+- **Zone music.** Ryan's request, 2026-08-09. **The mapping is solved; the
+  decoder is not.**
 
-  What is not yet known, and should be established before any player is written:
-  (a) what the BGW container actually holds — streamed ADPCM is the likely
-  answer, and if so it needs decoding to PCM before the Web Audio API will take
-  it; (b) which `musicNNN` belongs to which zone. The zone→music mapping is not
-  in the seed CSV, and LandSandBoat's zone tables are the obvious place to look,
-  the same source `resources/item-names.json` came from. Do the mapping first —
-  a decoder with nothing to point it at proves nothing.
+  The music is **not** in the ROM DAT archives — it is ordinary files at
+  `<install>/sound<N>/win/music/data/musicNNN.bgw`, **223 of them** spread over
+  `sound`, `sound2`…`sound9`, plus `mov/music999.bgw` (80 MB, the opening
+  movie). They open with the ASCII magic `BGMStream`. The ~11,800 `.spw`
+  alongside them are sound effects, not music. Electron reads them through the
+  existing `ffxi:readDat` IPC, which takes a root and a relative path and does
+  not care that the file is not a DAT.
 
-  Electron can read these directly through the existing `ffxi:readDat` IPC path;
-  it takes a root plus a relative path and does not care that the file is not a
-  DAT.
+  **`resources/zone-music.json`** now maps zone id → `{day, night, solo, multi}`,
+  built by `scripts/build-zone-music.cjs` from LandSandBoat's
+  `zone_settings.sql` (fetched from GitHub, not vendored — same arrangement as
+  the item names). Its columns are `music_day` / `music_night` for ambient and
+  `battlesolo` / `battlemulti` for combat; **0 means silent and is not an
+  error**.
+
+  Three independent checks say the mapping is right: 283 of our 298 zone ids
+  carry a name matching LandSandBoat's exactly (the 15 that differ are rows
+  where our CSV has no name); **every** music id referenced by any zone resolves
+  to a real file, 0 missing; and each BGW stores its own track number at offset
+  **0x14** (`0x17` in music023, `0x65` in music101), so the file self-identifies.
+
+  What the 223 files are, by role:
+
+  | Role | Count |
+  |---|---|
+  | Ambient (zone) only | 42 |
+  | Battle only | 23 |
+  | Both ambient and battle | 32 |
+  | **Referenced by no zone at all** | **126** |
+
+  That last row is the menus, cutscenes, mog house, events and the movie —
+  Ryan's point that much of the music is not zone music, quantified. Of the 298
+  zones the viewer lists, **148 have an ambient track and 151 are silent**;
+  Riverne - Site #A01 is one of the silent ones, carrying battle music only.
+  Only **74 distinct** ambient tracks cover those 148 zones.
+
+  Two cautions for whoever writes the loader:
+
+  - **`musicNNN` is not unique across directories.** `music068` exists in both
+    `sound` and `sound9`, `music181` in both `sound2` and `sound5`. The sound
+    dirs overlay like the ROM dirs, so pick deliberately rather than taking the
+    first hit; the resource stores numbers, not paths, so the app resolves them.
+  - **`music_day` and `music_night` are never different in this dump.** Every
+    zone with music has the same id in both. That is a property of
+    LandSandBoat's data, not proof the game never varies music by time of day.
+    Do not build a day/night crossfade on the strength of it.
+
+  **What is left: the container format.** Nothing decodes a BGW yet. Streamed
+  ADPCM is the likely answer, and if so it needs decoding to PCM before the Web
+  Audio API will take it. Header bytes seen so far: magic at 0x00, a size-like
+  uint32 at 0x10, the track id at 0x14, two more uint32s, a 16-byte block that
+  looks like a hash, then `0x30` at 0x30 which reads as a header length.
 
 - **Path-traced stills.** `three-gpu-pathtracer` renders progressively in WebGL —
   far too slow to fly around in, but viable as a "render high-quality still"
