@@ -79,8 +79,8 @@ function describeMusic(s: MusicStatus): string {
         `${String(Math.round(s.seconds % 60)).padStart(2, '0')}` +
         (s.loops ? ' · looping' : '')
     case 'unsupported':
-      return `Track ${s.track} is encrypted ATRAC3 (codec ${s.codec}), which is not ` +
-        'decoded yet. 31 of the 74 zone tracks are in this format.'
+      return `Track ${s.track} uses codec ${s.codec}, which this build cannot decode. ` +
+        'Codec 0 (PS-ADPCM) and codec 3 (ATRAC3) both play.'
     case 'missing':
       return `Track ${s.track} is not in this installation.`
     case 'error':

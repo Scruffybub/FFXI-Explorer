@@ -7,6 +7,10 @@
  */
 import zoneMusicTable from '../../../../resources/zone-music.json'
 import { decodeBgw, readBgwHeader, type DecodedAudio } from './bgw'
+ import { decodeAtrac3Bgw } from './atrac3'
+
+/** ATRAC3 encoder delay, per vgmstream: 1024*2 + 69*2 samples. */
+const ATRAC3_ENCODER_DELAY = 1024 * 2 + 69 * 2
 
 interface ZoneMusicEntry {
   name: string
@@ -117,14 +121,29 @@ export class ZoneMusicPlayer {
       const bytes = new Uint8Array(raw)
 
       const header = readBgwHeader(bytes)
-      if (header && header.codec !== 0) {
-        // Codec 3 is encrypted ATRAC3 — see lib/bgw.ts. Report rather than
-        // fail silently, so a quiet zone can be told from a broken one.
+      let decoded: DecodedAudio | null = null
+      if (header && header.codec === 3) {
+        const at3 = decodeAtrac3Bgw(bytes)
+        if (at3) {
+          // ATRAC3 carries an encoder delay of 1024*2 + 69*2 samples before
+          // the real audio, and this file's loop point is in samples measured
+          // against the undelayed stream. Trim both together or the loop lands
+          // 2186 samples late.
+          const trimmed = at3.channels.map(c => c.subarray(ATRAC3_ENCODER_DELAY))
+          decoded = {
+            channels: trimmed,
+            sampleRate: at3.sampleRate,
+            loopStartSample: header.loopStart > 0
+              ? Math.max(0, header.loopStart - ATRAC3_ENCODER_DELAY)
+              : null,
+          }
+        }
+      } else if (header && header.codec !== 0) {
         onStatus({ state: 'unsupported', track, codec: header.codec })
         return
+      } else {
+        decoded = decodeBgw(bytes)
       }
-
-      const decoded = decodeBgw(bytes)
       if (gen !== this.generation) return
       if (!decoded) { onStatus({ state: 'error', track, message: 'decode failed' }); return }
 

@@ -1228,7 +1228,40 @@ rather than solved.
   Track 23 uses blockAlign 128 where the others use 16, so the variable frame
   size is exercised.
 
-  **Codec 3 (ATRAC3) — not done. 79 files, 31 of the 74 ambient tracks.** The
+  **Codec 3 (ATRAC3) — DONE, 2026-08-10.** `src/renderer/src/lib/atrac3.ts` is a
+  full port of FFmpeg's `atrac3.c` + `atrac.c`: bitstream reader, canonical
+  Huffman from lengths (symbol offset **-31**), tonal components, gain
+  compensation, a 512-point IMDCT and the 3-band QMF. All 74 ambient tracks now
+  play; nothing is left silent for codec reasons.
+
+  **Validated bit-exactly, not by ear.** `scripts/at3-oracle.cjs` decrypts, wraps
+  the stream as a RIFF `.at3` and decodes it with a real ffmpeg;
+  `scripts/atrac3.cjs` is the same algorithm as the shipped port with a
+  `--selftest`. Against ffmpeg over music178, music051 and music147 the port
+  agrees at **106-107 dB SNR with a maximum difference of 1 LSB**. ffmpeg is a
+  development tool only — not shipped, not a dependency.
+
+  Two traps, both of which produce plausible output rather than an error:
+
+  - **The IMDCT sign.** FFmpeg's `AV_TX_FLOAT_MDCT` inverse carries the opposite
+    sign from the textbook IMDCT, so `MDCT_SCALE` is **negative**. Uncorrected,
+    the decode measured -6.0 dB SNR against the reference while having an
+    identical RMS — the diff was exactly 2x the signal, which is the signature
+    of a pure inversion. The internal selftest compares fast against direct and
+    cannot see this; only the external oracle can.
+  - **The DCT-IV.** The first attempt used half-remembered twiddles and scored
+    3e-3 relative error — small enough to sound almost right. Replaced with a
+    derivation that folds the half-bin shift into the input and uses one
+    2N-point FFT, which now matches the direct transform to 5e-14.
+
+  Coding mode is **0 (SINGLE), not joint stereo** — ffmpeg rejects mode 1 on
+  these files with "JS mono Sound Unit id != 3" — so matrixing and channel
+  weighting are absent by construction. Decode costs about 2.7s for a
+  four-minute track.
+
+  The historical note follows.
+
+  **Codec 3 (ATRAC3) — was not done. 79 files, 31 of the 74 ambient tracks.** The
   *encryption is trivial*: XOR each byte with `key[(offset + i) % keySize]`,
   where the key is the file's own first `frameSize * channels` bytes with the
   first 4 bytes of each channel's frame XORed by `0xA0024E9F`
