@@ -2570,26 +2570,31 @@ export default function ZoneViewer({
           // 0/255, every alpha-driven decision in the renderer is working from
           // wrong data — the standing suspicion in §5. Buckets are the share of
           // texels at each alpha level, over every texture in the zone.
-          let opaque = 0, clear = 0, mid = 0, total = 0
-          const perTexMean: number[] = []
+          // Grouped by decode path, because the question is which one is
+          // producing the mid-range alpha.
+          const byFmt: Record<string, { tex: number; opaque: number; clear: number; mid: number; total: number; levels: Set<number> }> = {}
           for (const t of zoneData.textures) {
-            let sum = 0, n = 0
+            const f = t.format ?? '?'
+            const g = byFmt[f] ??= { tex: 0, opaque: 0, clear: 0, mid: 0, total: 0, levels: new Set() }
+            g.tex++
             for (let i = 3; i < t.rgba.length; i += 4) {
               const a = t.rgba[i]
-              if (a >= 250) opaque++
-              else if (a <= 5) clear++
-              else mid++
-              sum += a; n++; total++
+              if (a >= 250) g.opaque++
+              else if (a <= 5) g.clear++
+              else g.mid++
+              g.total++
+              if (g.levels.size < 40) g.levels.add(a)
             }
-            if (n) perTexMean.push(Math.round(sum / n))
           }
-          perTexMean.sort((a, b) => a - b)
-          const pct = (v: number) => total ? +(100 * v / total).toFixed(2) : 0
-          return {
-            textures: zoneData.textures.length,
-            opaquePct: pct(opaque), clearPct: pct(clear), midPct: pct(mid),
-            medianTexMeanAlpha: perTexMean[perTexMean.length >> 1] ?? -1,
+          const out: Record<string, unknown> = {}
+          for (const [f, g] of Object.entries(byFmt)) {
+            const pct = (v: number) => g.total ? +(100 * v / g.total).toFixed(1) : 0
+            out[f] = {
+              tex: g.tex, opaque: pct(g.opaque), clear: pct(g.clear), mid: pct(g.mid),
+              distinctAlpha: g.levels.size,
+            }
           }
+          return out
         })()) + ' ' +
         `[BLENDHIST] ` + JSON.stringify((() => {
           // What blend flags actually reach the screen. Unreferenced prefabs are

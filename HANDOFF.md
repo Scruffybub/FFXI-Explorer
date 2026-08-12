@@ -1115,7 +1115,56 @@ candidates, neither verified:
 
 ---
 
-## 5. The strongest open lead
+## 5a. The alpha theory is wrong — the decode is fine, the *meaning* is not
+
+**Measured 2026-08-11, and it retires the hypothesis §5 has carried for months.**
+`[ALPHAHIST]` now groups by decode path (`ParsedTexture.format`), and the two
+paths behave completely differently:
+
+| Zone | path | textures | opaque | mid-range | distinct alpha levels |
+|---|---|---|---|---|---|
+| West Ronfaure | indexed | 14 | **100%** | 0% | **2** |
+| West Ronfaure | dxt3 | 39 | **0.8%** | 66.5% | **16** |
+| Zone 103 | indexed | 10 | 100% | 0% | 2 |
+| Zone 103 | dxt3 | 53 | 1.9% | 48.6% | 10 |
+| Misareaux | indexed | 13 | 99.5% | 0% | 2 |
+| Misareaux | dxt3 | 106 | 0.8% | 64.1% | 16 |
+
+Read that carefully, because it says the opposite of what was assumed:
+
+- The **indexed** path is perfect — a clean 0/255 split, exactly two levels.
+- The **DXT3** path yields **all 16** nibble values, which is what a *correct*
+  4-bit expansion produces. Not a truncated or misaligned range.
+- The **colours from those same blocks decode correctly** — zones look right. A
+  wrong block layout or a mistaken format would corrupt colour first and most
+  visibly, and it does not.
+
+So the bytes reaching `decompressDXT3` are the right bytes, the nibble order is
+right, and the expansion is right. **The decode is not broken.** What is broken
+is the assumption that this channel means opacity.
+
+FFXI's DXT3 alpha for terrain is **not an opacity channel**. The comment already
+sitting at the `rgba[d+3]` line said as much from a different direction —
+"terrain textures average ~120 alpha but carry ~6% texels at zero… the PS2
+data-mask use of the alpha channel, not transparency" — and this measurement is
+that observation generalised across three zones and 198 textures.
+
+**Consequences, and they are large:**
+
+1. **§5 below should not be pursued as written.** Re-checking A1/81/B1 header
+   offsets or `guessCompressedLayout` is chasing a bug that the evidence says is
+   not there. Do not spend a session on it.
+2. **No blending scheme driven by this alpha can work** — see 4f. Alpha-testing
+   at 0.1 is effectively "ignore the channel", which is why it is the least-bad
+   behaviour rather than a correct one.
+3. **4b needs a different discriminator.** The next measurement is to split
+   `[ALPHAHIST]` by *what the texture is used for* rather than how it was
+   decoded: if genuine cutout sprites (foliage) show large contiguous zero
+   regions while terrain shows noise-like scatter, that spatial difference is
+   the separator five share-based attempts all missed. That is also exactly what
+   the alternation-rate idea from the model work predicts.
+
+## 5. The strongest open lead (superseded — read 5a first)
 
 > **Partly resolved, 2026-08-08.** The DXT3 alpha *decode itself was checked and
 > is correct*: nibble order and the `(a << 4) | a` expansion in

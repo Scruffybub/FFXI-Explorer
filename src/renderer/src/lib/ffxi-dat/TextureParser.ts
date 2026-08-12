@@ -181,17 +181,18 @@ export function parseTextureBlock(
     const pixelData = reader.readBytes(ddsSize)
 
     let rgba: Uint8Array
+    let fmt = '?'
     if (ddsType === '3TXD') {
-      rgba = decompressDXT3(pixelData, width, height)
+      rgba = decompressDXT3(pixelData, width, height); fmt = 'dxt3'
     } else if (ddsType === '1TXD') {
-      rgba = decompressDXT1(pixelData, width, height)
+      rgba = decompressDXT1(pixelData, width, height); fmt = 'dxt1'
     } else {
       return null // Unknown DDS type
     }
 
     return {
       name: id.trim(),
-      texture: { width, height, rgba },
+      texture: { width, height, rgba, format: fmt },
     }
   }
 
@@ -206,17 +207,18 @@ export function parseTextureBlock(
     const pixelData = reader.readBytes(ddsSize)
 
     let rgba: Uint8Array
+    let fmt = '?'
     if (ddsType === '3TXD') {
-      rgba = decompressDXT3(pixelData, width, height)
+      rgba = decompressDXT3(pixelData, width, height); fmt = 'dxt3'
     } else if (ddsType === '1TXD') {
-      rgba = decompressDXT1(pixelData, width, height)
+      rgba = decompressDXT1(pixelData, width, height); fmt = 'dxt1'
     } else {
       return null
     }
 
     return {
       name: id.trim(),
-      texture: { width, height, rgba },
+      texture: { width, height, rgba, format: fmt },
     }
   }
 
@@ -269,7 +271,7 @@ function parseB1Texture(
     rgba[d + 3] = a > 0 ? 255 : 0
   }
 
-  return { name, texture: { width, height, rgba } }
+  return { name, texture: { width, height, rgba, format: 'indexed' } }
 }
 
 /** Fallback: try DXT decoding for 0xB1 blocks that don't fit the indexed format. */
@@ -290,14 +292,14 @@ function parseB1AsDXT(
     const pixelOffset = dataOffset + dataLength - expectedDXT3
     reader.seek(pixelOffset)
     const pixelData = reader.readBytes(expectedDXT3)
-    return { name, texture: { width, height, rgba: decompressDXT3(pixelData, width, height) } }
+    return { name, texture: { width, height, rgba: decompressDXT3(pixelData, width, height), format: 'dxt3-b1' } }
   }
 
   if (dataLength >= expectedDXT1 + B1_HEADER_SIZE) {
     const pixelOffset = dataOffset + dataLength - expectedDXT1
     reader.seek(pixelOffset)
     const pixelData = reader.readBytes(expectedDXT1)
-    return { name, texture: { width, height, rgba: decompressDXT1(pixelData, width, height) } }
+    return { name, texture: { width, height, rgba: decompressDXT1(pixelData, width, height), format: 'dxt1-b1' } }
   }
 
   console.warn(`[TextureParser] 0xB1 texture "${name}" (${width}×${height}) doesn't fit indexed or DXT layout`)
