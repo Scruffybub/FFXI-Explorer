@@ -272,6 +272,12 @@ const BLEND_MODE =
     : ''
 
 /** Diagnostic, PICK-only: drop vertex colours, which are very dark here. */
+/** Experiment selector for FFXI blend-flag handling; see the use site. */
+const BLEND_EXP =
+  typeof window !== 'undefined'
+    ? Number(new URLSearchParams(window.location.search).get('blendexp') ?? 0) || 0
+    : 0
+
 const NO_VCOLOR =
   typeof window !== 'undefined' &&
   new URLSearchParams(window.location.search).has('novcolor')
@@ -2381,6 +2387,34 @@ export default function ZoneViewer({
             ? new THREE.MeshLambertMaterial(common)
             : new THREE.MeshBasicMaterial(common)
 
+        // Experiment: ?blendexp=N changes how FFXI's blend flags composite,
+        // globally. Gated behind a param because 0x8000 sits on 27-40% of the
+        // *visible* geometry in every zone measured (West Ronfaure 79 of 294
+        // referenced prefabs, zone 103 203 of 512), so this is not a change to
+        // make blind.
+        //
+        //   0/absent  every non-zero flag becomes alphaTest 0.1 — the behaviour
+        //             since the beginning, and what the sweep compares against
+        //   1         0x2000 becomes a real alpha blend; 0x8000 unchanged
+        //   2         as 1, and 0x8000 becomes additive
+        if (BLEND_EXP > 0 && !isWater) {
+          const m = mat as THREE.MeshBasicMaterial
+          const flag = prefab.blending >>> 0
+          if (flag & 0x2000) {
+            m.transparent = true
+            m.blending = THREE.NormalBlending
+            m.depthWrite = false
+            m.alphaTest = 0
+            m.needsUpdate = true
+          } else if (BLEND_EXP >= 2 && (flag & 0x8000)) {
+            m.transparent = true
+            m.blending = THREE.AdditiveBlending
+            m.depthWrite = false
+            m.alphaTest = 0
+            m.needsUpdate = true
+          }
+        }
+
         // Diagnostic: ?blend= overrides how the picked meshes composite.
         //
         // Deliberately gated behind PICK. The blend flag 0x8000 is carried by
@@ -2530,6 +2564,48 @@ export default function ZoneViewer({
         .filter(o => !referenced.has(o.i))
         .sort((a, b) => (b.w + b.d) - (a.w + a.d))
       console.log(
+        `[ALPHAHIST] ` + JSON.stringify((() => {
+          // Blending can only be as good as the alpha channel. If FFXI's
+          // textures decode to mid-range alpha where they should be a hard
+          // 0/255, every alpha-driven decision in the renderer is working from
+          // wrong data — the standing suspicion in §5. Buckets are the share of
+          // texels at each alpha level, over every texture in the zone.
+          let opaque = 0, clear = 0, mid = 0, total = 0
+          const perTexMean: number[] = []
+          for (const t of zoneData.textures) {
+            let sum = 0, n = 0
+            for (let i = 3; i < t.rgba.length; i += 4) {
+              const a = t.rgba[i]
+              if (a >= 250) opaque++
+              else if (a <= 5) clear++
+              else mid++
+              sum += a; n++; total++
+            }
+            if (n) perTexMean.push(Math.round(sum / n))
+          }
+          perTexMean.sort((a, b) => a - b)
+          const pct = (v: number) => total ? +(100 * v / total).toFixed(2) : 0
+          return {
+            textures: zoneData.textures.length,
+            opaquePct: pct(opaque), clearPct: pct(clear), midPct: pct(mid),
+            medianTexMeanAlpha: perTexMean[perTexMean.length >> 1] ?? -1,
+          }
+        })()) + ' ' +
+        `[BLENDHIST] ` + JSON.stringify((() => {
+          // What blend flags actually reach the screen. Unreferenced prefabs are
+          // mostly parked at the origin and hidden, so the referenced set is the
+          // one that matters for any change to blending.
+          const ref = { total: 0 } as Record<string, number>
+          const unref = { total: 0 } as Record<string, number>
+          for (let i = 0; i < zoneData.prefabs.length; i++) {
+            const p = zoneData.prefabs[i]
+            const bucket = referenced.has(i) ? ref : unref
+            const key = '0x' + (p.blending >>> 0).toString(16)
+            bucket[key] = (bucket[key] ?? 0) + 1
+            bucket.total++
+          }
+          return { referenced: ref, unreferenced: unref }
+        })()) + ' ' +
         `[CENSUS] ${census.length} unreferenced of ${zoneData.prefabs.length} prefabs: ` +
         JSON.stringify(census)
       )

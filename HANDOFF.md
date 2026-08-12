@@ -956,6 +956,55 @@ census of the skipped categories; see the commit that removed it.
 
 ## 4. Open problems
 
+### 4f. Blending cannot be fixed before the alpha channel is — measured 2026-08-11
+
+Attempted the blend-mode work and got a **negative result worth more than the
+change would have been.** Two new diagnostics, both permanent:
+
+- `[BLENDHIST]` — blend flags split by referenced vs unreferenced. **0x8000 sits
+  on 27–40% of the *visible* geometry of every zone measured** (West Ronfaure 79
+  of 294 referenced, zone 103 203 of 512), 0x2000 on 4–22%. A global change here
+  touches a third of the world.
+- `[ALPHAHIST]` — the alpha distribution across a zone's textures.
+
+`?blendexp=N` runs the experiment globally: `1` makes 0x2000 a real alpha blend,
+`2` also makes 0x8000 additive. Swept over zones 100, 103, 25, 130 from orbit
+and West Ronfaure at ground level:
+
+| View | Baseline dark px | exp1 | exp2 |
+|---|---|---|---|
+| West Ronfaure, walk | 10.19% | **13.35%** | **12.93%** |
+| Zone 103, orbit | 0.12% | 0.19% | 0.14% (+0.08% blown) |
+
+**Both make it worse.** Turning on transparency darkens the scene rather than
+revealing anything, and additive introduces blown highlights.
+
+**`[ALPHAHIST]` says why, and it confirms §5's standing suspicion:**
+
+| Zone | texels ≥250 | texels ≤5 | mid-range | median per-texture mean |
+|---|---|---|---|---|
+| West Ronfaure | **11.19%** | 29.27% | 59.54% | 128 |
+| Zone 103 | 12.02% | 44.39% | 43.59% | 92 |
+| Misareaux | 12.35% | 31.01% | 56.65% | 89 |
+
+Only about **an eighth of all texels are opaque**, and over half sit in the
+mid-range. Terrain art should be overwhelmingly alpha 255 with cutouts at a hard
+0. Enabling real blending against alpha of ~100/255 makes solid ground
+half-transparent, which is exactly the darkening measured.
+
+**So the order of work is fixed: alpha first, blending second.** Alpha-testing
+everything — today's behaviour — survives only because a 0.1 threshold ignores
+the mid-range entirely. It is the least-bad response to bad data, not a correct
+choice, and no blending experiment can succeed until the data is right.
+
+This also reframes 4a and 4b: both are downstream of the same cause, which is
+why five attempts at 4b that measured *transparent share* all failed. §5 already
+narrowed the suspects — not the DXT3 nibble decode, which was checked, but
+**which bytes reach it**: the A1/81/B1 header offsets and the
+`guessCompressedLayout` fallback that infers the pixel offset backwards from the
+end of the block. Start by breaking `[ALPHAHIST]` down per texture *format* to
+see whether one path produces all the mid-range alpha.
+
 ### 4a. Water does not look like the game
 
 **Status:** parked at the user's request pending their own research.
