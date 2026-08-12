@@ -2594,6 +2594,53 @@ export default function ZoneViewer({
               distinctAlpha: g.levels.size,
             }
           }
+
+          // The spatial discriminator for 4b. A genuine cutout has *contiguous*
+          // transparent regions; FFXI's data-mask alpha is scattered. Share
+          // alone cannot tell them apart — five attempts proved that — but the
+          // rate at which horizontal neighbours change class can.
+          //
+          //   clear      share of texels at alpha <= 16 (nibble 0)
+          //   alt        share of adjacent horizontal pairs that straddle it
+          //   altNorm    alt divided by 2p(1-p), the value random scatter would
+          //              give at that share. ~1 means noise, well under 1 means
+          //              contiguous blobs — a real cutout.
+          const nameOf = new Map<number, string>()
+          for (const p of zoneData.prefabs) {
+            if (p.materialIndex >= 0 && !nameOf.has(p.materialIndex)) {
+              nameOf.set(p.materialIndex, (p.textureName ?? '').trim())
+            }
+          }
+          const rows: string[] = []
+          for (let ti = 0; ti < zoneData.textures.length; ti++) {
+            const t = zoneData.textures[ti]
+            if ((t.format ?? '') !== 'dxt3') continue
+            const w = t.width, h = t.height
+            let clear = 0, pairs = 0, alt = 0
+            for (let y = 0; y < h; y++) {
+              for (let x = 0; x < w; x++) {
+                const a = t.rgba[(y * w + x) * 4 + 3]
+                const isClear = a <= 16
+                if (isClear) clear++
+                if (x + 1 < w) {
+                  const b = t.rgba[(y * w + x + 1) * 4 + 3]
+                  if (isClear !== (b <= 16)) alt++
+                  pairs++
+                }
+              }
+            }
+            const n = w * h
+            const p = clear / n
+            if (p < 0.02 || p > 0.98) continue      // nothing to separate
+            const altRate = pairs ? alt / pairs : 0
+            const expected = 2 * p * (1 - p)
+            rows.push(`${(nameOf.get(ti) ?? '#' + ti).padEnd(10)} ` +
+              `clear ${(100 * p).toFixed(0).padStart(3)}%  ` +
+              `alt ${(100 * altRate).toFixed(0).padStart(3)}%  ` +
+              `altNorm ${(expected ? altRate / expected : 0).toFixed(2)}`)
+          }
+          rows.sort()
+          console.log('[CUTOUT]\n  ' + rows.join('\n  '))
           return out
         })()) + ' ' +
         `[BLENDHIST] ` + JSON.stringify((() => {

@@ -1157,6 +1157,41 @@ that observation generalised across three zones and 198 textures.
 2. **No blending scheme driven by this alpha can work** — see 4f. Alpha-testing
    at 0.1 is effectively "ignore the channel", which is why it is the least-bad
    behaviour rather than a correct one.
+### The spatial discriminator was tried and does NOT separate — 2026-08-11
+
+`[CUTOUT]` (in the census block) reports, per DXT3 texture, the share of texels
+at alpha ≤ 16, the rate at which horizontal neighbours cross that threshold, and
+`altNorm` — that rate divided by `2p(1-p)`, which is what random scatter would
+give at the same share. **~1 means noise, well below 1 means contiguous blobs.**
+
+The prediction was that terrain's data-mask alpha would be scattered (~1) and
+genuine cutouts contiguous (<<1). West Ronfaure says otherwise:
+
+| Texture | clear | altNorm |
+|---|---|---|
+| `ron_kab0` | 94% | **0.02** |
+| `ron_riv` | 57% | 0.07 |
+| `ron_ro` | 38% | 0.06 |
+| `ron_w01c` (terrain) | 17% | 0.18 |
+| `ron_k01c` | 87% | 0.43 |
+| `hata1` | 22% | 0.08 |
+
+**Every DXT3 texture is contiguous — 0.02 to 0.60, nothing near 1.** The metric
+does not separate cutouts from terrain because there is nothing to separate:
+none of this alpha is dithered. **Do not try alternation again.**
+
+What the numbers suggest instead, and it is a hypothesis rather than a result:
+several textures are **86-94% "clear"**. A sheet that is nine-tenths transparent
+is not a translucent surface, it is an **atlas with a small used region and empty
+space around it** — contiguous by construction. If so, alpha marks *unused sheet
+area* rather than opacity, UVs address only the used part, and alpha-testing at
+0.1 works precisely because it punches out regions nothing samples.
+
+That would also join up with **4c**, whose best remaining hypothesis is already
+that South Gustaberg's ground textures are atlas sub-tiles selected by UV offset.
+The test is to overlay each mesh's UV range on its texture and check whether the
+sampled rectangle avoids the clear region.
+
 3. **4b needs a different discriminator.** The next measurement is to split
    `[ALPHAHIST]` by *what the texture is used for* rather than how it was
    decoded: if genuine cutout sprites (foliage) show large contiguous zero
