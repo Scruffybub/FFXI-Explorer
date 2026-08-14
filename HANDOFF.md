@@ -1189,8 +1189,31 @@ area* rather than opacity, UVs address only the used part, and alpha-testing at
 
 That would also join up with **4c**, whose best remaining hypothesis is already
 that South Gustaberg's ground textures are atlas sub-tiles selected by UV offset.
-The test is to overlay each mesh's UV range on its texture and check whether the
-sampled rectangle avoids the clear region.
+
+**Tested the same day, and the atlas reading is wrong.** `[UVALPHA]` overlays
+each mesh's UV bounding box on its texture and compares the clear share inside
+that rectangle against the whole sheet. Over West Ronfaure's 192 non-tiling
+dxt3 meshes (39 tile and cannot answer):
+
+> **mean sheet clear 51.8% → mean sampled clear 55.7%**
+
+Meshes do **not** avoid the clear regions; if anything they sample slightly more
+of them. The decisive single case is `ron_kab0`: a sheet that is **94% clear**,
+sampled over the full `uv[0,1]x[0,1]`, on geometry that renders as solid ground.
+A mesh covering a 94%-transparent sheet end to end and looking correct in game
+proves the game is **not treating this channel as opacity at all**.
+
+So alpha is neither opacity nor a marker of unused sheet area. For terrain it is
+data the renderer must simply ignore — which is exactly what alpha-testing at
+0.1 accidentally achieves, and why nothing better has ever been found.
+
+**One thing worth keeping from the same run**, because it supports 4c even
+though it sank 4b's version: the sheets *are* internally structured. The same
+`ron_w01c` texture reads **0% clear** over `uv[0.25,0.93]x[0.00,0.50]` and
+**65% clear** over `uv[0.01,0.49]x[0.51,0.99]`. Sub-regions differ enormously
+and different meshes address different ones. That is atlas-shaped, and 4c's
+sub-tile hypothesis survives — it is *tile selection* that is suspect, not the
+alpha channel.
 
 3. **4b needs a different discriminator.** The next measurement is to split
    `[ALPHAHIST]` by *what the texture is used for* rather than how it was

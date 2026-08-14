@@ -2641,6 +2641,59 @@ export default function ZoneViewer({
           }
           rows.sort()
           console.log('[CUTOUT]\n  ' + rows.join('\n  '))
+
+          // The atlas test. If alpha marks unused sheet area rather than
+          // opacity, then the rectangle a mesh's UVs actually sample should be
+          // far cleaner than the sheet as a whole. Meshes that tile (UV span > 1)
+          // sample everything and cannot answer the question, so they are
+          // counted separately rather than averaged in.
+          {
+            const clearShareOf = (t: { width: number; height: number; rgba: Uint8Array },
+              u0: number, v0: number, u1: number, v1: number) => {
+              const x0 = Math.max(0, Math.floor(u0 * t.width))
+              const x1 = Math.min(t.width, Math.ceil(u1 * t.width))
+              const y0 = Math.max(0, Math.floor(v0 * t.height))
+              const y1 = Math.min(t.height, Math.ceil(v1 * t.height))
+              let clear = 0, n = 0
+              for (let y = y0; y < y1; y++) {
+                for (let x = x0; x < x1; x++) {
+                  if (t.rgba[(y * t.width + x) * 4 + 3] <= 16) clear++
+                  n++
+                }
+              }
+              return n ? clear / n : -1
+            }
+            let tiling = 0
+            const cmp: string[] = []
+            let sumWhole = 0, sumSampled = 0, counted = 0
+            for (let pi = 0; pi < zoneData.prefabs.length; pi++) {
+              const p = zoneData.prefabs[pi]
+              const t = zoneData.textures[p.materialIndex]
+              if (!t || (t.format ?? '') !== 'dxt3' || p.uvs.length < 2) continue
+              let u0 = Infinity, v0 = Infinity, u1 = -Infinity, v1 = -Infinity
+              for (let i = 0; i < p.uvs.length; i += 2) {
+                const u = p.uvs[i], v = p.uvs[i + 1]
+                if (u < u0) u0 = u; if (u > u1) u1 = u
+                if (v < v0) v0 = v; if (v > v1) v1 = v
+              }
+              if (u1 - u0 > 1.001 || v1 - v0 > 1.001) { tiling++; continue }
+              const whole = clearShareOf(t, 0, 0, 1, 1)
+              const sampled = clearShareOf(t, Math.max(0, u0), Math.max(0, v0),
+                Math.min(1, u1), Math.min(1, v1))
+              if (whole < 0.02 || sampled < 0) continue
+              sumWhole += whole; sumSampled += sampled; counted++
+              if (cmp.length < 12) {
+                cmp.push(`${(p.textureName ?? '').trim().padEnd(18)} ` +
+                  `sheet ${(100 * whole).toFixed(0).padStart(3)}% clear -> ` +
+                  `sampled ${(100 * sampled).toFixed(0).padStart(3)}%  ` +
+                  `uv[${u0.toFixed(2)},${u1.toFixed(2)}]x[${v0.toFixed(2)},${v1.toFixed(2)}]`)
+              }
+            }
+            console.log(`[UVALPHA] ${counted} non-tiling meshes on dxt3 (${tiling} tile and were skipped)  ` +
+              `mean sheet clear ${(100 * sumWhole / Math.max(1, counted)).toFixed(1)}%  ` +
+              `mean sampled clear ${(100 * sumSampled / Math.max(1, counted)).toFixed(1)}%\n  ` +
+              cmp.join('\n  '))
+          }
           return out
         })()) + ' ' +
         `[BLENDHIST] ` + JSON.stringify((() => {
