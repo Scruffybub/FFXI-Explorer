@@ -1095,7 +1095,63 @@ West Ronfaure's per-mesh share histogram across 349 meshes is
 `161,1,9,23,35,40,21,7,15,37` (tenths) — a large opaque cluster and a long
 spread, not two clean clusters.
 
-### 4c. South Gustaberg mismatched ground tiles
+### 4c. SOLVED (diagnosis) — the pale tiles are overlay layers drawn opaque
+
+**2026-08-15. The cause is located; the fix is not written.**
+
+The atlas hypothesis was right about the textures and wrong about the cause.
+
+**1. `gus_02` really is an atlas.** Dumped to PNG and looked at: a 512×512 sheet
+with green grass top-left and bottom-left, brown dirt through the middle, grey
+rock down the right edge, and a black unused block at bottom-centre. Emphatically
+not seamless. `scripts/`-adjacent dumper lives in the scratchpad; `?census=1` now
+exposes `window.__zoneData` so any harness can pull textures, UVs and geometry
+without a new log format each time.
+
+**2. UV straddling is real but is NOT the cause.** `[UVSTRADDLE]` splits meshes
+into inside / straddling / tiling. South Gustaberg 270/22/105, North Gustaberg
+443/48/172, West Ronfaure 308/2/39 — the Gustaberg zones straddle far more, which
+looked damning. `?uvfix=1` slides those rects back inside 0..1, and it fires on
+exactly the 22 meshes. **The pale patches survive it unchanged.** Measured 0.41
+mean difference over the frame; the artifact is untouched. Hypothesis tested and
+rejected — do not re-run it.
+
+**3. The pale tiles are FFXI's terrain overlay layer, drawn at full strength.**
+Prefabs come in **pairs sharing a texture and an instance count**, one opaque and
+one partial:
+
+| prefab | texture | vertex alpha | instances |
+|---|---|---|---|
+| 67 | `gu_w01c` | 1.00 | 134 |
+| 68 | `gu_w01c` | 0.00–0.50 | **134** |
+| 12 | `gu_w11c` | 1.00 | 129 |
+| 13 | `gu_w11c` | 0.50–1.00 | **129** |
+| 14 | `gus_03` | 0.00–0.50 | 129 |
+
+Across the zone: 92 prefabs at a flat 1.00, **127 at a flat 0.50**, 97 ramping
+0.00–0.50. That is a base layer plus an overlay whose per-vertex alpha is the
+blend weight — the standard way terrain variation was done, and exactly what the
+comment at the vertex-colour code already suspected.
+
+**4. The blend weight never reaches the GPU.**
+`geometry.setAttribute('color', …, 3)` — **three components**. Alpha is parsed,
+counted, and dropped. So every overlay tile draws at full strength over its base,
+which is precisely a hard-edged pale square.
+
+That also explains why the earlier attempt failed. It tried to identify bad
+meshes by "alpha below 1" and found 288 of 397 — because *most* terrain carries
+an overlay. The discriminator was never the point; the missing channel was.
+
+**The fix, for whoever picks this up:** carry vertex colour as **four**
+components, make overlay meshes `transparent` with opacity driven by vertex
+alpha, and keep them drawing after their base (the `polygonOffset` already
+applied to `useAlpha` meshes is there for exactly this z-fighting). Note
+`vColor` is already declared `vec4` in this three.js version even without
+`USE_COLOR_ALPHA`, so the shader patch swizzles `.rgb` — see the note in
+"Smaller ones". Blast radius is wide (127 prefabs in one zone alone), so sweep
+several zones before and after and compare numerically.
+
+### 4c. South Gustaberg mismatched ground tiles (original notes)
 
 Pale angular patches of the wrong ground texture. Inspector on an affected tile:
 `gus_02`, material 9, blending 0, UV v to 1.13, vertex colour 0.50 — identical to

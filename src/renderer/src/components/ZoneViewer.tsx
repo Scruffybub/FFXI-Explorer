@@ -278,6 +278,11 @@ const BLEND_EXP =
     ? Number(new URLSearchParams(window.location.search).get('blendexp') ?? 0) || 0
     : 0
 
+/** 4c experiment: slide straddling UV rects back inside 0..1. */
+const UV_FIX =
+  typeof window !== 'undefined' &&
+  new URLSearchParams(window.location.search).has('uvfix')
+
 const NO_VCOLOR =
   typeof window !== 'undefined' &&
   new URLSearchParams(window.location.search).has('novcolor')
@@ -2188,6 +2193,7 @@ export default function ZoneViewer({
     let nonFiniteUvs = 0
     let nonFinitePositions = 0
     let blendApplied = 0
+    let uvFixed = 0
     /** Every weather state this zone carries geometry for. */
     const weatherStates = new Set<string>()
     /** prefab index -> its weather state, for tagging the meshes below. */
@@ -2323,6 +2329,47 @@ export default function ZoneViewer({
       }
 
       geometry.setAttribute('color', new THREE.Float32BufferAttribute(colorArray, 3))
+      // 4c experiment: ?uvfix=1 slides a mesh whose UV rect straddles the 0..1
+      // edge back inside it.
+      //
+      // Ground sheets like gus_02 are atlases — grass in one corner, dirt
+      // through the middle, rock down the side — and emphatically not seamless.
+      // A mesh spanning one tile but sitting across the edge (v 0.13..1.12) has
+      // its overhang wrapped to the opposite side of the sheet by
+      // RepeatWrapping, so part of it samples grass while the rest samples dirt.
+      //
+      // Only meshes spanning at most one tile are touched; anything larger
+      // genuinely tiles and must keep wrapping. Clamping those was tried before
+      // and smeared cliff faces into streaks.
+      //
+      // TESTED AND REJECTED, 2026-08-15: this fires on exactly the 22 straddling
+      // meshes in South Gustaberg and the pale patches survive it unchanged. The
+      // artifact is the terrain OVERLAY layer drawn at full strength, not a UV
+      // wrap — see HANDOFF 4c. Kept only so the hypothesis is not retried.
+      //
+      // This must run on `uvArray`, before the attribute is built — mutating
+      // `prefab.uvs` afterwards changed nothing at all, since the attribute
+      // already holds a copy.
+      if (UV_FIX) {
+        let u0 = Infinity, v0 = Infinity, u1 = -Infinity, v1 = -Infinity
+        for (let i = 0; i < uvArray.length; i += 2) {
+          const u = uvArray[i], v = uvArray[i + 1]
+          if (u < u0) u0 = u; if (u > u1) u1 = u
+          if (v < v0) v0 = v; if (v > v1) v1 = v
+        }
+        if (u1 - u0 <= 1.001 && v1 - v0 <= 1.001) {
+          const du = u1 > 1.001 ? -(u1 - 1) : u0 < -0.001 ? -u0 : 0
+          const dv = v1 > 1.001 ? -(v1 - 1) : v0 < -0.001 ? -v0 : 0
+          if (du !== 0 || dv !== 0) {
+            for (let i = 0; i < uvArray.length; i += 2) {
+              uvArray[i] += du
+              uvArray[i + 1] += dv
+            }
+            uvFixed++
+          }
+        }
+      }
+
       geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvArray, 2))
 
       // FFXI quantises these UVs to eighths and keeps a 1/8 margin at the
@@ -2330,6 +2377,19 @@ export default function ZoneViewer({
       // region rather than asking for a genuine tile. Under RepeatWrapping that
       // wraps to the far edge and samples the wrong part of the sheet, which is
       // what South Gustaberg's mismatched ground tiles are.
+      // 4c experiment: ?uvfix=1 slides a mesh whose UV rect straddles the 0..1
+      // edge back inside it.
+      //
+      // Ground sheets like gus_02 are atlases — grass in one corner, dirt
+      // through the middle, rock down the side — and emphatically not seamless.
+      // A mesh spanning one tile but sitting across the edge (v 0.13..1.12) has
+      // its overhang wrapped to the opposite side of the sheet by
+      // RepeatWrapping, so part of it samples grass while the rest samples dirt.
+      // That is the pale mismatched patch.
+      //
+      // Only meshes that span at most one tile are touched. Anything spanning
+      // more genuinely tiles and must keep wrapping — clamping those was tried
+      // before and smeared cliff faces into streaks.
       let uvOutOfRange = false
       for (let i = 0; i < prefab.uvs.length; i++) {
         const t = prefab.uvs[i]
@@ -2567,6 +2627,7 @@ export default function ZoneViewer({
       instancedMeshes.push(mesh)
     }
 
+    if (UV_FIX) console.log('[UVFIX] slid ' + uvFixed + ' straddling meshes back inside 0..1')
     if (degenerateNormals > 0) {
       console.log(`[ZoneViewer] replaced ${degenerateNormals} degenerate normals`)
     }
@@ -2580,6 +2641,10 @@ export default function ZoneViewer({
       )
     }
     if (CENSUS) {
+      // Hand the whole parsed zone to the page so harnesses can dump textures,
+      // UVs and geometry without another log format being invented each time.
+      ;(window as unknown as { __zoneData?: unknown }).__zoneData = zoneData
+
       // Every unreferenced prefab, in full. This is deliberately not filtered
       // by isSkyWeatherMesh: the point is to see what that filter catches and
       // what it misses, so it has to report the skipped ones too.
@@ -2698,6 +2763,43 @@ export default function ZoneViewer({
           }
           rows.sort()
           console.log('[CUTOUT]\n  ' + rows.join('\n  '))
+
+          // 4c. A mesh whose UVs run 0..6 is genuinely tiling and wants
+          // RepeatWrapping. A mesh whose UVs span less than one tile but sit
+          // *across* the 0..1 boundary — v from 0.13 to 1.13, say — is not
+          // tiling at all: it is one tile that has slipped past the edge, and
+          // repeat wraps the overhanging part back to the opposite side of the
+          // sheet. On an atlas that lands in a different cell, which is what
+          // "the wrong ground texture" looks like.
+          //
+          // Clamping was tried before and smeared cliff faces into streaks,
+          // because it punished the genuinely-tiling meshes too. Span is what
+          // separates the two cases.
+          {
+            let inside = 0, straddle = 0, tiling = 0
+            const examples: string[] = []
+            for (const p of zoneData.prefabs) {
+              if (p.uvs.length < 2) continue
+              let u0 = Infinity, v0 = Infinity, u1 = -Infinity, v1 = -Infinity
+              for (let i = 0; i < p.uvs.length; i += 2) {
+                const u = p.uvs[i], v = p.uvs[i + 1]
+                if (u < u0) u0 = u; if (u > u1) u1 = u
+                if (v < v0) v0 = v; if (v > v1) v1 = v
+              }
+              const spanU = u1 - u0, spanV = v1 - v0
+              if (spanU > 1.001 || spanV > 1.001) { tiling++; continue }
+              if (u0 < -0.001 || v0 < -0.001 || u1 > 1.001 || v1 > 1.001) {
+                straddle++
+                if (examples.length < 10) {
+                  examples.push(`${(p.textureName ?? '').trim().padEnd(18)} ` +
+                    `u[${u0.toFixed(2)},${u1.toFixed(2)}] v[${v0.toFixed(2)},${v1.toFixed(2)}] ` +
+                    `span ${spanU.toFixed(2)}x${spanV.toFixed(2)}`)
+                }
+              } else inside++
+            }
+            console.log(`[UVSTRADDLE] inside ${inside}  straddling ${straddle}  tiling ${tiling}` +
+              (examples.length ? '\n  ' + examples.join('\n  ') : ''))
+          }
 
           // The atlas test. If alpha marks unused sheet area rather than
           // opacity, then the rectangle a mesh's UVs actually sample should be
