@@ -267,6 +267,22 @@ export interface SceneSettings {
    */
   overlayBlend: boolean
 
+  /**
+   * Anisotropic filtering, as a sample count: 1 is off, up to 16.
+   *
+   * Mipmapping picks one level for the whole fragment, so ground seen at a
+   * grazing angle — most of a zone view — is filtered as though it were being
+   * viewed head-on and blurs into mush a few metres out. Anisotropic filtering
+   * takes several samples along the direction the texture is compressed in and
+   * keeps that ground legible into the distance.
+   *
+   * The value is passed to three.js as-is and clamped there to whatever the GPU
+   * reports, so asking for 16 on hardware that offers 8 is safe rather than an
+   * error. FFXI's own DX8 renderer had none of this, so `1` is the authentic
+   * setting and anything above it is deliberately not what the game looked like.
+   */
+  anisotropy: number
+
   mapView: boolean
   /** Fraction of the zone's own extent to frame. 1 fits the whole zone. */
   mapZoom: number
@@ -389,6 +405,7 @@ export const DEFAULT_SCENE: SceneSettings = {
   weatherState: '',
   weatherFollowsCamera: true,
   overlayBlend: false,
+  anisotropy: 16,
   mapView: false,
   mapZoom: 1,
   mapRotation: 0,

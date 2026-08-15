@@ -2188,7 +2188,7 @@ export default function ZoneViewer({
   const gameSunActive = !lit && lighting.gameSun
   const shaderVariant = gameSunActive ? 'lambert' : 'std'
 
-  const { instancedMeshes, waterMaterials, litMaterials, weatherStates, disposeAll } = useMemo(() => {
+  const { instancedMeshes, waterMaterials, litMaterials, textures, weatherStates, disposeAll } = useMemo(() => {
     const geometries: THREE.BufferGeometry[] = []
     const materials: THREE.Material[] = []
     const waterMaterials: THREE.ShaderMaterial[] = []
@@ -2196,6 +2196,8 @@ export default function ZoneViewer({
 
     const geoMap = new Map<number, THREE.BufferGeometry>()
     const matMap = new Map<number, THREE.Material>()
+    /** Every texture built here, so anisotropy can be re-applied without a rebuild. */
+    const textures: THREE.DataTexture[] = []
     const waterNames: string[] = []
     let degenerateNormals = 0
     let nonFiniteColors = 0
@@ -2493,6 +2495,9 @@ export default function ZoneViewer({
         texture.magFilter = THREE.LinearFilter
         texture.minFilter = THREE.LinearMipmapLinearFilter
         texture.generateMipmaps = true
+        // Anisotropy itself is applied by the live effect below, so moving the
+        // slider does not rebuild the zone.
+        textures.push(texture)
         texture.flipY = false
         texture.colorSpace = THREE.SRGBColorSpace
       }
@@ -3052,13 +3057,33 @@ export default function ZoneViewer({
     }
 
     return {
-      instancedMeshes, waterMaterials, litMaterials,
+      instancedMeshes, waterMaterials, litMaterials, textures,
       weatherStates: [...weatherStates].sort(),
       totalInstances: zoneData.instances.length, disposeAll,
     }
     // Rebuild materials when PCSS is toggled so they compile against the
     // shadow chunk that is actually installed.
   }, [zoneData, lit, scene.wireframe, shaderVariant, scene.overlayBlend])
+
+  /**
+   * Anisotropy, applied to the zone's textures in place.
+   *
+   * It is a sampler parameter, so three only sends it to the GPU while
+   * uploading — setting the field alone changes nothing on screen and
+   * `needsUpdate` is what makes it take. That re-uploads the texture, which is
+   * why this is an effect over the built textures rather than a memo
+   * dependency: a rebuild costs seconds, this costs a few milliseconds.
+   *
+   * The value is clamped inside three to `capabilities.getMaxAnisotropy()`, so
+   * there is no need to read the GPU limit here — which matters because this
+   * component sits outside the Canvas and has no renderer to ask.
+   */
+  useEffect(() => {
+    for (const texture of textures) {
+      texture.anisotropy = scene.anisotropy
+      texture.needsUpdate = true
+    }
+  }, [textures, scene.anisotropy])
 
   // Live material tweaks that do not require rebuilding geometry.
   useEffect(() => {

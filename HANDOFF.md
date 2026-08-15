@@ -997,6 +997,31 @@ supplied. Those are different fixes. The removed implementation was a one-line
 escape in the prefab loop (`if (isSkyWeatherMesh(prefab)) continue`) plus a
 census of the skipped categories; see the commit that removed it.
 
+### Anisotropic filtering
+
+**Scene → Anisotropic filtering**, a power-of-two slider from Off to 16×,
+defaulting to **16**. Stored as the sample count, so `?scene_anisotropy=8`
+reads naturally. FFXI's own renderer had none of this, so Off is the authentic
+setting — the presets do not override the default, which means even
+Original (2002) currently renders with 16×.
+
+Two things worth keeping:
+
+- **Anisotropy is a sampler parameter, so three only sends it to the GPU while
+  uploading a texture.** Setting `texture.anisotropy` alone changes nothing on
+  screen; `texture.needsUpdate = true` is what makes it take. This is the same
+  shape of trap as `alphaTest`/`vertexColors` needing `material.needsUpdate`.
+- It is applied by an effect over the textures the build memo returns, **not by
+  a memo dependency** — a zone rebuild costs seconds, re-uploading 53 textures
+  costs milliseconds. `ZoneViewer` sits outside the Canvas and has no renderer
+  to ask for `getMaxAnisotropy()`, which does not matter: three clamps the value
+  to the GPU limit on upload.
+
+Measured in West Ronfaure at eye level, Off against 16×: mean difference
+1.195/255 with **14.4% of viewport pixels moving** and a peak of 238. Crops of
+the distant ground confirm the direction — grass keeps its grain into the
+distance instead of smearing to a flat wash.
+
 ### The expansion tag comes from the ROM archive, not a hand-written list
 
 The sidebar shows each zone's expansion beside its DAT path. The classification

@@ -776,6 +776,19 @@ export default function ControlPanel({
           How much of the baked vertex shading tints water. FFXI stores very dark
           values here, so a low setting keeps rivers from going black.
         </p>
+        {/* Stored as the sample count (1, 2, 4… 16) so `scene_anisotropy=8`
+            reads naturally, but driven by a power-of-two slider. */}
+        <Slider
+          label="Anisotropic filtering"
+          value={Math.log2(scene.anisotropy)} min={0} max={4} step={1}
+          onChange={v => onScene({ anisotropy: 2 ** v })}
+          format={v => (v === 0 ? 'Off' : `${2 ** v}×`)}
+        />
+        <p className="note small">
+          Keeps ground textures sharp where they meet the view at a shallow
+          angle, instead of blurring a few metres out. FFXI had none of this, so
+          Off is what the game actually looked like.
+        </p>
         <Toggle label="Show sky" checked={scene.showSky} onChange={v => onScene({ showSky: v })} />
         {!scene.showSky && (
           <>
