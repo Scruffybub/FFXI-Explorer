@@ -1099,6 +1099,13 @@ spread, not two clean clusters.
 
 **FIXED 2026-08-15.** Scene → **Blend terrain overlays**, on by default; `?valpha=off|direct|double` overrides it for testing. Turning it off reproduces the old render exactly (0.000 difference), so the escape hatch is real.
 
+**A regression followed and was fixed — read this before touching the overlay path.** Ryan reported models and texture squares popping in and out while flying around Misareaux Coast. Two causes, both mine:
+
+1. **The overlay test was too broad.** It blended anything below full opacity, which in Misareaux is 595 of 608 meshes — 376 of them sitting at a *flat* 0.50. A constant alpha is not a fade whatever its level; only a **varying** one is. The test is now `(rawMax - rawMin) > 0.02`, which drops Misareaux to 165 of 608, South Gustaberg to 166 of 397 and West Ronfaure to 75 of 349, and the squares stay fixed.
+2. **depthWrite was off.** That is the textbook setting for transparency and it is wrong here: these are terrain and foliage, not glass. Once they stop writing depth they stop occluding each other, so whatever the transparent queue draws last wins — which is exactly geometry popping in and out. It stays on; coplanar overlays do not need the ordering freedom, and polygonOffset already keeps them off their base.
+
+Note that **motion artefacts cannot be caught by the still-frame harness**. Both of these rendered perfectly in every screenshot taken. If the overlay path is changed again, it needs checking in motion by hand.
+
 The surprise was which reading of the alpha won. The code warned that 128 is *neutral* for the RGB channels, so `double` (opacity = min(1, a×2)) was the reasoned default — and it changed almost nothing (0.02% of pixels). **`direct` is correct**: the value is opacity as stored, so alpha is NOT on the same convention as RGB here. It removes the pale squares and moves 3.5% of the frame. Swept across West Ronfaure, zone 103, Misareaux and North Gustaberg — differences of 0.2 to 1.5 mean, no sorting artefacts, nothing broken.
 
 The atlas hypothesis was right about the textures and wrong about the cause.

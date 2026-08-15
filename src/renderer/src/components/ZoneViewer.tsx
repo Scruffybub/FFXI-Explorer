@@ -2346,10 +2346,23 @@ export default function ZoneViewer({
       const colorArray = useVertexAlpha
         ? new Float32Array(vertexColors.length)
         : new Float32Array(vertexColors.filter((_, i) => i % 4 !== 3))
+      // A *varying* alpha is a fade. A constant one is not, whatever its level —
+      // and constants dominate: 376 of Misareaux's 608 meshes sit at a flat
+      // 0.50, 127 of South Gustaberg's 397 likewise. Blending those put most of
+      // a zone into the depth-sorted transparent queue, where the order flips as
+      // the camera moves and geometry visibly pops. Only the ramps blend.
+      let rawMin = 1, rawMax = 0
       if (useVertexAlpha) {
+        for (let i = 3; i < vertexColors.length; i += 4) {
+          const raw = vertexColors[i]
+          if (raw < rawMin) rawMin = raw
+          if (raw > rawMax) rawMax = raw
+        }
         for (let i = 0, o = 0; i < vertexColors.length; i += 4, o += 4) {
           const raw = vertexColors[i + 3]
-          const a = alphaMode === 'double' ? Math.min(1, raw * 2) : raw
+          // 128 is neutral, as it is for the RGB channels, so a ramp that tops
+          // out at 0.50 reaches full opacity rather than half.
+          const a = alphaMode === 'direct' ? raw : Math.min(1, raw * 2)
           if (a < minScaledAlpha) minScaledAlpha = a
           colorArray[o] = vertexColors[i]
           colorArray[o + 1] = vertexColors[i + 1]
@@ -2360,10 +2373,9 @@ export default function ZoneViewer({
       for (let i = 0; i < colorArray.length; i++) {
         if (!Number.isFinite(colorArray[i])) { colorArray[i] = 1; nonFiniteColors++ }
       }
-      // A mesh that never drops below full opacity is ordinary terrain and must
-      // stay on the opaque path, or sorting cost and artefacts arrive for
-      // nothing.
-      const isOverlay = useVertexAlpha && minScaledAlpha < 0.99
+      // Blend only meshes whose alpha actually varies AND ends up partial.
+      // Everything else stays opaque: no sorting cost, no popping.
+      const isOverlay = useVertexAlpha && (rawMax - rawMin) > 0.02 && minScaledAlpha < 0.99
       if (isOverlay) overlayMeshes++
       const uvArray = new Float32Array(prefab.uvs)
       for (let i = 0; i < uvArray.length; i++) {
@@ -2544,10 +2556,16 @@ export default function ZoneViewer({
           // through exactly the faded edge the overlay exists to produce.
           // depthWrite off keeps the overlay from occluding its own base, and
           // the polygonOffset above is already there to stop the two z-fighting.
+          // depthWrite STAYS ON. Turning it off is the textbook choice for
+          // transparency, and here it caused geometry to pop in and out as the
+          // camera moved: these meshes are terrain and foliage, not glass, and
+          // once they stop writing depth they stop occluding each other, so
+          // whatever the transparent queue happens to draw last wins. Coplanar
+          // overlays do not need the ordering freedom, and the polygonOffset
+          // below already keeps them off their base.
           ...(isOverlay && {
             transparent: true,
             alphaTest: 0,
-            depthWrite: false,
             polygonOffset: true,
             polygonOffsetFactor: -1,
             polygonOffsetUnits: -1,
