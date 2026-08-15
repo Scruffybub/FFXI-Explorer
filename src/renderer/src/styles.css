@@ -229,6 +229,16 @@ button.primary:hover { filter: brightness(1.1); }
   border-left: 1px solid var(--line);
   overflow-y: auto;
   min-height: 0;
+  /*
+   * Breathing room at the end of the scroll, so the last control is never
+   * flush against the window edge. Without it the final row had only the
+   * section body's 14px beneath it, and the grid row resolves to a fractional
+   * height (637.333px at one test size) — under Windows display scaling that
+   * rounds against you and clips the last control in half. Chrome includes a
+   * scroll container's bottom padding in its scrollable area, so this really
+   * is reachable rather than decorative.
+   */
+  padding-bottom: 28px;
 }
 
 /* Matches the padding the section bodies use, so the camera toggle sits on the
