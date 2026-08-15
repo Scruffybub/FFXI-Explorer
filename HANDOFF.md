@@ -938,6 +938,45 @@ supplied. Those are different fixes. The removed implementation was a one-line
 escape in the prefab loop (`if (isSkyWeatherMesh(prefab)) continue`) plus a
 census of the skipped categories; see the commit that removed it.
 
+### The grid collapsed the viewport when the panels were hidden
+
+`.app` is a three-column grid that relied on **auto-placement**, and
+`.app.ui-hidden` sets `display: none` on the sidebar and panel. That removes
+them from the grid entirely, so the viewport — now the first in-flow child —
+auto-placed into **column 1**, which `ui-hidden` sizes to `0`.
+
+Measured: after Hide panels the grid read `0px 1386px 0px` while `.viewport`
+measured **0×837**. The canvas kept its old backing buffer and still showed a
+stale image, so it looked fine until something forced a re-measure. Going
+fullscreen did exactly that, which is why it took *both* buttons for the view to
+vanish — and why it looked like a fullscreen bug when it was not.
+
+Fixed by pinning columns explicitly: `.sidebar { grid-column: 1 }`,
+`.viewport { grid-column: 2 }`, `.panel { grid-column: 3 }`. Verified — the
+viewport now goes 826 → 1386 → 1707 across the same sequence.
+
+### Map view: orthographic top-down capture
+
+**Scene panel → Map view.** A toggle, a zoom slider (1.00 frames the whole
+zone) and a rotation slider. `MapCamera` in `ZoneViewer.tsx` installs an
+`OrthographicCamera` and takes the camera over completely — no controls run in
+this mode, since anything that re-aims the camera stops the projection being a
+plan view.
+
+Why orthographic: a perspective camera has a vanishing point, so a bird's-eye
+shot splays walls outward and only the centre of frame is true. Orthographic has
+no vanishing point at all — parallel lines stay parallel and everything draws at
+true relative size, which is what makes the capture usable as a map.
+
+Two details worth keeping. The frustum is sized in **world units** rather than
+drei's pixel default, so coverage does not change with the window size and a map
+captured at one size matches one captured at another; aspect comes from the
+canvas so the ground is never stretched. And `up` is set before `lookAt`, or the
+view spins when the camera direction is parallel to the default up vector.
+
+Pairs with the existing **Screenshot** button. Turning off Show sky and picking
+a flat background gives a cleaner plate to trace over.
+
 ### Smaller ones
 
 - `vColor` is declared `vec4` in this three.js version even without

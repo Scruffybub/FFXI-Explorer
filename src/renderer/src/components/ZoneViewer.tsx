@@ -1259,6 +1259,63 @@ function WeatherFollow({
   return null
 }
 
+/**
+ * Top-down orthographic camera, for capturing a zone as a flat map.
+ *
+ * A perspective camera has a vanishing point, so a bird's-eye shot splays walls
+ * outward from the centre of frame and only the very centre of the image is
+ * true to plan. An orthographic projection has no vanishing point: parallel
+ * lines stay parallel and everything is drawn at true relative size, which is
+ * what makes the capture usable as a map.
+ *
+ * The frustum is sized in world units rather than by drei's pixel default, so
+ * the coverage does not change when the window resizes — a map captured at one
+ * window size matches one captured at another. Aspect is taken from the canvas
+ * so the ground is never stretched.
+ */
+function MapCamera({
+  center, extent, zoom, rotationDeg, far,
+}: {
+  center: THREE.Vector3
+  extent: number
+  zoom: number
+  rotationDeg: number
+  far: number
+}) {
+  const { size, set, camera } = useThree()
+  const camRef = useRef<THREE.OrthographicCamera | null>(null)
+
+  useEffect(() => {
+    const cam = new THREE.OrthographicCamera()
+    camRef.current = cam
+    const prev = camera
+    set({ camera: cam })
+    return () => { set({ camera: prev }) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [set])
+
+  useEffect(() => {
+    const cam = camRef.current
+    if (!cam) return
+    const aspect = size.height > 0 ? size.width / size.height : 1
+    const halfH = Math.max(1, (extent * zoom) / 2)
+    const halfW = halfH * aspect
+    cam.left = -halfW; cam.right = halfW
+    cam.top = halfH; cam.bottom = -halfH
+    cam.near = 0.1
+    cam.far = far
+    // Directly overhead, looking straight down. `up` is set before lookAt or
+    // the view spins when the camera direction is parallel to the default up.
+    cam.position.set(center.x, center.y + far * 0.45, center.z)
+    const r = (rotationDeg * Math.PI) / 180
+    cam.up.set(Math.sin(r), 0, -Math.cos(r))
+    cam.lookAt(center.x, center.y, center.z)
+    cam.updateProjectionMatrix()
+  }, [size.width, size.height, center, extent, zoom, rotationDeg, far])
+
+  return null
+}
+
 function SmartOrbitControls({ size, lookAt }: { size: number; lookAt?: THREE.Vector3 }) {
   const { camera } = useThree()
   const target = useMemo(() => {
@@ -3040,7 +3097,17 @@ export default function ZoneViewer({
 
       {/* A deep-linked orientation takes over from the controls, which would
           otherwise re-aim the camera on their next update. */}
-      {hasCameraOverride ? (
+      {scene.mapView ? (
+        // Map view owns the camera outright — no controls, or they would
+        // re-aim it and the projection would stop being a plan view.
+        <MapCamera
+          center={center}
+          extent={size}
+          zoom={scene.mapZoom}
+          rotationDeg={scene.mapRotation}
+          far={farPlane}
+        />
+      ) : hasCameraOverride ? (
         <CameraOrientation />
       ) : scene.cameraMode === 'orbit' ? (
         <SmartOrbitControls size={size} lookAt={PICK ? center : undefined} />

@@ -248,6 +248,21 @@ export interface SceneSettings {
    * weather dome is for.
    */
   weatherFollowsCamera: boolean
+
+  /**
+   * Top-down orthographic view, for capturing a zone as a flat map.
+   *
+   * A perspective camera splays walls outward from the centre of frame, so a
+   * bird's-eye screenshot cannot be used as a map — only the very centre is
+   * true. An orthographic projection has no vanishing point at all: parallel
+   * lines stay parallel and everything is drawn at true relative size, which is
+   * what makes the capture usable as a plan.
+   */
+  mapView: boolean
+  /** Fraction of the zone's own extent to frame. 1 fits the whole zone. */
+  mapZoom: number
+  /** Rotate the map about the vertical axis, in degrees. */
+  mapRotation: number
 }
 
 /**
@@ -364,6 +379,9 @@ export const DEFAULT_SCENE: SceneSettings = {
   showCollision: false,
   weatherState: '',
   weatherFollowsCamera: true,
+  mapView: false,
+  mapZoom: 1,
+  mapRotation: 0,
 
   // FFXI's world unit reads as roughly a metre: Chateau d'Oraguille's collision
   // spans 28 units across its floors, West Ronfaure ~1200 corner to corner. So

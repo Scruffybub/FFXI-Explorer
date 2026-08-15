@@ -674,6 +674,35 @@ export default function ControlPanel({
         )}
       </Section>
 
+      <Section title="Map view">
+        <Toggle
+          label="Top-down map (orthographic)"
+          checked={scene.mapView}
+          onChange={v => onScene({ mapView: v })}
+          hint="Removes perspective entirely, so a screenshot can be used as a map."
+        />
+        {scene.mapView && (
+          <>
+            <Slider
+              label="Zoom" value={scene.mapZoom} min={0.1} max={2} step={0.01}
+              onChange={v => onScene({ mapZoom: v })}
+            />
+            <Slider
+              label="Rotation" value={scene.mapRotation} min={0} max={360} step={1}
+              onChange={v => onScene({ mapRotation: v })}
+              format={v => `${Math.round(v)}°`}
+            />
+            <p className="note small">
+              1.00 zoom frames the whole zone. Nothing tapers with distance, so
+              the capture is true to plan everywhere rather than only at the
+              centre — use <strong>Screenshot</strong> to save it. Turning off
+              <strong> Show sky</strong> and picking a flat background gives a
+              cleaner map to trace over.
+            </p>
+          </>
+        )}
+      </Section>
+
       <Section title="Music">
         <Toggle
           label="Zone music"

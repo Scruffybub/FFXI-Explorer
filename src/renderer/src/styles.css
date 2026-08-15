@@ -165,7 +165,19 @@ button.primary:hover { filter: brightness(1.1); }
 .zone-list .empty { color: var(--muted); padding: 10px; font-size: 12px; }
 
 /* ── Viewport ──────────────────────────────────────────────────────── */
-.viewport { position: relative; min-width: 0; background: #05070a; }
+/*
+ * Columns are pinned explicitly rather than left to auto-placement.
+ *
+ * `ui-hidden` sets `display: none` on the sidebar and panel, which takes them
+ * out of the grid entirely — so with auto-placement the viewport became the
+ * first in-flow child and landed in column 1, which `ui-hidden` sizes to 0. The
+ * canvas kept its old backing buffer and still looked fine until something
+ * forced a re-measure, at which point the whole view vanished. Hiding the
+ * panels and then going fullscreen did exactly that.
+ */
+.sidebar { grid-column: 1; }
+.panel { grid-column: 3; }
+.viewport { grid-column: 2; position: relative; min-width: 0; background: #05070a; }
 .viewer-canvas { width: 100%; height: 100%; display: block; }
 
 .placeholder {
