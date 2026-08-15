@@ -974,6 +974,8 @@ captured at one size matches one captured at another; aspect comes from the
 canvas so the ground is never stretched. And `up` is set before `lookAt`, or the
 view spins when the camera direction is parallel to the default up vector.
 
+Fog is **suppressed** while map view is on, and the Scene panel says so. Fog shades by distance from the camera, which would darken one edge of what should be a flat, evenly-lit plate. It is overridden at the render rather than written into the setting, so the fog value survives and returns when map view is switched off — no save-and-restore bookkeeping to get wrong. Verified: map view with fog 4 and fog 0 produce identical frames (mean 74.8 both), while a normal view at fog 4 reads 186.4.
+
 Pairs with the existing **Screenshot** button. Turning off Show sky and picking
 a flat background gives a cleaner plate to trace over.
 

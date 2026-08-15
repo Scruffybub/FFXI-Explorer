@@ -3027,6 +3027,20 @@ export default function ZoneViewer({
 
   if (zoneData.prefabs.length === 0 || zoneData.instances.length === 0) return null
 
+  /*
+   * Map view suppresses fog rather than zeroing the setting.
+   *
+   * Distance fog defeats the point of an orthographic capture: the projection
+   * is there to make everything true to plan, and fog then shades the result by
+   * distance from the camera, so the far edge of a zone reads darker than the
+   * near edge on what should be a flat, evenly-lit plate.
+   *
+   * Overriding here rather than writing 0 into `scene.fogDensity` means the
+   * value survives — turn map view off and the fog you had is back, with no
+   * save-and-restore bookkeeping to get wrong.
+   */
+  const effectiveFog = scene.mapView ? 0 : scene.fogDensity
+
   const cx = center.x, cy = center.y, cz = center.z
 
   return (
@@ -3080,10 +3094,10 @@ export default function ZoneViewer({
         <LightPlacer meshes={instancedMeshes} active={placingLight} onPlace={onPlaceLight} />
       )}
 
-      {scene.showSky && scene.fogDensity > 0 ? (
+      {scene.showSky && effectiveFog > 0 ? (
         <>
           <SkyDome size={farPlane * 0.9} material={skyMaterial} />
-          <FogController size={size} density={scene.fogDensity} />
+          <FogController size={size} density={effectiveFog} />
         </>
       ) : scene.showSky ? (
         <SkyDome size={farPlane * 0.9} material={skyMaterial} />

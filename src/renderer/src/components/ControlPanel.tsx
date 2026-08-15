@@ -761,6 +761,13 @@ export default function ControlPanel({
           label="Fog density" value={scene.fogDensity} min={0} max={8} step={0.02}
           onChange={v => onScene({ fogDensity: v })}
         />
+        {scene.mapView && (
+          <p className="note small">
+            Fog is suppressed while <strong>Map view</strong> is on — it shades by
+            distance from the camera, which would darken one edge of an otherwise
+            flat plate. Your setting is kept and comes back when you leave map view.
+          </p>
+        )}
         <Slider
           label="Water tint" value={scene.waterTint} min={0} max={1} step={0.01}
           onChange={v => onScene({ waterTint: v })}
