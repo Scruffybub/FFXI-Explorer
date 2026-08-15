@@ -1,3 +1,4 @@
+import { Label } from './Info'
 import type { ModelSettings, ToneMappingMode } from '../lib/settings'
 import type { ParsedAnimation } from '../lib/ffxi-dat'
 
@@ -20,7 +21,7 @@ const TONE_OPTIONS: { value: ToneMappingMode; label: string }[] = [
 ]
 
 function Slider({
-  label, value, min, max, step, onChange,
+  label, value, min, max, step, onChange, info,
 }: {
   label: string
   value: number
@@ -28,11 +29,12 @@ function Slider({
   max: number
   step: number
   onChange: (v: number) => void
+  info?: string
 }) {
   return (
     <label className="control">
       <span className="control-row">
-        {label}
+        <Label text={label} info={info} />
         <span className="value">{value.toFixed(2)}</span>
       </span>
       <input
@@ -65,7 +67,10 @@ export default function ModelPanel({
           <div className="section-head static">ANIMATION</div>
           <div className="section-body">
             <label className="control">
-              <span>Clip</span>
+              <Label
+                text="Clip"
+                info="FFXI splits one pose across several blocks — upper body, lower body, extras — so All together is the composed result the game shows. Individual clips are for inspecting one part. A character's animations come from separate files, where a set holds many unrelated motions, so those default to the first clip instead."
+              />
               <select
                 value={clipIndex === null ? 'all' : String(clipIndex)}
                 onChange={e => onClipChange(e.target.value === 'all' ? null : Number(e.target.value))}
@@ -91,6 +96,7 @@ export default function ModelPanel({
             <Slider
               label="Speed" value={speed} min={0.1} max={3} step={0.1}
               onChange={onSpeedChange}
+              info="Playback rate for the clip. FFXI's stored frame rate is not always what the game plays back at, so this is worth nudging when a motion looks hurried."
             />
           </div>
         </div>
@@ -102,27 +108,28 @@ export default function ModelPanel({
           <Slider
             label="Ambient" value={settings.ambientIntensity} min={0} max={3} step={0.05}
             onChange={v => onChange({ ambientIntensity: v })}
+            info="Even light from every direction, so nothing goes fully black. FFXI's textures already contain most of their shading, so these models take more ambient and less key light than a modern asset would."
           />
           <Slider
             label="Key light" value={settings.keyIntensity} min={0} max={5} step={0.05}
             onChange={v => onChange({ keyIntensity: v })}
+            info="The main directional light, which gives the model its form and its shadow side. Heavy key light doubles up with the shading already painted into the texture."
           />
           <Slider
             label="Fill light" value={settings.fillIntensity} min={0} max={3} step={0.05}
             onChange={v => onChange({ fillIntensity: v })}
+            info="A softer light from the opposite side, lifting the shadows the key light leaves behind."
           />
           <Slider
             label="Key angle" value={settings.keyAzimuth} min={-180} max={180} step={1}
             onChange={v => onChange({ keyAzimuth: v })}
+            info="Swings the key light around the model, in degrees. Useful for finding an angle that shows off a piece of armour rather than flattening it."
           />
           <Slider
             label="Roughness" value={settings.roughness} min={0} max={1} step={0.01}
             onChange={v => onChange({ roughness: v })}
+            info="Surface finish: 1 is cloth-matte, 0 is polished metal. FFXI stores no material data, so this applies to the whole model at once."
           />
-          <p className="note small">
-            FFXI's art is lit flat by the game, so its textures already contain
-            most of the shading. Heavy key light tends to double it up.
-          </p>
         </div>
       </div>
 
@@ -130,7 +137,10 @@ export default function ModelPanel({
         <div className="section-head static">DISPLAY</div>
         <div className="section-body">
           <label className="control">
-            <span>Tone mapping</span>
+            <Label
+              text="Tone mapping"
+              info="How high dynamic range is squeezed into a displayable image. ACES is filmic and contrasty, AgX gentler on bright colour, Neutral closest to the raw texture values."
+            />
             <select
               value={settings.toneMapping}
               onChange={e => onChange({ toneMapping: e.target.value as ToneMappingMode })}
@@ -143,9 +153,13 @@ export default function ModelPanel({
           <Slider
             label="Exposure" value={settings.exposure} min={0.1} max={3} step={0.05}
             onChange={v => onChange({ exposure: v })}
+            info="Overall brightness going into tone mapping, like a camera's exposure. Raising it lifts the darks rather than clipping the brights."
           />
           <label className="control color">
-            <span>Background</span>
+            <Label
+              text="Background"
+              info="The backdrop behind the model. A mid grey judges colour most honestly; black and white both flatter it."
+            />
             <input
               type="color" value={settings.background}
               onChange={e => onChange({ background: e.target.value })}
@@ -156,14 +170,20 @@ export default function ModelPanel({
               type="checkbox" checked={settings.showGround}
               onChange={e => onChange({ showGround: e.target.checked })}
             />
-            <span>Ground plane</span>
+            <Label
+              text="Ground plane"
+              info="A floor under the model, which gives its feet somewhere to sit and catches its shadow. Off leaves it floating against the background."
+            />
           </label>
           <label className="control toggle">
             <input
               type="checkbox" checked={settings.wireframe}
               onChange={e => onChange({ wireframe: e.target.checked })}
             />
-            <span>Wireframe</span>
+            <Label
+              text="Wireframe"
+              info="Draw the model as edges only, which is the quickest way to see how its mesh is built and where the seams between equipment pieces fall."
+            />
           </label>
         </div>
       </div>

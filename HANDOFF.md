@@ -541,6 +541,7 @@ All launch the built app headless via Electron and capture PNGs.
 | `character-anim-test.cjs <animIdx> <out>` | Equip and animate a character, measure vertex motion |
 | `build-item-names.cjs <item_equipment.sql>` | Regenerate `resources/item-names.json` (not a test; a data build step) |
 | `expansion-check.cjs` | Read the expansion tag the sidebar renders for all 285 zones and cross-check it against the CSV's archive and the name rules |
+| `panel-inventory.cjs` | List every control the settings panel renders, with whether it has an info icon. `EXTRA_QUERY` reveals the conditional ones |
 
 **`walk-test.cjs` and the other movement harnesses need `show: true`.** Chromium
 throttles `requestAnimationFrame` in a hidden window regardless of
@@ -996,6 +997,41 @@ resolve or whether they need a transform the instance list would normally have
 supplied. Those are different fixes. The removed implementation was a one-line
 escape in the prefab loop (`if (isSkyWeatherMesh(prefab)) continue`) plus a
 census of the skipped categories; see the commit that removed it.
+
+### Every setting explains itself, through an info icon
+
+`components/Info.tsx` — a lowercase "i" in a circle beside a control's name,
+opening a hover popup with a sentence or two. Both panels use it: the zone
+panel's 67 controls and the model panel's 12 all carry one, and the long
+explanatory paragraphs that used to sit under a handful of settings are gone
+into the icons. Only genuinely non-setting prose is still printed: the fly/walk
+key help, the third-person animation caveat, the map-view tip, the live music
+status and "this zone carries no weather geometry".
+
+Details that are the way they are on purpose:
+
+- **The popup is portalled to `document.body` and positioned `fixed`.** The
+  panels scroll, and `overflow-y: auto` clips anything leaving the box, so a
+  popup parented to the control is cut off near the panel edges.
+- **It opens to the left of the whole panel, not of the icon.** Anchoring to the
+  icon put the card over the control it was explaining. `Info` reads
+  `closest('.panel')` for that edge.
+- **`pointer-events: none`,** or moving the pointer toward the popup would
+  dismiss it.
+- **The icon's click handler calls `preventDefault()`.** Every icon sits inside
+  a `<label>`, and clicking a label activates its control — without it, reaching
+  for an explanation would toggle the setting.
+
+**A verification trap, and the second time this project has hit it.** The popup
+measured perfectly in the DOM — right rect, `visibility: visible`, parented to
+body — and was **absent from the screenshot**. A hidden Electron window does not
+composite newly created layers into `capturePage`. `walk-test.cjs` already needs
+`show: true` for rAF; anything that appears only on interaction needs it too.
+
+`scripts/panel-inventory.cjs` lists every control the panel renders, in order,
+with whether it has an icon. Running it before and after the refactor is what
+proved no control was lost: 66 labels before, the same 66 after plus the weather
+**State** dropdown, which had never had a label at all.
 
 ### Anisotropic filtering
 
