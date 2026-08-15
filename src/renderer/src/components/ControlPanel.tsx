@@ -792,6 +792,12 @@ export default function ControlPanel({
             />
           </>
         )}
+        <Toggle
+          label="Blend terrain overlays"
+          checked={scene.overlayBlend}
+          onChange={v => onScene({ overlayBlend: v })}
+          hint="FFXI fades an overlay layer over base ground using per-vertex alpha. Off draws every overlay at full strength, which is what caused the pale mismatched squares in the Gustabergs."
+        />
         <Toggle label="Wireframe" checked={scene.wireframe} onChange={v => onScene({ wireframe: v })} />
         <Toggle
           label="Show collision"

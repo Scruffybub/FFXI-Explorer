@@ -1095,9 +1095,11 @@ West Ronfaure's per-mesh share histogram across 349 meshes is
 `161,1,9,23,35,40,21,7,15,37` (tenths) — a large opaque cluster and a long
 spread, not two clean clusters.
 
-### 4c. SOLVED (diagnosis) — the pale tiles are overlay layers drawn opaque
+### 4c. FIXED — the pale tiles were overlay layers drawn opaque
 
-**2026-08-15. The cause is located; the fix is not written.**
+**FIXED 2026-08-15.** Scene → **Blend terrain overlays**, on by default; `?valpha=off|direct|double` overrides it for testing. Turning it off reproduces the old render exactly (0.000 difference), so the escape hatch is real.
+
+The surprise was which reading of the alpha won. The code warned that 128 is *neutral* for the RGB channels, so `double` (opacity = min(1, a×2)) was the reasoned default — and it changed almost nothing (0.02% of pixels). **`direct` is correct**: the value is opacity as stored, so alpha is NOT on the same convention as RGB here. It removes the pale squares and moves 3.5% of the frame. Swept across West Ronfaure, zone 103, Misareaux and North Gustaberg — differences of 0.2 to 1.5 mean, no sorting artefacts, nothing broken.
 
 The atlas hypothesis was right about the textures and wrong about the cause.
 

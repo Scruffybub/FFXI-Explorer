@@ -279,6 +279,15 @@ const BLEND_EXP =
     : 0
 
 /** 4c experiment: slide straddling UV rects back inside 0..1. */
+/**
+ * 4c: how to read FFXI's per-vertex alpha — 'off', 'direct', or 'double'.
+ * See the colour-attribute code for what each means.
+ */
+const VERTEX_ALPHA =
+  typeof window !== 'undefined'
+    ? (new URLSearchParams(window.location.search).get('valpha') ?? '').toLowerCase()
+    : ''
+
 const UV_FIX =
   typeof window !== 'undefined' &&
   new URLSearchParams(window.location.search).has('uvfix')
@@ -2194,6 +2203,9 @@ export default function ZoneViewer({
     let nonFinitePositions = 0
     let blendApplied = 0
     let uvFixed = 0
+    let overlayMeshes = 0
+    // The query param overrides; otherwise the Scene toggle decides.
+    const alphaMode = VERTEX_ALPHA || (scene.overlayBlend ? 'direct' : 'off')
     /** Every weather state this zone carries geometry for. */
     const weatherStates = new Set<string>()
     /** prefab index -> its weather state, for tagging the meshes below. */
@@ -2314,10 +2326,45 @@ export default function ZoneViewer({
       // places with bloom on" report — a symptom that only shows from the
       // camera angles where the offending triangle is on screen, which is why
       // an in-place angle sweep can miss it entirely.
-      const colorArray = new Float32Array(vertexColors.filter((_, i) => i % 4 !== 3))
+      /*
+       * 4c. FFXI lays an overlay layer over base terrain and fades it in with
+       * per-vertex alpha — prefabs come in pairs sharing a texture and an
+       * instance count, one opaque and one partial. That weight was being
+       * dropped here (a three-component colour attribute), so every overlay drew
+       * at full strength over its base: the hard-edged pale squares.
+       *
+       * Two readings of the value, chosen by `?valpha=`:
+       *   double  (default) 128 is neutral, as it is for the RGB channels, so
+       *           opacity is min(1, a*2). The 127 prefabs sitting at a flat 0.50
+       *           stay fully opaque and only the ramps fade.
+       *   direct  the value is opacity as-is, which makes every flat-0.50 mesh
+       *           half-transparent.
+       * `off` keeps the old three-component behaviour for comparison.
+       */
+      let minScaledAlpha = 1
+      const useVertexAlpha = alphaMode !== 'off'
+      const colorArray = useVertexAlpha
+        ? new Float32Array(vertexColors.length)
+        : new Float32Array(vertexColors.filter((_, i) => i % 4 !== 3))
+      if (useVertexAlpha) {
+        for (let i = 0, o = 0; i < vertexColors.length; i += 4, o += 4) {
+          const raw = vertexColors[i + 3]
+          const a = alphaMode === 'double' ? Math.min(1, raw * 2) : raw
+          if (a < minScaledAlpha) minScaledAlpha = a
+          colorArray[o] = vertexColors[i]
+          colorArray[o + 1] = vertexColors[i + 1]
+          colorArray[o + 2] = vertexColors[i + 2]
+          colorArray[o + 3] = a
+        }
+      }
       for (let i = 0; i < colorArray.length; i++) {
         if (!Number.isFinite(colorArray[i])) { colorArray[i] = 1; nonFiniteColors++ }
       }
+      // A mesh that never drops below full opacity is ordinary terrain and must
+      // stay on the opaque path, or sorting cost and artefacts arrive for
+      // nothing.
+      const isOverlay = useVertexAlpha && minScaledAlpha < 0.99
+      if (isOverlay) overlayMeshes++
       const uvArray = new Float32Array(prefab.uvs)
       for (let i = 0; i < uvArray.length; i++) {
         if (!Number.isFinite(uvArray[i])) { uvArray[i] = 0; nonFiniteUvs++ }
@@ -2328,7 +2375,8 @@ export default function ZoneViewer({
         if (!Number.isFinite(posArray[i])) { posArray[i] = 0; nonFinitePositions++ }
       }
 
-      geometry.setAttribute('color', new THREE.Float32BufferAttribute(colorArray, 3))
+      geometry.setAttribute('color',
+        new THREE.Float32BufferAttribute(colorArray, useVertexAlpha ? 4 : 3))
       // 4c experiment: ?uvfix=1 slides a mesh whose UV rect straddles the 0..1
       // edge back inside it.
       //
@@ -2490,6 +2538,20 @@ export default function ZoneViewer({
             polygonOffsetFactor: -1,
             polygonOffsetUnits: -1,
           }),
+          // 4c. An overlay blends over the base rather than cutting out of it.
+          // alphaTest must go: with a four-component colour attribute the vertex
+          // weight feeds diffuseColor.a, so a 0.1 cutout would punch holes
+          // through exactly the faded edge the overlay exists to produce.
+          // depthWrite off keeps the overlay from occluding its own base, and
+          // the polygonOffset above is already there to stop the two z-fighting.
+          ...(isOverlay && {
+            transparent: true,
+            alphaTest: 0,
+            depthWrite: false,
+            polygonOffset: true,
+            polygonOffsetFactor: -1,
+            polygonOffsetUnits: -1,
+          }),
         }
 
         // Unlit reproduces the game exactly; lit uses the DAT's per-vertex
@@ -2627,6 +2689,7 @@ export default function ZoneViewer({
       instancedMeshes.push(mesh)
     }
 
+    if (alphaMode !== 'off') console.log('[VALPHA] mode=' + alphaMode + ' overlay meshes ' + overlayMeshes + ' of ' + zoneData.prefabs.length)
     if (UV_FIX) console.log('[UVFIX] slid ' + uvFixed + ' straddling meshes back inside 0..1')
     if (degenerateNormals > 0) {
       console.log(`[ZoneViewer] replaced ${degenerateNormals} degenerate normals`)
@@ -2977,7 +3040,7 @@ export default function ZoneViewer({
     }
     // Rebuild materials when PCSS is toggled so they compile against the
     // shadow chunk that is actually installed.
-  }, [zoneData, lit, scene.wireframe, shaderVariant])
+  }, [zoneData, lit, scene.wireframe, shaderVariant, scene.overlayBlend])
 
   // Live material tweaks that do not require rebuilding geometry.
   useEffect(() => {

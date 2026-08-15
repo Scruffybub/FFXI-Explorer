@@ -258,6 +258,15 @@ export interface SceneSettings {
    * lines stay parallel and everything is drawn at true relative size, which is
    * what makes the capture usable as a plan.
    */
+  /**
+   * Blend FFXI terrain overlay layers using their per-vertex alpha.
+   *
+   * The game lays an overlay mesh over base ground and fades it in with a
+   * per-vertex weight. Dropping that weight drew every overlay at full
+   * strength, which is what South Gustaberg's pale mismatched squares were.
+   */
+  overlayBlend: boolean
+
   mapView: boolean
   /** Fraction of the zone's own extent to frame. 1 fits the whole zone. */
   mapZoom: number
@@ -379,6 +388,7 @@ export const DEFAULT_SCENE: SceneSettings = {
   showCollision: false,
   weatherState: '',
   weatherFollowsCamera: true,
+  overlayBlend: true,
   mapView: false,
   mapZoom: 1,
   mapRotation: 0,
