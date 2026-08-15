@@ -31,7 +31,7 @@ forgetting that:
 
 | | Status |
 |---|---|
-| **4c — pale ground squares** | **Mostly fixed, still open.** Ryan: "still some squares in Gustaberg, although much less than before." Cause and fix are in §4c; the remainder is unexplained |
+| **4c — pale ground squares** | **Mostly fixed, still open, and the fix now ships OFF by default** (2026-08-15, Ryan's call). Ryan: "still some squares in Gustaberg, although much less than before." Cause, fix and the default flip are in §4c; the remainder is unexplained |
 | **4e — white screen with bloom** | Not reproduced. Needs Ryan to say *where* in a zone it happens, then it can be driven headlessly |
 | **4a / 4b — water, cutout alpha** | Both downstream of the alpha question. **Read §5a first** — three readings of the alpha channel have been eliminated by measurement, and §5's old lead is superseded |
 | **Diorama** | The last unstarted roadmap item, and the only one that builds rather than debugs |
@@ -1156,7 +1156,7 @@ spread, not two clean clusters.
 
 **Largely fixed 2026-08-15, but NOT closed.** Ryan, after the fix: *"there are still some squares in Gustaberg, although much less than before."* The mechanism below is right and the bulk of the artifact is gone; some remainder has a cause not yet identified. **Start here if picking 4c up: find what the surviving squares have in common that the fixed ones did not.** The obvious next cut is to dump the per-mesh vertex-alpha shape (flat vs ramp, min, max) for the meshes still showing pale, using `window.__zoneData` under `?census=1`, and compare against the ones that came good.
 
- Scene → **Blend terrain overlays**, on by default; `?valpha=off|direct|double` overrides it for testing. Turning it off reproduces the old render exactly (0.000 difference), so the escape hatch is real.
+ Scene → **Blend terrain overlays**, **off by default as of 2026-08-15 at Ryan's request** — the fix is real but incomplete, so the shipped default is the known-good old render and the blend is opt-in until the surviving squares are understood. `?valpha=off|direct|double` overrides the toggle for testing. Verified after the flip: South Gustaberg at the default is byte-identical to `?valpha=off` (mean abs difference 0.000) and differs from `?valpha=direct` (0.101), and `[VALPHA]` no longer logs unless the toggle or the param turns it on.
 
 **A regression followed and was fixed — read this before touching the overlay path.** Ryan reported models and texture squares popping in and out while flying around Misareaux Coast. Two causes, both mine:
 

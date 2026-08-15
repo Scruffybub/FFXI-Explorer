@@ -388,7 +388,7 @@ export const DEFAULT_SCENE: SceneSettings = {
   showCollision: false,
   weatherState: '',
   weatherFollowsCamera: true,
-  overlayBlend: true,
+  overlayBlend: false,
   mapView: false,
   mapZoom: 1,
   mapRotation: 0,
