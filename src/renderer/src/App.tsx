@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { ZONES, type ZoneEntry } from './lib/zoneList'
+import { expansionFor } from './lib/zoneExpansion'
 import { parseZoneFile, parseTexturesFromDat, type ParsedZone } from './lib/ffxi-dat'
 import ZoneViewer from './components/ZoneViewer'
 import ControlPanel from './components/ControlPanel'
@@ -423,17 +424,23 @@ export default function App() {
           </div>
         </div>
         <ul className="zone-list">
-          {filtered.map(zone => (
-            <li key={zone.id}>
-              <button
-                className={selected?.id === zone.id ? 'active' : ''}
-                onClick={() => loadZone(zone)}
-              >
-                <span className="zone-name">{zone.name}</span>
-                <span className="zone-path">{zone.modelPath}</span>
-              </button>
-            </li>
-          ))}
+          {filtered.map(zone => {
+            const expansion = expansionFor(zone)
+            return (
+              <li key={zone.id}>
+                <button
+                  className={selected?.id === zone.id ? 'active' : ''}
+                  onClick={() => loadZone(zone)}
+                >
+                  <span className="zone-name">{zone.name}</span>
+                  <span className="zone-meta">
+                    <span className="zone-path">{zone.modelPath}</span>
+                    <span className="zone-expansion" title={expansion.label}>{expansion.tag}</span>
+                  </span>
+                </button>
+              </li>
+            )
+          })}
           {filtered.length === 0 && <li className="empty">No zones match “{search}”.</li>}
         </ul>
       </aside>

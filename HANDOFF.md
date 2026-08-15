@@ -452,6 +452,7 @@ postprocessing · electron-vite · TypeScript.
 | `src/renderer/src/components/ModelPanel.tsx` | Model settings panel (clip, studio lighting) |
 | `src/renderer/src/components/CharacterBuilder.tsx` | Race, face, eight equipment slots, animation set |
 | `src/renderer/src/lib/settings.ts` | Settings types, defaults, presets |
+| `src/renderer/src/lib/zoneExpansion.ts` | Which expansion a zone shipped with, derived from its ROM archive |
 | `src/renderer/src/lib/modelBuild.ts` | DAT → three.js meshes. **Shared** by model viewer and zone avatar |
 | `src/renderer/src/lib/skinning.ts` | CPU skinning maths, split from React so it can be tested |
 | `src/renderer/src/lib/characterModel.ts` | Assembles a player character; equipment, face and animation tables |
@@ -539,6 +540,7 @@ All launch the built app headless via Electron and capture PNGs.
 | `character-test.cjs <raceIdx> <out>` | Build a player character with equipment, report what loaded |
 | `character-anim-test.cjs <animIdx> <out>` | Equip and animate a character, measure vertex motion |
 | `build-item-names.cjs <item_equipment.sql>` | Regenerate `resources/item-names.json` (not a test; a data build step) |
+| `expansion-check.cjs` | Read the expansion tag the sidebar renders for all 285 zones and cross-check it against the CSV's archive and the name rules |
 
 **`walk-test.cjs` and the other movement harnesses need `show: true`.** Chromium
 throttles `requestAnimationFrame` in a hidden window regardless of
@@ -994,6 +996,38 @@ resolve or whether they need a transform the instance list would normally have
 supplied. Those are different fixes. The removed implementation was a one-line
 escape in the prefab loop (`if (isSkyWeatherMesh(prefab)) continue`) plus a
 census of the skipped categories; see the commit that removed it.
+
+### The expansion tag comes from the ROM archive, not a hand-written list
+
+The sidebar shows each zone's expansion beside its DAT path. The classification
+is **derived from the install**: FFXI shipped each expansion in its own archive
+and the zone table's model path names it — ROM2 Zilart, ROM3 Promathia, ROM4
+Aht Urhgan, ROM5 Wings, ROM9 Adoulin, plain ROM the base game.
+
+The split is exact. ROM2 holds precisely the Zilart set (Sky, the jungles,
+Altepa, Norg, Kazham, Dynamis), ROM3 the Promathia set, ROM4 ids 46-79, ROM5
+every `[S]` past zone. `scripts/expansion-check.cjs` reads the tag the sidebar
+actually renders for all 285 rows and cross-checks it against the archive plus
+two name rules (`[S]` must be Wings, `Abyssea - ` must be Abyssea); it reports
+0 disagreements.
+
+**What the archive cannot answer.** Content from later version updates has no
+archive of its own — it was appended to the base ROM under high directory
+numbers (ROM/240 upward), so the archive rule alone calls it base game. Those
+25 zones are listed by id in `lib/zoneExpansion.ts`. Ten are Abyssea and three
+are Adoulin; the remaining thirteen (Provenance, Legion, Feretory, Escha,
+Reisenjima, Desuetia, Dynamis Divergence) each came from a different year's
+update and belong to no expansion, so they carry a deliberately coarse
+**Update** tag. Sharpening those needs Ryan, not a guess.
+
+Two zones read as Promathia because that is where their data sits, though their
+*use* is much later: Diorama Abdhaljs-Ghelsba and Abdhaljs Isle-Purgonorgo,
+both in ROM3.
+
+**A false pass worth remembering.** The first run of the check reported "no
+problems" over **zero rows** — the harness returned null from `ffxi:autoDetect`,
+so the app showed its setup screen and the list never rendered, and every rule
+passed vacuously. It now fails unless the rendered row count matches the CSV.
 
 ### The grid collapsed the viewport when the panels were hidden
 
