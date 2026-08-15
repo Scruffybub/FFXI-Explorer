@@ -1,6 +1,11 @@
 /**
+ * SPDX-License-Identifier: LGPL-2.1-or-later
+ *
  * ATRAC3 decoder for FFXI's codec-3 BGW music, ported from FFmpeg's
  * libavcodec/atrac3.c and atrac.c.
+ *
+ * Being a derivative of FFmpeg, this file is LGPL-2.1-or-later rather than MIT
+ * like the rest of the project. See THIRD-PARTY-NOTICES.md.
  *
  * **Validated bit-exactly against ffmpeg**, not by ear: `scripts/atrac3.cjs` is
  * the same algorithm and `scripts/at3-oracle.cjs` decodes the same file with a

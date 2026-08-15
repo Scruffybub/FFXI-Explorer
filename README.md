@@ -1,124 +1,152 @@
-# FFXI Zone Viewer
+# FFXI Explorer
 
-A standalone desktop viewer for Final Fantasy XI zone models, with modern
-lighting, shadows, and post-processing that the game itself never had.
+A standalone desktop viewer for **Final Fantasy XI**'s zones, models and music,
+with modern lighting, shadows and post-processing the game itself never had.
 
-Zone geometry, textures and normals are read straight out of your local FFXI
-installation. Nothing is uploaded, and no server, account or internet
-connection is involved.
+Everything is read straight out of your own local FFXI installation. Nothing is
+uploaded, and no server, account or internet connection is involved.
 
-## Running it
+![Version](https://img.shields.io/badge/version-0.1.0-blue) ![Platform](https://img.shields.io/badge/platform-Windows-lightgrey)
 
-Download `FFXI-Zone-Viewer-portable.exe` and run it. There is nothing to
-install and no runtime to set up.
+---
 
-On first launch it looks for your FFXI installation automatically by reading the
-PlayOnline registry keys and checking the usual install locations. If it can't
-find one, it asks you to pick the folder — the one containing `ROM`,
-`ROM2`–`ROM9` and `VTABLE.DAT`. Your choice is remembered.
+## What's in it
 
-An install inside `C:\Program Files (x86)` is completely fine here. That path is
-blocked in browsers because of the File System Access API sandbox; a desktop app
-has no such restriction and reads it directly.
+**Zone viewer** — all 285 zones, from West Ronfaure to Reisenjima, each labelled
+with the expansion it shipped with. Orbit, fly, or **walk** them in first or
+third person, standing on FFXI's own collision mesh so walls block you and the
+ground is where the game puts it.
 
-## Lighting
+**Lighting** — *Original* reproduces the 2002 look faithfully (baked vertex
+colours, plus the game's own fixed-function sun). *Dynamic* lights the same
+geometry using the per-vertex normals in the DAT files, with real shadows,
+hand-placed point lights and image-based sky lighting.
 
-FFXI baked all of its lighting into per-vertex colours back in 2002. There are
-no light sources in the game data — the shading you see is painted on. The
-viewer offers two modes:
+**Post-processing** — ambient occlusion, bloom, SMAA, depth of field, colour
+grading, vignette, and a choice of tone-mapping curves.
 
-**Original** reproduces that faithfully: unlit materials, vertex colours only.
-This is what the game looks like.
+**Model viewer** — 2,473 NPC, monster and object models with their animations,
+plus a character builder that assembles a player character from a race skeleton
+and eight equipment slots, with real item names. The character you build is the
+one you walk zones as.
 
-**Dynamic** lights the zone properly using the per-vertex normals stored in the
-DAT files, with a directional sun, hemisphere ambient, and real-time shadows.
+**Zone music** — the game's own BGW tracks, decoded in-app. Both codecs play:
+PS-ADPCM, and ATRAC3 via a from-source decoder validated bit-exactly against
+ffmpeg.
 
-The **Keep baked shading** slider controls how much of the original painted-on
-shading survives in dynamic mode. At 1.0 the old baked shadows multiply against
-your new ones and everything reads twice as dark; at 0 you get purely dynamic
-light and lose some of the original art's character. Around 0.25–0.4 usually
-strikes the best balance.
+**Map view** — a top-down orthographic capture with no perspective distortion,
+for tracing a zone into a map.
 
-### Presets
+**Weather geometry** — every zone carries sky and weather meshes the client
+swaps between at runtime. They can be picked and drawn per state.
 
-| Preset | What it shows |
+---
+
+## Installing
+
+Grab a build from [Releases](../../releases):
+
+| File | What it is |
 |---|---|
-| Original (2002) | The game's own baked look |
-| Midday Sun | Hard overhead key light, crisp shadows |
-| Golden Hour | Low warm sun, long shadows, heavy bloom |
-| Moonlit Night | Cool dim key, deep ambient shadow |
-| Overcast | Soft shadowless sky light, good for reading geometry |
-| Clay Render | Untextured neutral shading to inspect pure geometry |
+| `FFXI-Zone-Viewer-0.1.0-setup.exe` | Installer. Lets you pick a location, adds a Start-menu entry, uninstalls cleanly |
+| `FFXI-Zone-Viewer-0.1.0-portable.exe` | Single file, nothing installed. Just run it |
+
+**Windows will warn you.** The build is unsigned — a code-signing certificate
+costs a few hundred dollars a year — so SmartScreen shows "Windows protected
+your PC". Click **More info → Run anyway**. If you would rather not, the
+build-from-source instructions below produce the same application.
+
+Windows x64 only for now.
+
+### Finding your game
+
+On first launch it locates your FFXI installation automatically from the
+PlayOnline registry keys and the usual install paths. If it can't find one, it
+asks you to pick the folder — the one containing `ROM`, `ROM2`–`ROM9` and
+`VTABLE.DAT`. Your choice is remembered.
+
+An installation inside `C:\Program Files (x86)` is completely fine. That path is
+blocked in browsers by the File System Access sandbox, which is exactly why this
+is a desktop application: it reads the files directly.
+
+---
+
+## Using it
+
+### Cameras
+
+**Orbit** drags to rotate, scrolls to zoom. **Fly** captures the mouse on click:
+`WASD` to move, `E`/`Space` up, `Q`/`Shift` down, scroll to change speed, `Esc`
+to release. **Walk** puts you on the ground: `WASD` to walk, `Shift` to run,
+`Esc` to release. Walk mode has step-up, slope limits, wall sliding and a noclip
+toggle, and can follow you in third person.
+
+### Lighting modes
+
+FFXI baked all of its lighting into per-vertex colours back in 2002 — there are
+no light sources in the game data, the shading you see is painted on.
+
+*Original* reproduces that. *Dynamic* replaces it with real lights, and the
+**Keep baked shading** slider decides how much of the original art survives
+underneath: at 1.0 the old shadows multiply against the new ones and everything
+reads twice as dark, at 0 you get pure dynamic light and lose some character.
+Around 0.25–0.4 is usually the balance.
+
+Six presets cover the common looks: Original (2002), Midday Sun, Golden Hour,
+Moonlit Night, Overcast and Clay Render.
 
 ### Point lights
 
-FFXI's zone files contain no light data whatsoever, so torches and braziers have
-to be placed by hand. In Dynamic mode, open **Point lights**, click **Place a
-light**, then click a surface in the view — the light is dropped just off that
-surface. `Esc` cancels placement.
+The zone files contain no light data at all, so torches and braziers are placed
+by hand. In Dynamic mode, open **Point lights → Place a light**, then click a
+surface. Each light has colour, intensity, range, falloff and a flicker amount;
+the **headlamp** is a light attached to the camera, which is the quickest way to
+explore a dark interior. Lights are lost when you change zone.
 
-Each light has colour, intensity, range, falloff, and a **flicker** amount that
-drives an irregular flame-like variation. Selecting a light in the list opens its
-controls and highlights its marker in the scene; **Raise / lower** nudges its
-height, since a click always lands on a surface.
+### Presentation
 
-Point lights can cast their own shadows, but each shadow-casting point light
-renders the scene six times (once per cube face), so switch that on sparingly.
+The floating buttons at the top right of the view cover **Hide panels** (`F10`),
+**Fullscreen** (`F11`) and **Screenshot** (`F12`), which saves a PNG of the 3D
+view at window resolution with no UI in the frame. **Inspect** reports what a
+clicked surface actually is — texture, material, blend flags, UV range.
 
-The **headlamp** is a light attached to the camera — the quickest way to explore
-a dark interior without placing anything.
+Every setting has an ⓘ beside it explaining what it does.
 
-Point lights only affect Dynamic mode. Original mode uses unlit materials, which
-ignore light sources entirely.
-
-### Shadow tuning
-
-Shadows use a directional light whose shadow camera follows the view, so a
-moderate shadow map still resolves sharp detail across a very large zone.
-**Shadow range** sets how much ground around the camera receives shadows —
-smaller covers less but resolves finer. If you see stripe patterns on surfaces
-or shadows detaching from what casts them, raise **Bias** or **Normal bias**.
-
-## Post-processing
-
-Ambient occlusion (N8AO), bloom, SMAA anti-aliasing, depth of field, colour
-grading, vignette, and a choice of tone mapping curves — all individually
-adjustable. Ambient occlusion is skipped automatically on zones above 2000
-objects to stay interactive, regardless of the setting.
-
-## Presentation and screenshots
-
-The floating buttons at the top-right of the view (they fade in on hover) cover
-**Hide panels** (`F10`), **Fullscreen** (`F11`, `Esc` to leave) and **Screenshot**
-(`F12`). Screenshot saves a PNG of the 3D view at the current window resolution,
-without any UI in the frame, via a normal save dialog.
-
-## Camera
-
-**Orbit** drags to rotate and scrolls to zoom. **Fly** captures the mouse on
-click: `W`/`A`/`S`/`D` to move, `E` or `Space` up, `Q` or `Shift` down, scroll to
-change speed, `Esc` to release.
+---
 
 ## Building from source
 
+Requires Node.js 20+ and a Windows machine for the packaging step.
+
 ```bash
 npm install
-npm run dev          # run against the dev server
-npm run build        # compile main, preload and renderer
-npm run dist         # produce the portable .exe in release/
+npx electron-vite dev                             # run against the dev server
+npx electron-vite build                           # compile main, preload, renderer
+npx electron-builder --win --config electron-builder.yml   # installers into release/
 ```
 
-The renderer can also be deep-linked for testing:
-`index.html?zone=<id>&preset=<index>`.
+The renderer can be deep-linked for testing:
+`index.html?zone=<id>&preset=<index>`, and most settings can be overridden by
+query parameter (`scene_cameraMode=walk`, `light_mode=lit`, `scene_anisotropy=8`).
+`scripts/` holds the verification harnesses.
+
+---
 
 ## Credits
 
-The DAT parsing code originates from
+The DAT parsing originates from
 [Vanalytics](https://github.com/Soverance/Vanalytics) by Soverance (MIT), which
-in turn builds on FFXI community reverse-engineering work — notably
+builds on FFXI community reverse-engineering — notably
 [GalkaReeve's mapViewer](https://github.com/GalkaReeve) for the zone geometry,
 mesh and animation block structures, and
-[LandSandBoat](https://github.com/LandSandBoat/server) for the zone tables.
+[LandSandBoat](https://github.com/LandSandBoat/server) for the zone, item and
+music tables. The ATRAC3 decoder is ported from FFmpeg, and the MZB collision
+layout was worked out against LandSandBoat's NavMesh Builder.
+
+## Licence
+
+MIT, except the ATRAC3 decoder ported from FFmpeg, which stays LGPL-2.1-or-later.
+See [LICENSE](LICENSE) and [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 
 FINAL FANTASY XI is a registered trademark of Square Enix Holdings Co., Ltd.
 This project is not affiliated with or endorsed by Square Enix, and distributes

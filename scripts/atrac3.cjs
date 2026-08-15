@@ -1,5 +1,9 @@
 /**
- * ATRAC3 decoder, ported from FFmpeg's libavcodec/atrac3.c + atrac.c.
+ * SPDX-License-Identifier: LGPL-2.1-or-later
+ *
+ * ATRAC3 decoder, ported from FFmpeg's libavcodec/atrac3.c + atrac.c. Being a
+ * derivative of FFmpeg, this file is LGPL-2.1-or-later rather than MIT like the
+ * rest of the project. See THIRD-PARTY-NOTICES.md.
  *
  *   node scripts/atrac3.cjs --selftest
  *   node scripts/atrac3.cjs <in.bgw> <out.wav>
