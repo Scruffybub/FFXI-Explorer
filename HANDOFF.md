@@ -1,14 +1,71 @@
 # FFXI Zone Viewer — Development Handoff
 
 Context for continuing work in a fresh session.
-Written 2026-08-03, substantially revised 2026-08-08.
+Written 2026-08-03; substantially revised 2026-08-08 and 2026-08-15.
 
 ---
 
-## 0. Start here — the next task
+## 0. Start here — state of play
 
-**Weather: the census is done and the geometry is identified. What remains is
-deciding how to present it.**
+Last worked 2026-08-15. Everything below is committed and pushed; the packaged
+exe in `release/` is current.
+
+**Read §2 (how to debug this) before changing anything.** Nearly every hour lost
+on this project went to theorising instead of measuring.
+
+### The one rule this session kept proving
+
+**Verify the way the user will see it.** Two separate failures came from
+forgetting that:
+
+- A full session's work never reached Ryan because `npm run build` only feeds
+  `out/` and the headless harness. He runs `release/*.exe`. **Repackage before
+  claiming anything is done** (`npx electron-builder --win portable --config
+  electron-builder.yml`).
+- The overlay-blend regression — geometry popping in and out as the camera
+  moved — **rendered perfectly in every screenshot the harness took**. Motion
+  artefacts are invisible to a still frame. Anything touching materials,
+  transparency or draw order needs checking in motion, by hand.
+
+### What is live and worth picking up
+
+| | Status |
+|---|---|
+| **4c — pale ground squares** | **Mostly fixed, still open.** Ryan: "still some squares in Gustaberg, although much less than before." Cause and fix are in §4c; the remainder is unexplained |
+| **4e — white screen with bloom** | Not reproduced. Needs Ryan to say *where* in a zone it happens, then it can be driven headlessly |
+| **4a / 4b — water, cutout alpha** | Both downstream of the alpha question. **Read §5a first** — three readings of the alpha channel have been eliminated by measurement, and §5's old lead is superseded |
+| **Diorama** | The last unstarted roadmap item, and the only one that builds rather than debugs |
+
+### Finished this session, do not redo
+
+- **Zone music** — mapping, PS-ADPCM, and a full ATRAC3 port validated
+  bit-exactly against ffmpeg. All 74 ambient tracks play. §6.
+- **Map view** — orthographic top-down capture, fog suppressed. §3.
+- **Weather** — geometry fully identified; parked because FFXI ships no
+  placement for it. §0b, and do not tune it further without new information.
+- Panel clipping, and the hidden-panels/fullscreen viewport collapse. §3.
+
+### Diagnostics available
+
+All are query params on the built app; `scripts/smoke.cjs` passes them through
+`EXTRA_QUERY` and its console filter already includes every tag below.
+
+| Switch | What it gives |
+|---|---|
+| `?census=1` | `[CENSUS]`, `[BLENDHIST]`, `[ALPHAHIST]`, `[CUTOUT]`, `[UVALPHA]`, `[UVSTRADDLE]`, and exposes **`window.__zoneData`** — the whole parsed zone, for any harness |
+| `?pick=<substr>` `?pickaxis=` | Draw only matching prefabs, framed. How the weather geometry was identified |
+| `?valpha=off\|direct\|double` | Override the terrain-overlay alpha reading |
+| `?uvfix=1` | Tested and rejected for 4c; kept so it is not retried |
+| `?blendexp=1\|2` | Global blend-flag experiment; made things worse, see §4f |
+| `?music=1` | Start music at launch; every state change logs `[MUSIC]` |
+| `?nowater=1` `?nounref=1` `?walkdebug=1` `?modeldebug=1` | Older switches, still good |
+
+---
+
+## 0b. Weather — identified, built, and deliberately parked
+
+**The census is done and the geometry is identified. What remains is deciding
+how to present it — and that is blocked, see below.**
 
 Steps 1–3 of the old plan were carried out on 2026-08-09. The findings below
 replace the guesswork; read them before touching anything.
@@ -1095,9 +1152,11 @@ West Ronfaure's per-mesh share histogram across 349 meshes is
 `161,1,9,23,35,40,21,7,15,37` (tenths) — a large opaque cluster and a long
 spread, not two clean clusters.
 
-### 4c. FIXED — the pale tiles were overlay layers drawn opaque
+### 4c. MOSTLY FIXED, STILL OPEN — pale tiles are overlay layers drawn opaque
 
-**FIXED 2026-08-15.** Scene → **Blend terrain overlays**, on by default; `?valpha=off|direct|double` overrides it for testing. Turning it off reproduces the old render exactly (0.000 difference), so the escape hatch is real.
+**Largely fixed 2026-08-15, but NOT closed.** Ryan, after the fix: *"there are still some squares in Gustaberg, although much less than before."* The mechanism below is right and the bulk of the artifact is gone; some remainder has a cause not yet identified. **Start here if picking 4c up: find what the surviving squares have in common that the fixed ones did not.** The obvious next cut is to dump the per-mesh vertex-alpha shape (flat vs ramp, min, max) for the meshes still showing pale, using `window.__zoneData` under `?census=1`, and compare against the ones that came good.
+
+ Scene → **Blend terrain overlays**, on by default; `?valpha=off|direct|double` overrides it for testing. Turning it off reproduces the old render exactly (0.000 difference), so the escape hatch is real.
 
 **A regression followed and was fixed — read this before touching the overlay path.** Ryan reported models and texture squares popping in and out while flying around Misareaux Coast. Two causes, both mine:
 
