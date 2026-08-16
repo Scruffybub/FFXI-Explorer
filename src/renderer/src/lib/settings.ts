@@ -288,6 +288,24 @@ export interface SceneSettings {
   mapZoom: number
   /** Rotate the map about the vertical axis, in degrees. */
   mapRotation: number
+
+  /**
+   * Frame a fixed number of world units instead of a fraction of the zone.
+   *
+   * `mapZoom` is relative to each zone's own bounding diagonal, so one zoom
+   * value means a different scale in every zone — Chateau d'Oraguille's extent
+   * is 208 units against Misareaux Coast's 2,901, a 14x spread. That is what
+   * you want for framing a single zone and exactly what you do not want for
+   * capturing many and stitching them together.
+   *
+   * With this on, every zone is captured at the same world scale, so the
+   * captures differ only by where they sit. Note that the *height* of the zone
+   * feeds that diagonal too, so even two zones with equal ground footprints
+   * come out at different scales under `mapZoom`.
+   */
+  mapFixedScale: boolean
+  /** World units covered vertically when `mapFixedScale` is on. */
+  mapUnits: number
 }
 
 /**
@@ -409,6 +427,10 @@ export const DEFAULT_SCENE: SceneSettings = {
   mapView: false,
   mapZoom: 1,
   mapRotation: 0,
+  mapFixedScale: false,
+  // 2,000 units tall frames all but the largest zones measured (Misareaux
+  // Coast's diagonal is 2,901) and is a round number to divide by.
+  mapUnits: 2000,
 
   // FFXI's world unit reads as roughly a metre: Chateau d'Oraguille's collision
   // spans 28 units across its floors, West Ronfaure ~1200 corner to corner. So

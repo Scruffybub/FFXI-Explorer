@@ -14,6 +14,19 @@ import type {
   LightingSettings, PointLightSettings, PostSettings, SceneSettings, SurfaceInfo, ToneMappingMode,
 } from '../lib/settings'
 
+/**
+ * What a map-view capture is worth in world units.
+ *
+ * `unitsPerPixel` is the number that matters for stitching captures together:
+ * two captures share a scale when this matches, whatever their zones' sizes.
+ */
+export interface MapScale {
+  unitsTall: number
+  unitsWide: number
+  unitsPerPixel: number
+  pixelHeight: number
+}
+
 interface ZoneViewerProps {
   zoneData: ParsedZone
   lighting: LightingSettings
@@ -31,6 +44,8 @@ interface ZoneViewerProps {
   characterClip?: number | null
   /** Weather states this zone carries geometry for, once it has been parsed. */
   onWeatherStates?: (states: string[]) => void
+  /** Map view's current scale, for the panel's readout. Null when it is off. */
+  onMapScale?: (scale: MapScale | null) => void
 }
 
 const TONE_MAPPING: Record<ToneMappingMode, THREE.ToneMapping> = {
@@ -1288,13 +1303,21 @@ function WeatherFollow({
  * so the ground is never stretched.
  */
 function MapCamera({
-  center, extent, zoom, rotationDeg, far,
+  center, extent, zoom, rotationDeg, far, fixedUnits, onScale,
 }: {
   center: THREE.Vector3
   extent: number
   zoom: number
   rotationDeg: number
   far: number
+  /**
+   * World units to cover vertically, overriding `extent * zoom`. This is what
+   * makes captures of different zones share one scale: `zoom` is a fraction of
+   * each zone's own diagonal, so it means something different in every zone.
+   */
+  fixedUnits?: number
+  /** Reports the scale back to the panel, so a capture can be documented. */
+  onScale?: (info: MapScale | null) => void
 }) {
   const { size, set, camera } = useThree()
   const camRef = useRef<THREE.OrthographicCamera | null>(null)
@@ -1312,7 +1335,7 @@ function MapCamera({
     const cam = camRef.current
     if (!cam) return
     const aspect = size.height > 0 ? size.width / size.height : 1
-    const halfH = Math.max(1, (extent * zoom) / 2)
+    const halfH = Math.max(1, (fixedUnits && fixedUnits > 0 ? fixedUnits : extent * zoom) / 2)
     const halfW = halfH * aspect
     cam.left = -halfW; cam.right = halfW
     cam.top = halfH; cam.bottom = -halfH
@@ -1325,7 +1348,25 @@ function MapCamera({
     cam.up.set(Math.sin(r), 0, -Math.cos(r))
     cam.lookAt(center.x, center.y, center.z)
     cam.updateProjectionMatrix()
-  }, [size.width, size.height, center, extent, zoom, rotationDeg, far])
+
+    // The scale that matters for stitching is world units per pixel, and it
+    // needs the canvas size — which only exists inside the Canvas, hence the
+    // report upward rather than a calculation in the panel.
+    const scale: MapScale = {
+      unitsTall: halfH * 2,
+      unitsWide: halfW * 2,
+      unitsPerPixel: size.height > 0 ? (halfH * 2) / size.height : 0,
+      pixelHeight: size.height,
+    }
+    onScale?.(scale)
+    console.log(`[MAPVIEW] covers ${scale.unitsWide.toFixed(1)} x ${scale.unitsTall.toFixed(1)} units ` +
+      `over ${size.width}x${size.height}px — ${scale.unitsPerPixel.toFixed(4)} units/px` +
+      (fixedUnits ? ' (fixed scale)' : ` (zoom ${zoom} of extent ${extent.toFixed(1)})`))
+  }, [size.width, size.height, center, extent, zoom, rotationDeg, far, fixedUnits, onScale])
+
+  // Clear the readout when map view is switched off, or the panel keeps showing
+  // a scale for a capture that can no longer be taken.
+  useEffect(() => () => onScale?.(null), [onScale])
 
   return null
 }
@@ -2038,7 +2079,7 @@ export default function ZoneViewer({
   zoneData, lighting, post, scene, pointLights,
   selectedLightId = null, placingLight = false, onPlaceLight,
   inspecting = false, onInspectResult, onFlySpeedChange,
-  character = null, characterClip = null, onWeatherStates,
+  character = null, characterClip = null, onWeatherStates, onMapScale,
 }: ZoneViewerProps) {
   // Where the walking body is. Written by WalkCamera, read by Avatar.
   const walkBody = useRef<WalkBodyState>({ x: 0, y: 0, z: 0, yaw: 0, moving: false })
@@ -3328,6 +3369,8 @@ export default function ZoneViewer({
           zoom={scene.mapZoom}
           rotationDeg={scene.mapRotation}
           far={farPlane}
+          fixedUnits={scene.mapFixedScale ? scene.mapUnits : undefined}
+          onScale={onMapScale}
         />
       ) : hasCameraOverride ? (
         <CameraOrientation />

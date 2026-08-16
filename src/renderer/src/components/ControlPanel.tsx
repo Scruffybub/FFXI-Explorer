@@ -6,6 +6,7 @@ import type {
 } from '../lib/settings'
 import { PRESETS } from '../lib/settings'
 import type { MusicStatus } from '../lib/zoneMusic'
+import type { MapScale } from './ZoneViewer'
 
 interface ControlPanelProps {
   lighting: LightingSettings
@@ -16,6 +17,8 @@ interface ControlPanelProps {
   placingLight: boolean
   /** Weather states the loaded zone carries geometry for; varies per zone. */
   weatherStates: string[]
+  /** What map view currently covers, for the scale readout. Null when it is off. */
+  mapScale: MapScale | null
   music: MusicSettings
   musicStatus: MusicStatus
   onMusic: (patch: Partial<MusicSettings>) => void
@@ -196,7 +199,7 @@ function formatHour(h: number): string {
 }
 
 export default function ControlPanel({
-  lighting, post, scene, pointLights, selectedLightId, placingLight, weatherStates,
+  lighting, post, scene, pointLights, selectedLightId, placingLight, weatherStates, mapScale,
   music, musicStatus, onMusic,
   onLighting, onPost, onScene, onPointLights, onUpdateLight, onRemoveLight,
   onSelectLight, onTogglePlacing, onPreset, onReset,
@@ -782,17 +785,41 @@ export default function ControlPanel({
         />
         {scene.mapView && (
           <>
-            <Slider
-              label="Zoom" value={scene.mapZoom} min={0.1} max={2} step={0.01}
-              onChange={v => onScene({ mapZoom: v })}
-              info="Fraction of the zone's own extent to frame — 1.00 fits the whole zone. The frustum is sized in world units, so a map captured at one window size matches one captured at another."
+            <Toggle
+              label="Fixed scale (for stitching)"
+              checked={scene.mapFixedScale}
+              onChange={v => onScene({ mapFixedScale: v })}
+              info="Frame a set number of world units instead of a fraction of the zone. Zoom is relative to each zone's own size — Chateau d'Oraguille's extent is 208 units against Misareaux Coast's 2,901 — so the same zoom means a 14x different scale. With this on, every zone is captured at one scale and the captures differ only by where they sit."
             />
+            {scene.mapFixedScale ? (
+              <Slider
+                label="Height covered" value={scene.mapUnits} min={100} max={8000} step={50}
+                onChange={v => onScene({ mapUnits: v })}
+                format={v => `${v.toFixed(0)} u`}
+                info="World units covered top to bottom, the same in every zone. Width follows from the window's shape; the scale itself is identical in both directions. Zones larger than this are cropped rather than shrunk, which is the point."
+              />
+            ) : (
+              <Slider
+                label="Zoom" value={scene.mapZoom} min={0.1} max={2} step={0.01}
+                onChange={v => onScene({ mapZoom: v })}
+                info="Fraction of the zone's own extent to frame — 1.00 fits the whole zone. Good for framing one zone, but it means a different scale in every zone; turn on Fixed scale to compare or stitch them."
+              />
+            )}
             <Slider
               label="Rotation" value={scene.mapRotation} min={0} max={360} step={1}
               onChange={v => onScene({ mapRotation: v })}
               format={v => `${Math.round(v)}°`}
               info="Spin the plan around the vertical axis, to line the zone up the way you want it on the page."
             />
+            {mapScale && (
+              <p className="note small">
+                Covers <strong>{mapScale.unitsWide.toFixed(0)} × {mapScale.unitsTall.toFixed(0)}</strong> units
+                at <strong>{mapScale.unitsPerPixel.toFixed(3)}</strong> units per pixel.
+                {scene.mapFixedScale
+                  ? ' Captures match any other taken at this setting and window size.'
+                  : ' This changes from zone to zone.'}
+              </p>
+            )}
             <p className="note small">
               Turning off <strong>Show sky</strong> and picking a flat background
               gives a cleaner plate to trace over.

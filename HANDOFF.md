@@ -1173,6 +1173,25 @@ Fog is **suppressed** while map view is on, and the Scene panel says so. Fog sha
 Pairs with the existing **Screenshot** button. Turning off Show sky and picking
 a flat background gives a cleaner plate to trace over.
 
+**Fixed scale, for stitching zones together.** `mapZoom` is a fraction of each
+zone's **bounding diagonal**, so one zoom value means a different scale in every
+zone — and that diagonal includes height, so even equal ground footprints differ.
+Measured at zoom 1.00: Chateau d'Oraguille covers 208 units, Windurst Waters
+869, Misareaux Coast 2,901 — a **14x** spread. Captures taken that way cannot be
+assembled into an atlas without per-zone rescaling, and the zoom slider's 2.00
+ceiling makes correcting it from the UI impossible anyway.
+
+`scene.mapFixedScale` + `scene.mapUnits` frame a set number of world units
+instead. Verified by `[MAPVIEW]`, which every map-view render now logs: those
+three zones at 2,000 units all report **2.3885 units/px**, against 0.2481,
+1.0378 and 3.4650 unfixed. A small zone then sits as a small object in a large
+empty frame, which is what sharing a scale with Misareaux Coast actually means.
+
+`MapCamera` reports the scale up through `onMapScale` so the panel can print
+"covers W × H units at N units/px". Units per pixel is the number that decides
+whether two captures stitch, and it needs the canvas size — which only exists
+inside the Canvas, hence the report upward rather than a sum in the panel.
+
 ### Smaller ones
 
 - `vColor` is declared `vec4` in this three.js version even without

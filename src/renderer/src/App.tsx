@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { ZONES, type ZoneEntry } from './lib/zoneList'
 import { expansionFor } from './lib/zoneExpansion'
 import { parseZoneFile, parseTexturesFromDat, type ParsedZone } from './lib/ffxi-dat'
-import ZoneViewer from './components/ZoneViewer'
+import ZoneViewer, { type MapScale } from './components/ZoneViewer'
 import ControlPanel from './components/ControlPanel'
 import ModelBrowser from './components/ModelBrowser'
 import { composeCharacter, type CharacterSpec, type ComposedCharacter } from './lib/characterModel'
@@ -37,6 +37,7 @@ export default function App() {
   // ZoneViewer once the zone is parsed, because it is a property of the zone
   // file rather than a setting — every zone stores a different set.
   const [weatherStates, setWeatherStates] = useState<string[]>([])
+  const [mapScale, setMapScale] = useState<MapScale | null>(null)
   // ?music=1 turns it on at startup so harnesses can exercise the path; a
   // headless run hears nothing, but the status says whether it got there.
   const [music, setMusic] = useState<MusicSettings>(() => ({
@@ -480,6 +481,7 @@ export default function App() {
             character={character}
             characterClip={charClip}
             onWeatherStates={setWeatherStates}
+            onMapScale={setMapScale}
           />
         )}
 
@@ -572,6 +574,7 @@ export default function App() {
         selectedLightId={selectedLightId}
         placingLight={placingLight}
         weatherStates={weatherStates}
+        mapScale={mapScale}
         music={music}
         musicStatus={musicStatus}
         onMusic={patch => setMusic(m => ({ ...m, ...patch }))}
