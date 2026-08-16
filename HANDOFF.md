@@ -1025,15 +1025,30 @@ Three things that cost a measurement each:
   parser and never wired a UI to it. Use it rather than `parseTexturesFromDat`,
   which does *not* flip.
 
-**A lead, unmeasured.** `TextureParser`'s indexed path does not flip, and its
-comment asserts "zone textures are top-down". If any zone or model texture is
-palette-indexed, it is being drawn upside down in 3D right now. Nobody has
-checked how common that is, or whether three's `flipY` cancels it. That is worth
-knowing before trusting any indexed texture in the 3D views.
+**The palette is ARGB, and reading it as BGRA is what made every map pink.**
+One little-endian word per entry: alpha, then blue, green, red. Read as BGRA,
+the *constant* alpha byte lands in blue — pinning it at 128 — and the real red
+lands in alpha, so the parchment came out pink, the red "Valkurm Dunes" label
+purple, and the torn edges' opacity tracked their redness.
 
-Palette alpha now doubles (`0x80` is fully opaque in FFXI's convention) instead
-of collapsing to 255-or-0, which is what turned the torn parchment edges into a
-solid blue border.
+Measured in Selbina's `m_248_00` rather than guessed, and the measurement is
+worth repeating if this is ever doubted:
+
+- byte 0 holds `0x80` in **all 256 entries**. A colour channel does not do that;
+  FFXI's fully-opaque alpha does.
+- the parchment entry is `80 9e ca d6`. As A,B,G,R that is **(214, 202, 158)**,
+  the warm tan the game shows. As BGRA it is a light blue nobody has ever seen
+  on a Vana'diel map.
+
+Alpha doubles on the way out, since `0x80` is the opaque end.
+
+**A lead, unmeasured, and now a strong one.** `TextureParser.parseB1Texture`
+carries **the same two bugs**: it reads the palette as BGRA with alpha at byte 3,
+and it does not flip the rows. Whatever it decodes is upside down with blue
+pinned to 128. Nobody has checked which zone or model textures are 0xB1
+palette-indexed, or whether three's `flipY` cancels the flip in 3D — but the
+README already lists textures rendering wrongly as a known issue, and this is
+the first concrete candidate. Start there.
 
 `ParsedTexture.format` is now declared. The parser had always set it and
 ZoneViewer had always read it, so `tex.format` was a type error in three places

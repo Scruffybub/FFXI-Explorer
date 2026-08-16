@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { ZONES, type ZoneEntry } from './lib/zoneList'
 import { expansionFor } from './lib/zoneExpansion'
-import { parseZoneFile, parseTexturesFromDat, type ParsedZone } from './lib/ffxi-dat'
+import { parseZoneFile, parseTexturesFromDat, parseMinimapDat, type ParsedZone } from './lib/ffxi-dat'
 import ZoneViewer, { type MapScale } from './components/ZoneViewer'
 import UpdateNotice from './components/UpdateNotice'
 import ControlPanel from './components/ControlPanel'
@@ -258,6 +258,8 @@ export default function App() {
     // so decoded pixels can be written out and looked at rather than described.
     ;(window as unknown as Record<string, unknown>).__parseTextures =
       (buf: ArrayBuffer) => parseTexturesFromDat(buf)
+    ;(window as unknown as Record<string, unknown>).__parseMinimap =
+      (buf: ArrayBuffer) => parseMinimapDat(buf)
     ;(window as unknown as Record<string, unknown>).__probeDat = async (rel: string) => {
       try {
         if (!(await window.ffxi.fileExists(ffxiPath, rel))) return { rel, exists: false }

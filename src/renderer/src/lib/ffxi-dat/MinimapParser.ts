@@ -101,7 +101,20 @@ function parseMinimapTextureBlock(
     return parseB1AsDXT(reader, dataOffset, dataLength, width, height)
   }
 
-  // Read the 256-entry BGRA palette (FFXI stores palette as BGRA)
+  /**
+   * The palette is **ARGB**, one little-endian word per entry: alpha, then
+   * blue, green, red.
+   *
+   * It was read as BGRA, which put the *constant* alpha byte into blue and the
+   * real red into alpha. Every map came out pink — blue pinned at 128 — with a
+   * red "Valkurm Dunes" label rendering purple, and the torn edges' opacity
+   * tracking their redness.
+   *
+   * Measured rather than guessed, in Selbina's `m_248_00`: byte 0 holds 0x80 in
+   * **all 256 entries**, which is FFXI's fully-opaque alpha and cannot be a
+   * colour channel; and the parchment entry `80 9e ca d6` read as A,B,G,R gives
+   * (214, 202, 158) — the warm tan the game shows.
+   */
   reader.seek(paletteOffset)
   const palette = reader.readBytes(B1_PALETTE_SIZE)
 
@@ -120,15 +133,12 @@ function parseMinimapTextureBlock(
       const idx = indices[srcRow + x]
       const pOff = idx * 4
       const d = (dstRow + x) * 4
-      rgba[d + 0] = palette[pOff + 2] // R (from BGRA byte 2)
-      rgba[d + 1] = palette[pOff + 1] // G (from BGRA byte 1)
-      rgba[d + 2] = palette[pOff + 0] // B (from BGRA byte 0)
-      // FFXI palette alpha: 0x80 is fully opaque, so the value doubles rather
-      // than being treated as a yes/no. Collapsing it to 255-or-0 turned the
-      // torn parchment edges — drawn with partial alpha — into a solid blue
-      // border, which is what they looked like before this.
-      const a = palette[pOff + 3]
-      rgba[d + 3] = Math.min(255, a * 2)
+      rgba[d + 0] = palette[pOff + 3] // R
+      rgba[d + 1] = palette[pOff + 2] // G
+      rgba[d + 2] = palette[pOff + 1] // B
+      // 0x80 is fully opaque in FFXI's convention, so the value doubles rather
+      // than being read as a yes/no.
+      rgba[d + 3] = Math.min(255, palette[pOff + 0] * 2)
     }
   }
 
