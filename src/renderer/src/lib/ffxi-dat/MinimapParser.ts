@@ -9,7 +9,17 @@ const BLOCK_PADDING = 8
  * Parse a minimap DAT file and extract the map texture.
  * Minimap DATs use 0xB1 flag IMGINFO headers ("menumap" format).
  */
-export function parseMinimapDat(buffer: ArrayBuffer): ParsedTexture | null {
+/**
+ * The id string the block carries, e.g. "menumap m_106_00" or
+ * "ex4_datam_088_00": zone id and page number, which is how a zone tells its
+ * own plates from its Wings of the Goddess counterpart.
+ */
+export interface ParsedMinimap {
+  name: string
+  texture: ParsedTexture
+}
+
+export function parseMinimapDat(buffer: ArrayBuffer): ParsedMinimap | null {
   const reader = new DatReader(buffer)
   let offset = 0
 
@@ -27,7 +37,12 @@ export function parseMinimapDat(buffer: ArrayBuffer): ParsedTexture | null {
       const dataLength = blockSize - DATHEAD_SIZE - BLOCK_PADDING
       if (dataLength > 0) {
         const texture = parseMinimapTextureBlock(reader, dataOffset, dataLength)
-        if (texture) return texture
+        if (texture) {
+          // The id sits at +0x01 of the block, 16 bytes, NUL padded.
+          reader.seek(dataOffset + 1)
+          const name = reader.readString(16).replace(/\0+$/, '').trim()
+          return { name, texture }
+        }
       }
     }
 
@@ -108,13 +123,16 @@ function parseMinimapTextureBlock(
       rgba[d + 0] = palette[pOff + 2] // R (from BGRA byte 2)
       rgba[d + 1] = palette[pOff + 1] // G (from BGRA byte 1)
       rgba[d + 2] = palette[pOff + 0] // B (from BGRA byte 0)
-      // FFXI palette alpha: 0x80 = opaque, 0x00 = transparent
+      // FFXI palette alpha: 0x80 is fully opaque, so the value doubles rather
+      // than being treated as a yes/no. Collapsing it to 255-or-0 turned the
+      // torn parchment edges — drawn with partial alpha — into a solid blue
+      // border, which is what they looked like before this.
       const a = palette[pOff + 3]
-      rgba[d + 3] = a > 0 ? 255 : 0
+      rgba[d + 3] = Math.min(255, a * 2)
     }
   }
 
-  return { width, height, rgba }
+  return { width, height, rgba, format: 'indexed' }
 }
 
 /** Fallback: try DXT decoding for 0xB1 blocks that don't fit the indexed format. */
@@ -131,14 +149,14 @@ function parseB1AsDXT(
     const pixelOffset = dataOffset + dataLength - expectedDXT3
     reader.seek(pixelOffset)
     const pixelData = reader.readBytes(expectedDXT3)
-    return { width, height, rgba: decompressDXT3(pixelData, width, height) }
+    return { width, height, rgba: decompressDXT3(pixelData, width, height), format: 'dxt3-b1' }
   }
 
   if (dataLength >= expectedDXT1 + B1_HEADER_SIZE) {
     const pixelOffset = dataOffset + dataLength - expectedDXT1
     reader.seek(pixelOffset)
     const pixelData = reader.readBytes(expectedDXT1)
-    return { width, height, rgba: decompressDXT1(pixelData, width, height) }
+    return { width, height, rgba: decompressDXT1(pixelData, width, height), format: 'dxt1-b1' }
   }
 
   return null
@@ -172,5 +190,5 @@ function parseA1Style(reader: DatReader, dataOffset: number): ParsedTexture | nu
     return null
   }
 
-  return { width, height, rgba }
+  return { width, height, rgba, format: ddsType === '3TXD' ? 'dxt3' : 'dxt1' }
 }

@@ -342,6 +342,44 @@ select {
   cursor: pointer;
 }
 
+/* ── Map viewer ────────────────────────────────────────────────────── */
+.map-view { position: absolute; inset: 0; display: flex; flex-direction: column; }
+
+.map-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+  flex: none;
+}
+.map-bar > strong { margin-right: auto; }
+.map-pages, .map-zoom { display: flex; gap: 3px; flex-wrap: wrap; }
+.map-bar button {
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  color: var(--muted);
+  padding: 3px 8px;
+  font-size: 10px;
+  cursor: pointer;
+}
+.map-bar button:hover { color: var(--text); }
+.map-bar button.active { background: var(--accent-dim); color: var(--text); border-color: var(--accent-dim); }
+
+.map-canvas-wrap { flex: 1; min-height: 0; display: flex; background: #05070a; }
+/* Fit centres and scales down; the fixed zooms scroll instead, so fine labels
+ * can be read at their real pixel size. */
+.map-canvas-wrap.fit { align-items: center; justify-content: center; padding: 16px; overflow: hidden; }
+.map-canvas-wrap.fit .map-canvas { max-width: 100%; max-height: 100%; object-fit: contain; }
+.map-canvas-wrap.scroll { overflow: auto; padding: 16px; }
+.map-canvas-wrap.scroll .map-canvas { margin: auto; image-rendering: pixelated; }
+
+.map-canvas { display: block; border-radius: 4px; }
+.map-hud { pointer-events: none; }
+
 /* ── Update popup ──────────────────────────────────────────────────── */
 .modal-backdrop {
   position: fixed;

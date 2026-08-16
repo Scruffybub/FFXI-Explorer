@@ -998,6 +998,47 @@ supplied. Those are different fixes. The removed implementation was a one-line
 escape in the prefab loop (`if (isSkyWeatherMesh(prefab)) continue`) plus a
 census of the skipped categories; see the commit that removed it.
 
+### The in-game area maps — Models → Maps
+
+**Where they live was never a mystery; the answer was already in the repo.**
+`resources/zone-seed-data.csv` has a `MAP_PATHS` column, `lib/zoneList.ts` has
+always parsed it into `ZoneEntry.mapPaths`, and nothing had ever read it. **191
+of the 285 zones carry map pages.**
+
+Each listed DAT holds one 512×512 texture whose id names it:
+`menumap m_<zone>_<page>`, or `ex4_datam_<zone>_<page>` for the expansion maps.
+Zones with floors get a page each — Castle Oztroja's are 1-6 plus 15.
+
+Three things that cost a measurement each:
+
+- **A row lists its counterpart's maps too.** North Gustaberg's entry carries
+  both `m_106_00` and `ex4_datam_088_00`, and 88 is North Gustaberg [S], which
+  has its own row listing the same pair. `MapViewer` filters pages by the zone
+  id in the name, falling back to showing everything if none match.
+- **Palette-indexed plates are stored bottom-up; DXT ones are not.** Castle
+  Oztroja's floor 1 is `indexed` and came out mirrored-looking until all four
+  orientations were rendered and read: only the vertical flip puts the banner at
+  the top, the grid letters A-O left to right and the compass at bottom right.
+  North Gustaberg's is `dxt3` and is correct untouched.
+- **`parseMinimapDat` already existed and already handled both**, exported from
+  `lib/ffxi-dat/index.ts` and used by nothing. An earlier session built the
+  parser and never wired a UI to it. Use it rather than `parseTexturesFromDat`,
+  which does *not* flip.
+
+**A lead, unmeasured.** `TextureParser`'s indexed path does not flip, and its
+comment asserts "zone textures are top-down". If any zone or model texture is
+palette-indexed, it is being drawn upside down in 3D right now. Nobody has
+checked how common that is, or whether three's `flipY` cancels it. That is worth
+knowing before trusting any indexed texture in the 3D views.
+
+Palette alpha now doubles (`0x80` is fully opaque in FFXI's convention) instead
+of collapsing to 255-or-0, which is what turned the torn parchment edges into a
+solid blue border.
+
+`ParsedTexture.format` is now declared. The parser had always set it and
+ZoneViewer had always read it, so `tex.format` was a type error in three places
+— that is five of the fourteen pre-existing `tsc` errors gone.
+
 ### The update check is hand-rolled, and deliberately
 
 `src/main/updates.ts` asks the GitHub releases API for the latest tag a couple

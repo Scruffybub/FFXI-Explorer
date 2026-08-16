@@ -6,6 +6,8 @@ import ModelPanel from './ModelPanel'
 import { DEFAULT_MODEL, type ModelSettings } from '../lib/settings'
 import CharacterBuilder from './CharacterBuilder'
 import { RACES, type CharacterSpec, type ComposedCharacter } from '../lib/characterModel'
+import MapViewer from './MapViewer'
+import { ZONES, type ZoneEntry } from '../lib/zoneList'
 
 /**
  * The model viewer half of the app: its own sidebar and its own viewport,
@@ -42,7 +44,17 @@ export default function ModelBrowser({
   const [speed, setSpeed] = useState(1)
   const [settings, setSettings] = useState<ModelSettings>(DEFAULT_MODEL)
 
-  const [mode, setMode] = useState<'browse' | 'character'>('browse')
+  const [mode, setMode] = useState<'browse' | 'character' | 'maps'>('browse')
+
+  // Only zones the table actually lists map pages for; 'unknown' rows and a
+  // handful of instanced areas carry none.
+  const [mapZone, setMapZone] = useState<ZoneEntry | null>(null)
+  const [mapSearch, setMapSearch] = useState('')
+  const mapZones = useMemo(() => ZONES.filter(z => z.mapPaths.length > 0), [])
+  const mapZonesFiltered = useMemo(() => {
+    const q = mapSearch.trim().toLowerCase()
+    return q ? mapZones.filter(z => z.name.toLowerCase().includes(q)) : mapZones
+  }, [mapZones, mapSearch])
 
   const filtered = useMemo(
     () => searchModels(search, category).slice(0, 400),
@@ -103,7 +115,21 @@ export default function ModelBrowser({
             >
               Character
             </button>
+            <button
+              className={mode === 'maps' ? 'active' : ''}
+              onClick={() => setMode('maps')}
+            >
+              Maps
+            </button>
           </div>
+          {mode === 'maps' && (
+            <input
+              className="search"
+              placeholder="Search zones..."
+              value={mapSearch}
+              onChange={e => setMapSearch(e.target.value)}
+            />
+          )}
           {mode === 'browse' && (
             <>
               <input
@@ -136,6 +162,30 @@ export default function ModelBrowser({
           </div>
         )}
 
+        {mode === 'maps' && (
+          <ul className="zone-list">
+            {mapZonesFiltered.map(z => (
+              <li key={z.id}>
+                <button
+                  className={mapZone?.id === z.id ? 'active' : ''}
+                  onClick={() => setMapZone(z)}
+                >
+                  <span className="zone-name">{z.name}</span>
+                  <span className="zone-meta">
+                    <span className="zone-path">
+                      {z.mapPaths.length} page{z.mapPaths.length === 1 ? '' : 's'}
+                    </span>
+                    <span className="zone-expansion">{z.id}</span>
+                  </span>
+                </button>
+              </li>
+            ))}
+            {mapZonesFiltered.length === 0 && (
+              <li className="empty">No zones match “{mapSearch}”.</li>
+            )}
+          </ul>
+        )}
+
         {mode === 'browse' && (
         <ul className="zone-list">
           {filtered.map(m => (
@@ -162,7 +212,9 @@ export default function ModelBrowser({
       </aside>
 
       <main className="viewport">
-        {mode === 'character' ? (
+        {mode === 'maps' ? (
+          <MapViewer ffxiPath={ffxiPath} zone={mapZone} uiHidden={uiHidden} />
+        ) : mode === 'character' ? (
           <>
             {character === null && (
               <div className="placeholder">
@@ -266,7 +318,9 @@ export default function ModelBrowser({
         )}
       </main>
 
-      {!uiHidden && (
+      {/* The model panel is lighting and animation, neither of which means
+          anything for a flat map plate, so maps mode leaves it out. */}
+      {!uiHidden && mode !== 'maps' && (
         <ModelPanel
           settings={settings}
           onChange={patch => setSettings(s => ({ ...s, ...patch }))}

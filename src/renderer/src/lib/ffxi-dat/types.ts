@@ -20,6 +20,16 @@ export interface ParsedTexture {
   width: number
   height: number
   rgba: Uint8Array
+  /**
+   * Which decoder produced the pixels: 'dxt1', 'dxt3', 'indexed', and the
+   * '-b1' variants for 0xB1 blocks that fell back to DXT.
+   *
+   * The parser has always set this and ZoneViewer has always read it; it was
+   * simply missing from the type, which is why `tex.format` was a type error in
+   * three places. It matters beyond diagnostics: palette-indexed plates are
+   * stored bottom-up where DXT ones are not (see MapViewer).
+   */
+  format: string
 }
 
 export interface ParsedBone {

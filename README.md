@@ -55,6 +55,9 @@ PS-ADPCM, and ATRAC3 via a from-source decoder validated against ffmpeg.
 **Map view** — a top-down orthographic capture with no perspective distortion,
 for shaping a zone into a map.
 
+**Area maps** — the game's own parchment maps, in **Models → Maps**. 191 zones
+have them, dungeons a page per floor, and any of them can be saved as a PNG.
+
 **Weather geometry** — every zone carries sky and weather meshes the client
 swaps between at runtime. They can be picked and drawn.
 

@@ -254,6 +254,10 @@ export default function App() {
   // adjacent zone files can be checked for geometry the model DAT lacks.
   useEffect(() => {
     if (!ffxiPath) return
+    // Hands a DAT's textures to a harness as {name → {width, height, rgba}},
+    // so decoded pixels can be written out and looked at rather than described.
+    ;(window as unknown as Record<string, unknown>).__parseTextures =
+      (buf: ArrayBuffer) => parseTexturesFromDat(buf)
     ;(window as unknown as Record<string, unknown>).__probeDat = async (rel: string) => {
       try {
         if (!(await window.ffxi.fileExists(ffxiPath, rel))) return { rel, exists: false }
