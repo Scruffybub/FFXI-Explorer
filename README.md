@@ -48,8 +48,8 @@ Grab a build from [Releases](../../releases):
 
 | File | What it is |
 |---|---|
-| `FFXI-Zone-Viewer-0.1.0-setup.exe` | Installer. Lets you pick a location, adds a Start-menu entry, uninstalls cleanly |
-| `FFXI-Zone-Viewer-0.1.0-portable.exe` | Single file, nothing installed. Just run it |
+| `FFXI-Explorer-0.1.0-setup.exe` | Installer. Lets you pick a location, adds a Start-menu entry, uninstalls cleanly |
+| `FFXI-Explorer-0.1.0-portable.exe` | Single file, nothing installed. Just run it |
 
 **Windows will warn you.** The build is unsigned — a code-signing certificate
 costs a few hundred dollars a year — so SmartScreen shows "Windows protected

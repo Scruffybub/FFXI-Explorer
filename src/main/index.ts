@@ -96,7 +96,7 @@ function createWindow(): void {
     backgroundColor: '#0b0d12',
     show: false,
     autoHideMenuBar: true,
-    title: 'FFXI Zone Viewer',
+    title: 'FFXI Explorer',
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false,
