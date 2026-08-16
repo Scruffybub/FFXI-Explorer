@@ -1,7 +1,16 @@
+**Work in Progress**
+Water flat-out does not render right now.
+Weather does not render properly right now.
+Some zones have textures that don't render properly, primarily textures that have some sort of transparency. This includes some plants, wall textures, and ground textures.
+Some zones have models/textures/effects hidden in out-of-bounds areas.
+Some zones have "domes" of weather data in the middle of the zones.
+Walking mode will sometimes spawn you in an area with no floor. At the moment, quickly press the "noclip" button and you will be able to fly to an area with a floor and unselect "noclip".
+
+
 # FFXI Explorer
 
-A standalone desktop viewer for **Final Fantasy XI**'s zones, models and music,
-with modern lighting, shadows and post-processing the game itself never had.
+A standalone desktop viewer for **Final Fantasy XI**'s zones and models. Explore the game's areas via orbiting, flying, and walking
+complete with full collision data. FFXI Explorer includes faithful lighting and shading faithful to the game's actual graphics, along with modern lighting, shading, and post processing features that you can use to customize and enhance your exploration of Vana'diel.
 
 Everything is read straight out of your own local FFXI installation. Nothing is
 uploaded, and no server, account or internet connection is involved.
@@ -14,8 +23,7 @@ uploaded, and no server, account or internet connection is involved.
 
 **Zone viewer** — all 285 zones, from West Ronfaure to Reisenjima, each labelled
 with the expansion it shipped with. Orbit, fly, or **walk** them in first or
-third person, standing on FFXI's own collision mesh so walls block you and the
-ground is where the game puts it.
+third person, standing on FFXI's own collision mesh.
 
 **Lighting** — *Original* reproduces the 2002 look faithfully (baked vertex
 colours, plus the game's own fixed-function sun). *Dynamic* lights the same
@@ -31,14 +39,13 @@ and eight equipment slots, with real item names. The character you build is the
 one you walk zones as.
 
 **Zone music** — the game's own BGW tracks, decoded in-app. Both codecs play:
-PS-ADPCM, and ATRAC3 via a from-source decoder validated bit-exactly against
-ffmpeg.
+PS-ADPCM, and ATRAC3 via a from-source decoder validated against ffmpeg.
 
 **Map view** — a top-down orthographic capture with no perspective distortion,
-for tracing a zone into a map.
+for shaping a zone into a map.
 
 **Weather geometry** — every zone carries sky and weather meshes the client
-swaps between at runtime. They can be picked and drawn per state.
+swaps between at runtime. They can be picked and drawn.
 
 ---
 
@@ -56,7 +63,7 @@ costs a few hundred dollars a year — so SmartScreen shows "Windows protected
 your PC". Click **More info → Run anyway**. If you would rather not, the
 build-from-source instructions below produce the same application.
 
-Windows x64 only for now.
+Windows x64 only.
 
 ### Finding your game
 
@@ -83,10 +90,7 @@ toggle, and can follow you in third person.
 
 ### Lighting modes
 
-FFXI baked all of its lighting into per-vertex colours back in 2002 — there are
-no light sources in the game data, the shading you see is painted on.
-
-*Original* reproduces that. *Dynamic* replaces it with real lights, and the
+*Original* reproduces the look from 2002. *Dynamic* replaces it with real lights, and the
 **Keep baked shading** slider decides how much of the original art survives
 underneath: at 1.0 the old shadows multiply against the new ones and everything
 reads twice as dark, at 0 you get pure dynamic light and lose some character.
