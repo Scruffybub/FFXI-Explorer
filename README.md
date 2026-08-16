@@ -125,6 +125,21 @@ npx electron-vite build                           # compile main, preload, rende
 npx electron-builder --win --config electron-builder.yml   # installers into release/
 ```
 
+**Producing a release build with the icon** takes three steps rather than one,
+because embedding an icon needs `signAndEditExecutable`, and turning that on
+makes electron-builder unpack a bundle containing macOS symlinks that Windows
+will not create without elevated privileges:
+
+```bash
+npx electron-vite build
+npx electron-builder --win dir --config electron-builder.yml
+node scripts/set-icon.cjs                          # stamps build/icon.ico via rcedit
+npx electron-builder --prepackaged release/win-unpacked --win portable nsis --config electron-builder.yml
+```
+
+`scripts/make-icon.cjs <source.png>` regenerates `build/icon.ico` if the artwork
+changes.
+
 The renderer can be deep-linked for testing:
 `index.html?zone=<id>&preset=<index>`, and most settings can be overridden by
 query parameter (`scene_cameraMode=walk`, `light_mode=lit`, `scene_anisotropy=8`).

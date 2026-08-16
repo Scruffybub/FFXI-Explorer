@@ -998,6 +998,48 @@ supplied. Those are different fixes. The removed implementation was a one-line
 escape in the prefab loop (`if (isSkyWeatherMesh(prefab)) continue`) plus a
 census of the skipped categories; see the commit that removed it.
 
+### The app icon needs a three-step build, and a plain repackage loses it
+
+**If you rebuild with `electron-builder --win` alone, the icon silently reverts
+to Electron's default atom.** The release build is:
+
+```
+npx electron-vite build
+npx electron-builder --win dir --config electron-builder.yml
+node scripts/set-icon.cjs
+npx electron-builder --prepackaged release/win-unpacked --win portable nsis --config electron-builder.yml
+```
+
+Why it cannot be one step: embedding an icon requires
+`signAndEditExecutable: true`, which makes electron-builder unpack its
+winCodeSign bundle, and that bundle holds two macOS symlinks
+(`darwin/10.12/lib/libcrypto.dylib` and `libssl.dylib`) that Windows refuses to
+create without `SeCreateSymbolicLinkPrivilege` — administrator, or Developer
+Mode. 7-Zip exits non-zero, electron-builder retries into a **fresh random temp
+directory** each time and never promotes one to a usable cache, so the build
+dies. The dated leftovers under
+`%LOCALAPPDATA%\electron-builder\Cache\winCodeSign\` are every attempt since
+2026-07-27. `signAndEditExecutable: false` in the config is what makes packaging
+work at all, at the cost of the icon and the exe's version metadata.
+
+The workaround takes the one step that was actually wanted. `rcedit` lives
+*inside* that same bundle, and a copy is already extracted, so
+`scripts/set-icon.cjs` finds it and stamps the icon directly;
+`scripts/make-icon.cjs` builds the 7-frame `.ico` (16–256) from a PNG using
+Electron's own `nativeImage` resizing, so there is no image dependency. The
+`--prepackaged` step then wraps the directory as it stands rather than
+rebuilding it.
+
+Verified for 0.1.0 by extracting the icon back out of all three executables —
+the app, the installer and the portable — and by **launching the packaged
+portable build**, which reported a window titled "FFXI Explorer". That last
+check matters: `rcedit` rewrites the resource section *after* electron-builder
+writes the asar integrity resource, and a launch is the only thing that proves
+it did not break startup.
+
+If Developer Mode is ever switched on, the whole workaround can be deleted and
+`signAndEditExecutable` set back to true.
+
 ### Every setting explains itself, through an info icon
 
 `components/Info.tsx` — a lowercase "i" in a circle beside a control's name,
