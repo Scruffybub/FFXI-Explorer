@@ -1,10 +1,10 @@
 **Work in Progress**
-Water flat-out does not render right now.
-Weather does not render properly right now.
-Some zones have textures that don't render properly, primarily textures that have some sort of transparency. This includes some plants, wall textures, and ground textures.
-Some zones have models/textures/effects hidden in out-of-bounds areas.
-Some zones have "domes" of weather data in the middle of the zones.
-Walking mode will sometimes spawn you in an area with no floor. At the moment, quickly press the "noclip" button and you will be able to fly to an area with a floor and unselect "noclip".
+**Water** Water flat-out does not render right now.
+**Weather** Weather does not render properly right now.
+**Transparency** Some zones have textures that don't render properly, primarily textures that have some sort of transparency. This includes some plants, wall textures, and ground textures.
+**Unknown textures** Some zones have models/textures/effects hidden in out-of-bounds areas.
+**Weather domes**Some zones have "domes" of weather data in the middle of the zones.
+**Walking mode** Walking mode will sometimes spawn you in an area with no floor. At the moment, quickly press the "noclip" button and you will be able to fly to an area with a floor and unselect "noclip".
 
 
 # FFXI Explorer
