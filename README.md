@@ -12,6 +12,10 @@
 
 **Walking mode** - Walking mode will sometimes spawn you in an area with no floor. At the moment, quickly press the "noclip" button and you will be able to fly to an area with a floor and unselect "noclip".
 
+**Third-person walking mode** - Third person walking mode does not work properly. The characters are not animated and face the wrong direction when moving.
+
+**Model viewer** - The model viewer has a lot of issues such as incorrect animations, incorrect file naming, UI issues.
+
 
 # FFXI Explorer
 
