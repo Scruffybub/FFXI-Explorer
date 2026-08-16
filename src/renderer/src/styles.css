@@ -342,6 +342,72 @@ select {
   cursor: pointer;
 }
 
+/* ── Update popup ──────────────────────────────────────────────────── */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(4, 6, 10, 0.62);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.modal {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 20px 22px;
+  width: 420px;
+  max-width: calc(100vw - 40px);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+}
+.modal h2 { margin: 0 0 10px; font-size: 15px; }
+
+.update-notes {
+  margin: 0 0 14px;
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--muted);
+  white-space: pre-wrap;
+  max-height: 190px;
+  overflow-y: auto;
+}
+
+.update-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.update-actions button {
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--text);
+  padding: 7px 12px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.update-actions button:hover { border-color: var(--accent-dim); }
+.update-actions button.primary { background: var(--accent-dim); border-color: var(--accent-dim); }
+
+.link-btn {
+  margin-top: 12px;
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--muted);
+  font-size: 10px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.link-btn:hover { color: var(--text); }
+
+.progress {
+  margin-top: 10px;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--line);
+  overflow: hidden;
+}
+.progress-fill { height: 100%; background: var(--accent); transition: width 0.15s linear; }
+
 /* ── Info icons ────────────────────────────────────────────────────── */
 /*
  * A lowercase "i" in a circle beside a setting's name, explaining it on hover.

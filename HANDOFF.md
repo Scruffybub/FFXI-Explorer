@@ -998,6 +998,46 @@ supplied. Those are different fixes. The removed implementation was a one-line
 escape in the prefab loop (`if (isSkyWeatherMesh(prefab)) continue`) plus a
 census of the skipped categories; see the commit that removed it.
 
+### The update check is hand-rolled, and deliberately
+
+`src/main/updates.ts` asks the GitHub releases API for the latest tag a couple
+of seconds after launch, and the renderer shows `UpdateNotice` only if it is
+newer. **electron-updater was rejected for two concrete reasons**: the packaged
+app ships `out/**` and `package.json` only — `node_modules` is not packaged — so
+a main-process dependency has to end up bundled into the main chunk to exist at
+runtime; and electron-updater cannot install a **portable** build at all, which
+is the artifact most people will run.
+
+How each artifact updates: an installed build downloads the `-setup.exe`, spawns
+it detached and quits so the installer can replace files it was holding open. A
+portable build downloads the `-portable.exe` and opens its folder, because a
+running portable exe cannot overwrite itself — `process.env.PORTABLE_EXECUTABLE_FILE`
+is how it tells which it is.
+
+Things worth keeping:
+
+- **Every failure is silent.** GitHub unreachable, offline, rate-limited, repo
+  private — all log `[UPDATE]` and show nothing. Verified against the private
+  repo, which answers 404: `[UPDATE] check failed: HTTP 404` and no popup. It
+  will start working the moment the repo goes public, with no code change.
+- **Downloads are size-checked** against what the release advertised, and only
+  `github.com` / `objects.githubusercontent.com` hosts are accepted, on the
+  original request and on every redirect.
+- **The preference lives in `localStorage`, not `SceneSettings`** — presets
+  apply over `DEFAULT_SCENE`, so a preset click would otherwise silently
+  re-enable a check the user turned off.
+- **`isNewer` is split into `src/main/version.ts`** so it can be tested without
+  Electron: `node scripts/version-test.cjs`, 15 cases, all passing. It is the
+  one function that decides whether every user gets nagged, and a mistake there
+  is invisible in a screenshot.
+- **`?updatetest=1`** shows the popup against a fabricated release, so the UI
+  can be exercised without publishing one. Its asset is null, so nothing
+  downloads.
+
+**The README's "no internet connection is involved" claim was true and is not
+any more.** It now says the version check is the only request the app makes, and
+points at the toggle. Keep that honest if this ever grows.
+
 ### The app icon needs a three-step build, and a plain repackage loses it
 
 **If you rebuild with `electron-builder --win` alone, the icon silently reverts

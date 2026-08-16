@@ -2,11 +2,12 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App'
 import './styles.css'
-import type { FfxiApi } from '../../preload/index'
+import type { FfxiApi, UpdatesApi } from '../../preload/index'
 
 declare global {
   interface Window {
     ffxi: FfxiApi
+    updates: UpdatesApi
   }
 }
 

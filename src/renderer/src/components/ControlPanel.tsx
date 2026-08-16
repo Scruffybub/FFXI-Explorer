@@ -32,6 +32,12 @@ interface ControlPanelProps {
   onTogglePlacing: () => void
   onPreset: (index: number) => void
   onReset: () => void
+  /** Version of the running build, for the Updates section. */
+  appVersion: string
+  checkUpdates: boolean
+  updateCheckState: 'idle' | 'checking' | 'current' | 'failed'
+  onCheckUpdatesChange: (on: boolean) => void
+  onCheckNow: () => void
 }
 
 /**
@@ -203,6 +209,7 @@ export default function ControlPanel({
   music, musicStatus, onMusic,
   onLighting, onPost, onScene, onPointLights, onUpdateLight, onRemoveLight,
   onSelectLight, onTogglePlacing, onPreset, onReset,
+  appVersion, checkUpdates, updateCheckState, onCheckUpdatesChange, onCheckNow,
 }: ControlPanelProps) {
   const lit = lighting.mode === 'lit'
   const selected = pointLights.lights.find(l => l.id === selectedLightId) ?? null
@@ -945,6 +952,26 @@ export default function ControlPanel({
           onChange={v => onScene({ showCollision: v })}
           info="Draw the collision mesh FFXI actually uses for movement, in green. It is not the visible geometry — it carries invisible walls and leaves out decoration — so it will not match the art everywhere. This is exactly what Walk mode stands on."
         />
+      </Section>
+
+      <Section
+        title="Updates"
+        defaultOpen={false}
+        info="New versions are published on the project's GitHub releases page. This is the only thing the app ever sends over the network, and it only asks GitHub what the latest version number is."
+      >
+        <p className="note small">
+          You are running <strong>{appVersion || '…'}</strong>.
+          {updateCheckState === 'checking' && ' Checking…'}
+          {updateCheckState === 'current' && ' This is the latest release.'}
+          {updateCheckState === 'failed' && ' The last check could not reach GitHub.'}
+        </p>
+        <Toggle
+          label="Check on startup"
+          checked={checkUpdates}
+          onChange={onCheckUpdatesChange}
+          info="Ask GitHub for the latest version a couple of seconds after launch, and show a popup only if there is a newer one. Nothing about you or your game is sent, and a failed check is silent."
+        />
+        <button className="reset" onClick={onCheckNow}>Check now</button>
       </Section>
     </div>
   )

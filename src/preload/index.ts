@@ -32,8 +32,43 @@ const api = {
   /** Opens a save dialog for a PNG data URL. Resolves to the path, or null if cancelled. */
   saveScreenshot: (dataUrl: string, suggestedName: string): Promise<string | null> =>
     ipcRenderer.invoke('window:saveScreenshot', dataUrl, suggestedName),
+
+  version: (): Promise<string> => ipcRenderer.invoke('app:version'),
+}
+
+export interface UpdateInfo {
+  version: string
+  name: string
+  notes: string
+  pageUrl: string
+  asset: { name: string; url: string; size: number } | null
+  portable: boolean
+}
+
+const updates = {
+  /** Latest release if it is newer than this build, else null. Never throws. */
+  check: (): Promise<UpdateInfo | null> => ipcRenderer.invoke('update:check'),
+
+  download: (url: string, name: string, size: number): Promise<
+    { status: 'ok'; path: string } | { status: 'error'; message: string }
+  > => ipcRenderer.invoke('update:download', url, name, size),
+
+  /** Runs the installer and quits, or reveals the file for a portable build. */
+  install: (path: string): Promise<{ launched: boolean }> =>
+    ipcRenderer.invoke('update:install', path),
+
+  openPage: (url?: string): Promise<void> => ipcRenderer.invoke('update:openPage', url),
+
+  /** Download progress. Returns an unsubscribe function. */
+  onProgress: (fn: (p: { received: number; total: number }) => void): (() => void) => {
+    const listener = (_e: unknown, p: { received: number; total: number }) => fn(p)
+    ipcRenderer.on('update:progress', listener)
+    return () => { ipcRenderer.removeListener('update:progress', listener) }
+  },
 }
 
 contextBridge.exposeInMainWorld('ffxi', api)
+contextBridge.exposeInMainWorld('updates', updates)
 
 export type FfxiApi = typeof api
+export type UpdatesApi = typeof updates

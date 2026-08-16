@@ -3,6 +3,7 @@ import { join } from 'path'
 import { promises as fs } from 'fs'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
+import { checkForUpdate, downloadUpdate, installUpdate, RELEASES_PAGE } from './updates'
 
 const execFileAsync = promisify(execFile)
 
@@ -196,6 +197,37 @@ app.whenReady().then(() => {
     await fs.writeFile(result.filePath, Buffer.from(base64, 'base64'))
     return result.filePath
   })
+
+  // ── Updates ────────────────────────────────────────────────────────────
+  // The renderer decides *whether* to check — the preference lives with the
+  // rest of its settings — and the main process does the network work.
+  ipcMain.handle('update:check', () => checkForUpdate())
+
+  ipcMain.handle('update:download', async (evt, url: string, name: string, size: number) => {
+    try {
+      let lastSent = 0
+      const path = await downloadUpdate(url, name, size, (received, total) => {
+        // Throttled: a progress event per chunk floods the IPC channel and the
+        // renderer only ever draws one bar.
+        const now = Date.now()
+        if (now - lastSent < 100 && received < total) return
+        lastSent = now
+        evt.sender.send('update:progress', { received, total })
+      })
+      return { status: 'ok' as const, path }
+    } catch (err) {
+      console.log('[UPDATE] download failed: ' + (err as Error).message)
+      return { status: 'error' as const, message: (err as Error).message }
+    }
+  })
+
+  ipcMain.handle('update:install', (_evt, path: string) => installUpdate(path))
+
+  ipcMain.handle('update:openPage', (_evt, url?: string) => {
+    shell.openExternal(url && url.startsWith('https://github.com/') ? url : RELEASES_PAGE)
+  })
+
+  ipcMain.handle('app:version', () => app.getVersion())
 
   createWindow()
 

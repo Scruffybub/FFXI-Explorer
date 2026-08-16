@@ -19,7 +19,8 @@ A standalone desktop viewer for **Final Fantasy XI**'s zones and models. Explore
 complete with full collision data. FFXI Explorer includes faithful lighting and shading faithful to the game's actual graphics, along with modern lighting, shading, and post processing features that you can use to customize and enhance your exploration of Vana'diel.
 
 Everything is read straight out of your own local FFXI installation. Nothing is
-uploaded, and no server, account or internet connection is involved.
+uploaded, and no server or account is involved. The only network request it ever
+makes is an optional check for a newer version — see [Updates](#updates).
 
 ![Version](https://img.shields.io/badge/version-0.1.0-blue) ![Platform](https://img.shields.io/badge/platform-Windows-lightgrey)
 
@@ -121,6 +122,22 @@ view at window resolution with no UI in the frame. **Inspect** reports what a
 clicked surface actually is — texture, material, blend flags, UV range.
 
 Every setting has an ⓘ beside it explaining what it does.
+
+---
+
+## Updates
+
+A couple of seconds after launch, the app asks GitHub for the latest release
+number. If it is newer than the version you are running, a popup offers to
+download it: an installed copy downloads the installer and runs it, a portable
+copy downloads the new exe and opens its folder, since a running portable
+executable cannot replace itself.
+
+That request is the only thing this app ever sends over the network. It carries
+no information about you, your machine or your game — it asks for a version
+number and nothing else — and a failed check is silent rather than an error box.
+Turn it off in **Scene panel → Updates → Check on startup**, which also holds a
+**Check now** button and the version you are running.
 
 ---
 

@@ -3,6 +3,7 @@ import { ZONES, type ZoneEntry } from './lib/zoneList'
 import { expansionFor } from './lib/zoneExpansion'
 import { parseZoneFile, parseTexturesFromDat, type ParsedZone } from './lib/ffxi-dat'
 import ZoneViewer, { type MapScale } from './components/ZoneViewer'
+import UpdateNotice from './components/UpdateNotice'
 import ControlPanel from './components/ControlPanel'
 import ModelBrowser from './components/ModelBrowser'
 import { composeCharacter, type CharacterSpec, type ComposedCharacter } from './lib/characterModel'
@@ -14,6 +15,10 @@ import {
   DEFAULT_MUSIC, type MusicSettings,
 } from './lib/settings'
 import { ZoneMusicPlayer, type MusicStatus } from './lib/zoneMusic'
+import type { UpdateInfo } from '../../preload/index'
+
+/** Where the 'check for updates on startup' preference is remembered. */
+const UPDATE_PREF_KEY = 'ffxi-explorer.checkUpdates'
 
 type LoadState =
   | { status: 'idle' }
@@ -108,6 +113,61 @@ export default function App() {
   useEffect(() => {
     setCharClip(charSpec.animation === null ? null : 0)
   }, [charSpec.animation])
+
+  // ── Update check ────────────────────────────────────────────────────────
+  // The preference lives in localStorage rather than the scene settings,
+  // because presets apply over DEFAULT_SCENE and clicking one would otherwise
+  // silently re-enable a check the user had turned off.
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null)
+  const [checkUpdates, setCheckUpdates] = useState(
+    () => localStorage.getItem(UPDATE_PREF_KEY) !== 'off',
+  )
+  const [appVersion, setAppVersion] = useState('')
+  const [checkState, setCheckState] = useState<'idle' | 'checking' | 'current' | 'failed'>('idle')
+
+  useEffect(() => { window.ffxi.version?.().then(setAppVersion).catch(() => {}) }, [])
+
+  const runUpdateCheck = useCallback(async (manual: boolean) => {
+    setCheckState('checking')
+    try {
+      const info = await window.updates.check()
+      setUpdateInfo(info)
+      setCheckState(info ? 'idle' : 'current')
+    } catch {
+      setCheckState('failed')
+    }
+    if (manual) return
+  }, [])
+
+  useEffect(() => {
+    // ?updatetest=1 shows the popup against a fabricated release, so the UI can
+    // be exercised without publishing one. It never downloads: the asset is
+    // null, so the popup offers the download page instead.
+    if (new URLSearchParams(window.location.search).get('updatetest') === '1') {
+      setUpdateInfo({
+        version: '9.9.9',
+        name: 'FFXI Explorer 9.9.9',
+        notes: 'Test release used by the update harness. Nothing is downloaded.',
+        pageUrl: 'https://github.com/Scruffybub/FFXI-Explorer/releases/latest',
+        asset: null,
+        portable: false,
+      })
+      return
+    }
+    if (!checkUpdates) return
+    // Startup is busy enough; let the window paint and the zone list settle
+    // before touching the network.
+    const timer = setTimeout(() => { void runUpdateCheck(false) }, 2500)
+    return () => clearTimeout(timer)
+    // Deliberately runs once: re-checking whenever the preference is toggled
+    // back on would fire a request mid-click.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const setUpdatePref = useCallback((on: boolean) => {
+    setCheckUpdates(on)
+    localStorage.setItem(UPDATE_PREF_KEY, on ? 'on' : 'off')
+  }, [])
 
   const [uiHidden, setUiHidden] = useState(false)
   const [fullscreen, setFullscreen] = useState(false)
@@ -588,7 +648,20 @@ export default function App() {
         onTogglePlacing={() => setPlacingLight(p => !p)}
         onPreset={applyPreset}
         onReset={resetAll}
+        appVersion={appVersion}
+        checkUpdates={checkUpdates}
+        updateCheckState={checkState}
+        onCheckUpdatesChange={setUpdatePref}
+        onCheckNow={() => runUpdateCheck(true)}
       />
+
+      {updateInfo && (
+        <UpdateNotice
+          info={updateInfo}
+          onDismiss={() => setUpdateInfo(null)}
+          onDisableChecks={() => { setUpdatePref(false); setUpdateInfo(null) }}
+        />
+      )}
     </div>
   )
 }
