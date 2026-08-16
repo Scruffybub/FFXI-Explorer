@@ -1,6 +1,6 @@
 {
   "name": "ffxi-zone-viewer",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "description": "Standalone 3D viewer for Final Fantasy XI zone models with modern lighting",
   "main": "./out/main/index.js",
   "author": "",

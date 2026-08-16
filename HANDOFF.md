@@ -1042,6 +1042,25 @@ worth repeating if this is ever doubted:
 
 Alpha doubles on the way out, since `0x80` is the opaque end.
 
+**The same 0x80 convention explains the checkerboard, and it is not in the
+palette path at all.** DXT3 holds alpha in 4 bits, and `0x80` is 7.53 of 15 —
+not representable — so the encoder dithered it. Measured in North Gustaberg's
+`m_106_00`: the alpha channel holds exactly **two values, 119 and 136, at 50%
+each**, and nothing else. That is a checkerboard standing in for a constant, not
+transparency.
+
+Untreated, every DXT plate drew at about half opacity. Over the viewer's dark
+background that dimmed the parchment into something muddy — read as
+"saturation turned up" — with the 119/136 alternation showing through as a
+checkerboard. `normaliseAlpha` reads anything at or above nibble 7 as the opaque
+it was meant to be; genuinely lower values still double. After it, all three
+sampled plates report 100% opaque and a single alpha value of 255.
+
+Worth knowing for the 3D side: **19 of 24 sampled map plates are DXT3 and every
+one of them carried this dither.** If FFXI dithers `0x80` this way in menu
+textures, it may well do the same elsewhere, which would look like faint
+checkerboarding on anything alpha-blended.
+
 **A lead, unmeasured, and now a strong one.** `TextureParser.parseB1Texture`
 carries **the same two bugs**: it reads the palette as BGRA with alpha at byte 3,
 and it does not flip the rows. Whatever it decodes is upside down with blue

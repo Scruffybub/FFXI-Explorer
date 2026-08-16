@@ -145,6 +145,32 @@ function parseMinimapTextureBlock(
   return { width, height, rgba, format: 'indexed' }
 }
 
+/**
+ * Bring DXT-decoded alpha back onto FFXI's scale.
+ *
+ * FFXI treats **0x80 as fully opaque**, the same convention the palette uses.
+ * DXT3 stores alpha in 4 bits, and 0x80 is 7.53 of 15 — not representable — so
+ * the encoder dithered it between nibbles 7 and 8. Measured in North
+ * Gustaberg's `m_106_00`: the alpha channel holds exactly two values, **119 and
+ * 136, at 50% each**, and nothing else. That is not transparency, it is a
+ * checkerboard standing in for a constant.
+ *
+ * Left alone, every DXT plate drew at about half opacity: over the viewer's
+ * dark background that dimmed the parchment into something muddy and
+ * over-saturated, with the 119/136 alternation showing through as a
+ * checkerboard once zoomed.
+ *
+ * So anything at or above nibble 7 is read as the opaque it was meant to be,
+ * and genuinely lower values still scale by two.
+ */
+function normaliseAlpha(rgba: Uint8Array): Uint8Array {
+  for (let i = 3; i < rgba.length; i += 4) {
+    const a = rgba[i]
+    rgba[i] = a >= 112 ? 255 : Math.min(255, a * 2)
+  }
+  return rgba
+}
+
 /** Fallback: try DXT decoding for 0xB1 blocks that don't fit the indexed format. */
 function parseB1AsDXT(
   reader: DatReader, dataOffset: number, dataLength: number,
@@ -159,14 +185,14 @@ function parseB1AsDXT(
     const pixelOffset = dataOffset + dataLength - expectedDXT3
     reader.seek(pixelOffset)
     const pixelData = reader.readBytes(expectedDXT3)
-    return { width, height, rgba: decompressDXT3(pixelData, width, height), format: 'dxt3-b1' }
+    return { width, height, rgba: normaliseAlpha(decompressDXT3(pixelData, width, height)), format: 'dxt3-b1' }
   }
 
   if (dataLength >= expectedDXT1 + B1_HEADER_SIZE) {
     const pixelOffset = dataOffset + dataLength - expectedDXT1
     reader.seek(pixelOffset)
     const pixelData = reader.readBytes(expectedDXT1)
-    return { width, height, rgba: decompressDXT1(pixelData, width, height), format: 'dxt1-b1' }
+    return { width, height, rgba: normaliseAlpha(decompressDXT1(pixelData, width, height)), format: 'dxt1-b1' }
   }
 
   return null
@@ -193,9 +219,9 @@ function parseA1Style(reader: DatReader, dataOffset: number): ParsedTexture | nu
 
   let rgba: Uint8Array
   if (ddsType === '3TXD') {
-    rgba = decompressDXT3(pixelData, width, height)
+    rgba = normaliseAlpha(decompressDXT3(pixelData, width, height))
   } else if (ddsType === '1TXD') {
-    rgba = decompressDXT1(pixelData, width, height)
+    rgba = normaliseAlpha(decompressDXT1(pixelData, width, height))
   } else {
     return null
   }
