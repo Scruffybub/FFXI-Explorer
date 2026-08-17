@@ -1061,13 +1061,34 @@ one of them carried this dither.** If FFXI dithers `0x80` this way in menu
 textures, it may well do the same elsewhere, which would look like faint
 checkerboarding on anything alpha-blended.
 
-**A lead, unmeasured, and now a strong one.** `TextureParser.parseB1Texture`
-carries **the same two bugs**: it reads the palette as BGRA with alpha at byte 3,
-and it does not flip the rows. Whatever it decodes is upside down with blue
-pinned to 128. Nobody has checked which zone or model textures are 0xB1
-palette-indexed, or whether three's `flipY` cancels the flip in 3D — but the
-README already lists textures rendering wrongly as a known issue, and this is
-the first concrete candidate. Start there.
+**The palette starts at 0x3C, not 0x40 — and that was the last map bug.**
+
+Read four bytes late, every index landed on the *next* entry's colour. The
+parchment ramp is smooth so it barely showed there, but the spot colours were
+visibly wrong: icons near-black instead of blue, grid letters red instead of
+dark, and index 0 picking up header bytes.
+
+**Settled against POLUtils.** Its XML export embeds its own decode as a PNG, and
+comparing index-by-index against it is conclusive: at 0x40, **0 of 256** indices
+matched; at 0x3C, **183 match exactly** and the rest differ by a unit or two on
+sparse indices where the sampling itself is noisy. Pixels then follow the
+palette at 0x3C + 1024, which scores better than any other combination in a
+sweep of palette and pixel offsets (mean 8.9 against 13.6). Bastok Markets now
+renders with blue icons, a red "South Gustaberg" and dark grid letters, exactly
+like POLUtils and the game.
+
+A residual mean difference of about 9/255 remains against POLUtils' PNG, with
+the images visually identical; it is most likely their BMP→PNG conversion
+rather than the decode. Worth remembering before chasing it.
+
+**The lead this leaves, and it is now a strong one.**
+`TextureParser.parseB1Texture` carries **all three** of the bugs fixed here: it
+reads the palette at 0x40 rather than 0x3C, treats it as BGRA with alpha at byte
+3 rather than ARGB, and does not flip the rows. Anything 0xB1 it decodes is
+upside down, blue-pinned and off by one palette entry. Nobody has checked which
+zone or model textures are palette-indexed, or whether three's `flipY` cancels
+the flip in 3D — but the README lists textures rendering wrongly as a known
+issue, and the map fixes are a ready-made recipe. Start there.
 
 `ParsedTexture.format` is now declared. The parser had always set it and
 ZoneViewer had always read it, so `tex.format` was a type error in three places

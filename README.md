@@ -16,8 +16,6 @@
 
 **Model viewer** - The model viewer has a lot of issues such as incorrect animations, incorrect file naming, UI issues.
 
-**Area map colours** - Most area maps look right, but the ones stored in the older palette-indexed format have wrong accent colours: icons come out near-black instead of blue, and the grid letters read red instead of dark. The maps are perfectly legible, and the layout, scale and everything else is correct.
-
 
 # FFXI Explorer
 

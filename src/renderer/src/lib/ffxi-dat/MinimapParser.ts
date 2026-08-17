@@ -71,6 +71,22 @@ const B1_HEADER_SIZE = 64
 const B1_PALETTE_ENTRIES = 256
 const B1_PALETTE_SIZE = B1_PALETTE_ENTRIES * 4 // 1024 bytes (RGBA per entry)
 
+/**
+ * The palette starts at 0x3C, four bytes before the pixel maths would suggest.
+ *
+ * Read at 0x40, every index landed on the *next* entry's colour: icons came out
+ * near-black, grid letters red, and index 0 picked up a header byte instead of
+ * black. Established against POLUtils' own decode of `m_235_00`, exported from
+ * its XML: at 0x40, **0 of 256** indices matched its colours; at 0x3C, **183**
+ * match exactly and the rest differ only by a unit or two on sparse indices
+ * where the comparison itself is noisy.
+ *
+ * The pixel data still starts at 0x40 + 1024 — the four bytes between the end
+ * of the palette and the pixels are padding, and that arrangement is what makes
+ * the block size come out exact: 1088 + 512*512 = the block's data length.
+ */
+const B1_PALETTE_OFFSET = 60
+
 function parseMinimapTextureBlock(
   reader: DatReader, dataOffset: number, dataLength: number
 ): ParsedTexture | null {
@@ -91,7 +107,7 @@ function parseMinimapTextureBlock(
 
   if (width <= 0 || width > 2048 || height <= 0 || height > 2048) return null
 
-  const paletteOffset = dataOffset + B1_HEADER_SIZE
+  const paletteOffset = dataOffset + B1_PALETTE_OFFSET
   const pixelOffset = paletteOffset + B1_PALETTE_SIZE
   const pixelCount = width * height
 
