@@ -1,6 +1,9 @@
 import { DatReader } from './DatReader'
 import type { ParsedTexture } from './types'
-import { decompressDXT1, decompressDXT3 } from './TextureParser'
+import {
+  decompressDXT1, decompressDXT3, decodeB1Indexed,
+  B1_PALETTE_OFFSET, B1_PALETTE_SIZE,
+} from './TextureParser'
 
 const DATHEAD_SIZE = 8
 const BLOCK_PADDING = 8
@@ -62,30 +65,15 @@ export function parseMinimapDat(buffer: ArrayBuffer): ParsedMinimap | null {
  *   +0x19: height (4 bytes, uint32 LE)
  *   +0x1D..0x3F: unknown header fields + padding (35 bytes)
  *   +0x40: 256-entry RGBA palette (1024 bytes)
- *   +0x440: 8-bit indexed pixel data (width * height bytes)
+ *   +0x3D: 256-entry palette, B,G,R,A per entry (1024 bytes)
+ *   +0x43D: 8-bit indexed pixel data (width * height bytes), bottom-up
  *
- * Total header + palette = 64 + 1024 = 1088 bytes before pixel data.
- * Each pixel byte is an index into the 256-color palette.
+ * The palette offset and entry order live in `TextureParser`, which does the
+ * decoding for both this and the zone/model textures. `B1_HEADER_SIZE` below is
+ * only used by the DXT fallback, which measures back from the end of the block.
  */
 const B1_HEADER_SIZE = 64
-const B1_PALETTE_ENTRIES = 256
-const B1_PALETTE_SIZE = B1_PALETTE_ENTRIES * 4 // 1024 bytes (RGBA per entry)
 
-/**
- * The palette starts at 0x3C, four bytes before the pixel maths would suggest.
- *
- * Read at 0x40, every index landed on the *next* entry's colour: icons came out
- * near-black, grid letters red, and index 0 picked up a header byte instead of
- * black. Established against POLUtils' own decode of `m_235_00`, exported from
- * its XML: at 0x40, **0 of 256** indices matched its colours; at 0x3C, **183**
- * match exactly and the rest differ only by a unit or two on sparse indices
- * where the comparison itself is noisy.
- *
- * The pixel data still starts at 0x40 + 1024 — the four bytes between the end
- * of the palette and the pixels are padding, and that arrangement is what makes
- * the block size come out exact: 1088 + 512*512 = the block's data length.
- */
-const B1_PALETTE_OFFSET = 60
 
 function parseMinimapTextureBlock(
   reader: DatReader, dataOffset: number, dataLength: number
@@ -107,8 +95,7 @@ function parseMinimapTextureBlock(
 
   if (width <= 0 || width > 2048 || height <= 0 || height > 2048) return null
 
-  const paletteOffset = dataOffset + B1_PALETTE_OFFSET
-  const pixelOffset = paletteOffset + B1_PALETTE_SIZE
+  const pixelOffset = dataOffset + B1_PALETTE_OFFSET + B1_PALETTE_SIZE
   const pixelCount = width * height
 
   // Verify we have enough data for palette + indexed pixels
@@ -117,48 +104,10 @@ function parseMinimapTextureBlock(
     return parseB1AsDXT(reader, dataOffset, dataLength, width, height)
   }
 
-  /**
-   * The palette is **ARGB**, one little-endian word per entry: alpha, then
-   * blue, green, red.
-   *
-   * It was read as BGRA, which put the *constant* alpha byte into blue and the
-   * real red into alpha. Every map came out pink — blue pinned at 128 — with a
-   * red "Valkurm Dunes" label rendering purple, and the torn edges' opacity
-   * tracking their redness.
-   *
-   * Measured rather than guessed, in Selbina's `m_248_00`: byte 0 holds 0x80 in
-   * **all 256 entries**, which is FFXI's fully-opaque alpha and cannot be a
-   * colour channel; and the parchment entry `80 9e ca d6` read as A,B,G,R gives
-   * (214, 202, 158) — the warm tan the game shows.
-   */
-  reader.seek(paletteOffset)
-  const palette = reader.readBytes(B1_PALETTE_SIZE)
-
-  // Read indexed pixel data
-  reader.seek(pixelOffset)
-  const indices = reader.readBytes(pixelCount)
-
-  // Convert indexed pixels to RGBA, flipping vertically only
-  // (FFXI stores minimap pixels bottom-up)
-  // Palette format is BGRA; alpha 0x80 means fully opaque in FFXI's palette convention
-  const rgba = new Uint8Array(pixelCount * 4)
-  for (let y = 0; y < height; y++) {
-    const srcRow = y * width
-    const dstRow = (height - 1 - y) * width
-    for (let x = 0; x < width; x++) {
-      const idx = indices[srcRow + x]
-      const pOff = idx * 4
-      const d = (dstRow + x) * 4
-      rgba[d + 0] = palette[pOff + 3] // R
-      rgba[d + 1] = palette[pOff + 2] // G
-      rgba[d + 2] = palette[pOff + 1] // B
-      // 0x80 is fully opaque in FFXI's convention, so the value doubles rather
-      // than being read as a yes/no.
-      rgba[d + 3] = Math.min(255, palette[pOff + 0] * 2)
-    }
-  }
-
-  return { width, height, rgba, format: 'indexed' }
+  // The layout itself lives in TextureParser, shared with the zone and model
+  // textures: this format took long enough to pin down that two copies of it
+  // would only drift apart.
+  return decodeB1Indexed(reader, dataOffset, width, height)
 }
 
 /**

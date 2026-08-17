@@ -1081,14 +1081,40 @@ A residual mean difference of about 9/255 remains against POLUtils' PNG, with
 the images visually identical; it is most likely their BMP→PNG conversion
 rather than the decode. Worth remembering before chasing it.
 
-**The lead this leaves, and it is now a strong one.**
-`TextureParser.parseB1Texture` carries **all three** of the bugs fixed here: it
-reads the palette at 0x40 rather than 0x3C, treats it as BGRA with alpha at byte
-3 rather than ARGB, and does not flip the rows. Anything 0xB1 it decodes is
-upside down, blue-pinned and off by one palette entry. Nobody has checked which
-zone or model textures are palette-indexed, or whether three's `flipY` cancels
-the flip in 3D — but the README lists textures rendering wrongly as a known
-issue, and the map fixes are a ready-made recipe. Start there.
+**Then POLUtils' source settled it exactly, and the earlier fix was right by
+accident.** POLUtils reads these blocks as flag(1) + id(16) + 4 + a standard
+40-byte `BITMAPINFOHEADER`, so the palette sits at **61** with entries stored
+**B, G, R, A**, and the pixels follow at 61 + 1024 = **1085**.
+
+Reading at 60 as A,B,G,R lands on the *same three colour bytes*, one position
+over — so the colours came out right — but alpha came from the **previous**
+entry and the pixel data started **one byte early**, shifting the whole image
+sideways by a pixel. That was the unexplained mean difference of 8.9 against
+POLUtils, which had been written off as their PNG conversion. It was ours.
+Decoding their way scores **0.0000, every pixel identical**.
+
+POLUtils also reads the fourth byte as `SemiAlpha` and discards it, forcing
+opacity — independent confirmation of the `0x80 = opaque` reading. The parser
+doubles it instead, which reaches the same 255 for an ordinary entry while
+keeping genuinely partial edges.
+
+### 0xB1 decoding is shared, and it fixed the weather textures
+
+`decodeB1Indexed` lives in `TextureParser` and `MinimapParser` calls it, so the
+layout above is written down once. `parseB1Texture` had carried all three bugs.
+
+**The palette-indexed textures in zone files are the weather and effect
+sheets** — 15 of 168 sampled across four zones, and every one of them is
+`suny_a01`, `fine_a01`, `effect fir1/2/3`, `effect lt_a` or a lens flare. They
+were being decoded upside down with blue pinned at 128 and every index off by
+one, which is worth remembering next to the "weather does not render properly"
+entry in the README. After the fix `suny_a01` decodes as a soft cloud sheet at
+99.9% partial alpha and `lf01` as a recognisable lens-flare sprite sheet —
+rainbow arc, ghost discs, starburst.
+
+Ordinary zone rendering is untouched by this: everything else in those files is
+DXT, and the indexed sheets are weather geometry, which is hidden unless a state
+is chosen.
 
 `ParsedTexture.format` is now declared. The parser had always set it and
 ZoneViewer had always read it, so `tex.format` was a type error in three places

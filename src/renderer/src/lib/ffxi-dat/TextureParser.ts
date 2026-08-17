@@ -142,7 +142,7 @@ export function decompressDXT3(data: Uint8Array, width: number, height: number):
 
 const B1_HEADER_SIZE = 64
 const B1_PALETTE_ENTRIES = 256
-const B1_PALETTE_SIZE = B1_PALETTE_ENTRIES * 4 // 1024 bytes (BGRA per entry)
+export const B1_PALETTE_SIZE = B1_PALETTE_ENTRIES * 4 // 1024 bytes (BGRA per entry)
 
 export function parseTextureBlock(
   reader: DatReader,
@@ -226,9 +226,67 @@ export function parseTextureBlock(
 }
 
 /**
+ * Where a 0xB1 block's palette starts, and how its entries are laid out.
+ *
+ * The block is flag(1) + id(16) + 4 bytes + a standard 40-byte
+ * `BITMAPINFOHEADER`, which puts the palette at **61**, with entries stored
+ * **B, G, R, A** and the pixel indices immediately after it. That is how
+ * POLUtils reads these blocks, and decoding a map plate exactly this way
+ * reproduces its export byte for byte — mean difference 0.0000 across a
+ * 512x512 image, every pixel identical.
+ *
+ * It had been read at 64 as BGRA, which is off by one entry: every index picked
+ * up the *next* colour. On a smooth ramp that barely shows, but spot colours
+ * came out plainly wrong. See HANDOFF for how it was pinned down.
+ */
+export const B1_PALETTE_OFFSET = 61
+
+/**
+ * Decode a 0xB1 palette-indexed image. Shared with `MinimapParser`, because
+ * this layout took a long time to establish and having two copies of it is how
+ * they drift apart.
+ *
+ * Rows are stored **bottom-up** and flipped here, so the result matches the
+ * top-down orientation the DXT paths already produce.
+ */
+export function decodeB1Indexed(
+  reader: DatReader,
+  dataOffset: number,
+  width: number,
+  height: number,
+): ParsedTexture {
+  const paletteOffset = dataOffset + B1_PALETTE_OFFSET
+  const pixelOffset = paletteOffset + B1_PALETTE_SIZE
+  const pixelCount = width * height
+
+  reader.seek(paletteOffset)
+  const palette = reader.readBytes(B1_PALETTE_SIZE)
+  reader.seek(pixelOffset)
+  const indices = reader.readBytes(pixelCount)
+
+  const rgba = new Uint8Array(pixelCount * 4)
+  for (let y = 0; y < height; y++) {
+    const srcRow = y * width
+    const dstRow = (height - 1 - y) * width
+    for (let x = 0; x < width; x++) {
+      const pOff = indices[srcRow + x] * 4
+      const d = (dstRow + x) * 4
+      rgba[d + 0] = palette[pOff + 2] // R
+      rgba[d + 1] = palette[pOff + 1] // G
+      rgba[d + 2] = palette[pOff + 0] // B
+      // POLUtils calls the fourth byte SemiAlpha and discards it, since 0x80 is
+      // fully opaque in FFXI's convention. Doubling keeps partial edges and
+      // reaches the same 255 for an ordinary opaque entry.
+      rgba[d + 3] = Math.min(255, palette[pOff + 3] * 2)
+    }
+  }
+
+  return { width, height, rgba, format: 'indexed' }
+}
+
+/**
  * Parse a 0xB1 palette-indexed texture.
- * Format: 64-byte header → 256-entry BGRA palette (1024 bytes) → 8-bit indexed pixels.
- * Falls back to DXT decoding if data doesn't fit the indexed layout.
+ * Falls back to DXT decoding if the data does not fit the indexed layout.
  */
 function parseB1Texture(
   reader: DatReader,
@@ -238,40 +296,15 @@ function parseB1Texture(
   width: number,
   height: number,
 ): { name: string; texture: ParsedTexture } | null {
-  const paletteOffset = dataOffset + B1_HEADER_SIZE
-  const pixelOffset = paletteOffset + B1_PALETTE_SIZE
+  const pixelOffset = dataOffset + B1_PALETTE_OFFSET + B1_PALETTE_SIZE
   const pixelCount = width * height
 
-  // Check if data fits the palette-indexed layout
   if (pixelOffset + pixelCount > dataOffset + dataLength) {
     // Not enough data for indexed format — try DXT fallback
     return parseB1AsDXT(reader, dataOffset, dataLength, name, width, height)
   }
 
-  // Read the 256-entry BGRA palette
-  reader.seek(paletteOffset)
-  const palette = reader.readBytes(B1_PALETTE_SIZE)
-
-  // Read indexed pixel data
-  reader.seek(pixelOffset)
-  const indices = reader.readBytes(pixelCount)
-
-  // Convert indexed pixels to RGBA (no vertical flip — zone textures are top-down)
-  // Palette format is BGRA; alpha 0x80 means fully opaque in FFXI's palette convention
-  const rgba = new Uint8Array(pixelCount * 4)
-  for (let i = 0; i < pixelCount; i++) {
-    const idx = indices[i]
-    const pOff = idx * 4
-    const d = i * 4
-    rgba[d + 0] = palette[pOff + 2] // R (from BGRA byte 2)
-    rgba[d + 1] = palette[pOff + 1] // G (from BGRA byte 1)
-    rgba[d + 2] = palette[pOff + 0] // B (from BGRA byte 0)
-    // FFXI palette alpha: 0x80 = opaque, 0x00 = transparent
-    const a = palette[pOff + 3]
-    rgba[d + 3] = a > 0 ? 255 : 0
-  }
-
-  return { name, texture: { width, height, rgba, format: 'indexed' } }
+  return { name, texture: decodeB1Indexed(reader, dataOffset, width, height) }
 }
 
 /** Fallback: try DXT decoding for 0xB1 blocks that don't fit the indexed format. */
