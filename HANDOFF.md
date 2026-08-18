@@ -38,12 +38,49 @@ faster than any amount of squinting at screenshots.
 
 | | Status |
 |---|---|
-| **Materials from the alpha profile** | **The obvious next job.** The alpha decode is now correct and each texture can be classified — cutout, solid, or genuinely translucent — but the renderer still picks materials by `prefab.blending > 0`. See the new §3 section on DXT3 alpha. This is §4a and §4f both |
+| **Materials from the alpha profile** | **Agreed as the next job (2026-08-17).** Plan and thresholds are written up immediately below.** The alpha decode is now correct and each texture can be classified — cutout, solid, or genuinely translucent — but the renderer still picks materials by `prefab.blending > 0`. See the new §3 section on DXT3 alpha. This is §4a and §4f both |
 | **4c — pale ground squares** | Mostly fixed, still open, and the fix ships **off** by default (Ryan's call). Some squares survive in Gustaberg, unexplained |
 | **4e — white screen with bloom** | Not reproduced. Needs Ryan to say *where* it happens |
 | **Weather placement** | Textures are now correct; **placement is still absent from the zone files**. Do not confuse the two — §0b |
 | **Model viewer animations** | On Ryan's own known-issues list. POLUtils' TetraViewer is the obvious reference, and unexamined |
 | **Diorama** | Still the only unstarted roadmap item that builds rather than debugs |
+
+### Next task, agreed 2026-08-17: choose materials from the alpha profile
+
+The decode is correct and every texture now classifies cleanly. The renderer
+still ignores all of it and picks materials by `prefab.blending > 0`, which is
+the last thing standing between the correct data and a visible improvement.
+This is §4a and §4f both.
+
+**The classification, already measured.** Counting raw DXT3 alpha nibbles per
+texture (`scripts/` has no harness for this yet — the one used was ad hoc; write
+it properly):
+
+| Class | Test | South Gustaberg | Treatment |
+|---|---|---|---|
+| **Cutout** | more than ~5% of texels at nibble 0 | 21 of 47 — `gateston` 98%, `gus_04` 87%, `gu_to01c` 84%, `kabe` 57%, `moonshap` 68% | alpha test, no blending |
+| **Solid** | under ~0.5% clear | 25 of 47, all terrain | no alpha test at all |
+| **Translucent** | most texels partial (nibbles 1-6) | `effect mwr1` 95%, `umsb` 98%, `umw1` 95% | real blending, `depthWrite: false` |
+
+**Suggested shape.** Compute the profile in the parser, where the pixels already
+are, and hang it off `ParsedTexture` — something like
+`alphaProfile: 'solid' | 'cutout' | 'translucent'` plus the raw percentages for
+diagnostics. `ZoneViewer`'s material build then reads it instead of guessing.
+Log it under a `[ALPHAPROFILE]` tag so a census is one smoke run away.
+
+**Do not simply replace the blend flag with the profile.** They answer different
+questions: the profile is a property of the *texture*, the flag a property of
+the *mesh* (§4f, and the water shader in §0b diverts `taki`/`kawa` by name before
+either is consulted). Expect to combine them, and expect the water work in §4a to
+fall out of the translucent class.
+
+**How to know it worked.** Fences and gates keep their holes without fringing;
+terrain gains no holes at all — that was the old failure mode; water and spray
+stop reading as flat cloth. Verify **in motion, by hand**, not only in stills:
+anything touching materials, transparency or draw order is exactly what a
+screenshot cannot judge, and that is how the overlay-blend regression got through
+last time. `?nowater=1` isolates the water path; `?pick=<substr>` frames one
+prefab; `scripts/smoke.cjs` plus an image diff quantifies what moved.
 
 ### Finished 2026-08-17, do not redo
 
