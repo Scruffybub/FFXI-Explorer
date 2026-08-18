@@ -998,6 +998,46 @@ supplied. Those are different fixes. The removed implementation was a one-line
 escape in the prefab loop (`if (isSkyWeatherMesh(prefab)) continue`) plus a
 census of the skipped categories; see the commit that removed it.
 
+### FFXI's DXT3 alpha is binary, and it was being read at half scale
+
+**This is the answer to 4b, 5a and 4f.** POLUtils decodes DXT3 alpha as
+`nibble >= 8 ? 255 : nibble << 5` — with the comment *"Seems to be 8 maximum; so
+treat 8 as 255"*. That is FFXI's `0x80 = opaque` convention expressed in four
+bits, the same one the palette uses.
+
+The parser had been expanding the nibble straight (`a4 << 4 | a4`), so an opaque
+texel read as **119 or 136 of 255** — half transparent. Census of the raw
+nibbles across two zone files:
+
+| Nibble | South Gustaberg | West Ronfaure |
+|---|---|---|
+| 0, fully clear | 23.0% | 24.0% |
+| 1-6, genuinely partial | 4.2% | 3.7% |
+| **7 and 8, the dithered opaque pair** | **71.2%** | **69.8%** |
+| 9-15 | 1.7% | 2.5% |
+
+So the alpha is effectively binary: about 73% opaque, 23% cut out, 4% partial.
+**"Terrain textures average ~120 alpha" in 5a was measuring the 7/8 dither**, not
+a half-transparent texture — which is why five attempts at 4b failed while
+measuring *how much* was transparent.
+
+With the correct rule the classification falls out per texture. South Gustaberg,
+47 DXT3 textures:
+
+- **21 are cutouts** — `model gateston` 98.2% clear, `gus_04` 87.3%,
+  `gu_to01c` 84.2%, `kabe` 56.6%, `moonshap` 68.3%. Gates, fences, walls,
+  foliage, the moon. Alpha testing is right for these.
+- **25 have essentially no clear texels** — terrain. Alpha testing them is
+  pointless, which is why it only ever caused trouble.
+- **A few are almost entirely partial** — `effect mwr1` 95.1%, `umsb` 97.5%,
+  `umw1` 94.9%: water and spray, which want real blending rather than a cutout.
+
+**What this does not do:** the renderer still chooses its materials the old way
+(`useAlpha = prefab.blending > 0` turning on `alphaTest: 0.1`). Correcting the
+decode changed the zone view only slightly — 2.1% of pixels in West Ronfaure,
+0.0% in South Gustaberg — because the material logic never trusted the alpha
+anyway. The data is now right; deciding materials from it is the next step, and
+4f said blending could not be fixed until the alpha was. It now is.
 ### The in-game area maps — Models → Maps
 
 **Where they live was never a mystery; the answer was already in the repo.**

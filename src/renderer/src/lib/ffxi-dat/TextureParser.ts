@@ -101,13 +101,16 @@ export function decompressDXT3(data: Uint8Array, width: number, height: number):
           const ci = (idx >>> (pi * 2)) & 3
           const d = (y * width + x) * 4
           const a4 = (pi % 2 === 0) ? (alpha[pi >> 1] & 0xF) : ((alpha[pi >> 1] >> 4) & 0xF)
-          // Straight 4-bit expansion. Doubling this on the theory that FFXI
-          // uses the PS2's 0..128 alpha range was tried and changed nothing:
-          // terrain textures average ~120 alpha but carry ~6% texels at zero,
-          // and those are what alpha testing punches out. Those texels are the
-          // PS2 data-mask use of the alpha channel, not transparency — which is
-          // why terrain must not be alpha tested at all.
-          rgba[d] = pal[ci][0]; rgba[d + 1] = pal[ci][1]; rgba[d + 2] = pal[ci][2]; rgba[d + 3] = (a4 << 4) | a4
+          // FFXI's alpha tops out at 0x80, which in DXT3's four bits is 8. Nibble
+          // 8 or above is fully opaque; below that the value is a 3-bit alpha
+          // scaled by 32. This is POLUtils' rule, and it is the same 0x80
+          // convention the palette uses — see decodeB1Indexed.
+          //
+          // The straight 4-bit expansion this replaces read an opaque texel as
+          // 119 or 136 of 255, which is why map plates drew at half opacity and
+          // why terrain measured ~120 average alpha.
+          rgba[d] = pal[ci][0]; rgba[d + 1] = pal[ci][1]; rgba[d + 2] = pal[ci][2]
+          rgba[d + 3] = a4 >= 8 ? 255 : a4 << 5
         }
       }
     }
