@@ -38,7 +38,7 @@ faster than any amount of squinting at screenshots.
 
 | | Status |
 |---|---|
-| **Materials from the alpha profile** | **Agreed as the next job (2026-08-17).** Plan and thresholds are written up immediately below.** The alpha decode is now correct and each texture can be classified — cutout, solid, or genuinely translucent — but the renderer still picks materials by `prefab.blending > 0`. See the new §3 section on DXT3 alpha. This is §4a and §4f both |
+| **Materials from the alpha profile** | **Agreed as the next job (2026-08-17).** Plan and thresholds are written up immediately below. The alpha decode is now correct and each texture can be classified — cutout, solid, or genuinely translucent — but the renderer still picks materials by `prefab.blending > 0`. See the new §3 section on DXT3 alpha. This is §4a and §4f both |
 | **4c — pale ground squares** | Mostly fixed, still open, and the fix ships **off** by default (Ryan's call). Some squares survive in Gustaberg, unexplained |
 | **4e — white screen with bloom** | Not reproduced. Needs Ryan to say *where* it happens |
 | **Weather placement** | Textures are now correct; **placement is still absent from the zone files**. Do not confuse the two — §0b |
