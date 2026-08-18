@@ -1,49 +1,82 @@
-# FFXI Zone Viewer — Development Handoff
+# FFXI Explorer — Development Handoff
 
 Context for continuing work in a fresh session.
-Written 2026-08-03; substantially revised 2026-08-08 and 2026-08-15.
+Written 2026-08-03; substantially revised 2026-08-08, 2026-08-15 and 2026-08-17.
 
 ---
 
 ## 0. Start here — state of play
 
-Last worked 2026-08-15. Everything below is committed and pushed; the packaged
-exe in `release/` is current.
+Last worked **2026-08-17**. Everything is committed and pushed, and
+**v0.1.4 is published** at
+<https://github.com/Scruffybub/FFXI-Explorer/releases>. The repository is
+**public** as of 2026-08-16.
 
 **Read §2 (how to debug this) before changing anything.** Nearly every hour lost
 on this project went to theorising instead of measuring.
 
-### The one rule this session kept proving
+### The single most useful thing learned, and it is new
 
-**Verify the way the user will see it.** Two separate failures came from
-forgetting that:
+**POLUtils is a decoder oracle, and it is Apache-2.0.**
+<https://github.com/Windower/POLUtils> decodes these same DAT files, its XML
+export embeds its own decode as a PNG, and its source can be read as a
+specification — or ported, with attribution, since the licence is permissive.
 
-- A full session's work never reached Ryan because `npm run build` only feeds
-  `out/` and the headless harness. He runs `release/*.exe`. **Repackage before
-  claiming anything is done** (`npx electron-builder --win portable --config
-  electron-builder.yml`).
-- The overlay-blend regression — geometry popping in and out as the camera
-  moved — **rendered perfectly in every screenshot the harness took**. Motion
-  artefacts are invisible to a still frame. Anything touching materials,
-  transparency or draw order needs checking in motion, by hand.
+Three long-running problems fell in one afternoon once it was used:
+
+- Diffing against its **exported PNG** identified a palette offset bug that four
+  rounds of my own hypotheses had missed.
+- Reading its **source** then showed my fix was right by accident — same colours,
+  wrong alpha, and the image a pixel out. Their layout is byte-exact.
+- Its **DXT3 alpha rule** answered the question §4b, §5a and §4f were all
+  blocked on.
+
+When a decode looks nearly right, stop theorising and get a reference. It is
+faster than any amount of squinting at screenshots.
 
 ### What is live and worth picking up
 
 | | Status |
 |---|---|
-| **4c — pale ground squares** | **Mostly fixed, still open, and the fix now ships OFF by default** (2026-08-15, Ryan's call). Ryan: "still some squares in Gustaberg, although much less than before." Cause, fix and the default flip are in §4c; the remainder is unexplained |
-| **4e — white screen with bloom** | Not reproduced. Needs Ryan to say *where* in a zone it happens, then it can be driven headlessly |
-| **4a / 4b — water, cutout alpha** | Both downstream of the alpha question. **Read §5a first** — three readings of the alpha channel have been eliminated by measurement, and §5's old lead is superseded |
-| **Diorama** | The last unstarted roadmap item, and the only one that builds rather than debugs |
+| **Materials from the alpha profile** | **The obvious next job.** The alpha decode is now correct and each texture can be classified — cutout, solid, or genuinely translucent — but the renderer still picks materials by `prefab.blending > 0`. See the new §3 section on DXT3 alpha. This is §4a and §4f both |
+| **4c — pale ground squares** | Mostly fixed, still open, and the fix ships **off** by default (Ryan's call). Some squares survive in Gustaberg, unexplained |
+| **4e — white screen with bloom** | Not reproduced. Needs Ryan to say *where* it happens |
+| **Weather placement** | Textures are now correct; **placement is still absent from the zone files**. Do not confuse the two — §0b |
+| **Model viewer animations** | On Ryan's own known-issues list. POLUtils' TetraViewer is the obvious reference, and unexamined |
+| **Diorama** | Still the only unstarted roadmap item that builds rather than debugs |
 
-### Finished this session, do not redo
+### Finished 2026-08-17, do not redo
 
-- **Zone music** — mapping, PS-ADPCM, and a full ATRAC3 port validated
-  bit-exactly against ffmpeg. All 74 ambient tracks play. §6.
-- **Map view** — orthographic top-down capture, fog suppressed. §3.
-- **Weather** — geometry fully identified; parked because FFXI ships no
-  placement for it. §0b, and do not tune it further without new information.
-- Panel clipping, and the hidden-panels/fullscreen viewport collapse. §3.
+- **Area maps** — Models → Maps, 191 zones, a page per floor, Save PNG. Decodes
+  **byte-exact against POLUtils**. §3.
+- **Map view fixed scale** — captures of different zones share one scale, so they
+  stitch without rescaling. §3.
+- **Update check** — GitHub releases, silent on failure, verified delivering
+  0.1.2 → 0.1.3 → 0.1.4 against the live API. §3.
+- **0xB1 palette decoding** — shared by `TextureParser` and `MinimapParser`;
+  fixed the weather and effect textures. §3.
+- **DXT3 alpha on FFXI's 0x80 scale** — and the census of what the channel
+  actually holds. §3.
+- Info icons on every setting, expansion labels in the zone list, anisotropic
+  filtering, licence and notices, the app icon and its three-step build. §3.
+
+### Releasing
+
+Version lives in `package.json` and drives the artifact names. The build is
+three steps because the icon cannot be embedded the normal way (§3):
+
+```
+npx electron-vite build
+npx electron-builder --win dir --config electron-builder.yml
+node scripts/set-icon.cjs          # never pipe this — its exit code matters
+npx electron-builder --prepackaged release/win-unpacked --win portable nsis --config electron-builder.yml
+gh release create v0.1.N --target main --title "FFXI Explorer 0.1.N" --notes-file <notes> release/*.exe
+```
+
+**Close the app first** — a running instance locks the exe and `rcedit` fails.
+Verify afterwards by extracting the icon from both artifacts, launching the
+packaged build, and checking the release anonymously (an unauthenticated fetch
+of `releases/latest`, not `gh`, which authenticates as Ryan and always succeeds).
 
 ### Diagnostics available
 
@@ -58,7 +91,11 @@ All are query params on the built app; `scripts/smoke.cjs` passes them through
 | `?uvfix=1` | Tested and rejected for 4c; kept so it is not retried |
 | `?blendexp=1\|2` | Global blend-flag experiment; made things worse, see §4f |
 | `?music=1` | Start music at launch; every state change logs `[MUSIC]` |
+| `?updatetest=1` | Show the update popup against a fabricated release |
 | `?nowater=1` `?nounref=1` `?walkdebug=1` `?modeldebug=1` | Older switches, still good |
+
+Two renderer hooks exist for harnesses: **`window.__parseTextures(buf)`** and
+**`window.__parseMinimap(buf)`**, both live whenever an install path is set.
 
 ---
 
@@ -542,6 +579,9 @@ All launch the built app headless via Electron and capture PNGs.
 | `build-item-names.cjs <item_equipment.sql>` | Regenerate `resources/item-names.json` (not a test; a data build step) |
 | `expansion-check.cjs` | Read the expansion tag the sidebar renders for all 285 zones and cross-check it against the CSV's archive and the name rules |
 | `panel-inventory.cjs` | List every control the settings panel renders, with whether it has an info icon. `EXTRA_QUERY` reveals the conditional ones |
+| `version-test.cjs` | 15 cases for the update check's version comparison. Runs without Electron: `node scripts/version-test.cjs` |
+| `palette-dump.cjs` | Walk a map DAT's blocks and dump its palette bytes. This is what showed byte 0 is alpha, not blue |
+| `make-icon.cjs` / `set-icon.cjs` | Build the multi-size .ico, and stamp it onto the packaged exe with rcedit |
 
 **`walk-test.cjs` and the other movement harnesses need `show: true`.** Chromium
 throttles `requestAnimationFrame` in a hidden window regardless of
