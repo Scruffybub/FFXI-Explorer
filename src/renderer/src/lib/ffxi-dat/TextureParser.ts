@@ -1,5 +1,91 @@
 import { DatReader } from './DatReader'
-import type { ParsedTexture } from './types'
+import type { AlphaProfile, ParsedTexture } from './types'
+
+/**
+ * A texel is opaque at **224**, not 250.
+ *
+ * FFXI's alpha tops out at 0x80, which `decompressDXT3` expands as
+ * `nibble >= 8 ? 255 : nibble << 5`. Nibbles 7 and 8 are the dithered opaque
+ * pair the art uses for solid surfaces, and 7 comes out of that rule at 224.
+ * A census of two zones found 70% of all texels sitting on that pair, so a
+ * threshold of 250 would call almost every terrain sheet partially
+ * transparent. That misreading is exactly what §5a spent months chasing.
+ */
+const OPAQUE_ALPHA = 224
+
+/** Above this share of genuinely partial texels, a texture wants real blending. */
+const TRANSLUCENT_PARTIAL = 0.5
+
+/**
+ * Above this share of fully clear texels, a texture is a *candidate* cutout.
+ *
+ * This threshold decides a diagnostic label and nothing else. It must not be
+ * used to pick materials, and 0.5 was tried on 2026-08-18 on the strength of a
+ * misread top-down silhouette:
+ *
+ *   ron_wf    27.4% clear  the entire West Ronfaure floor, 1098 placements
+ *   ron_kab0  94.4% clear  a stone wall along the ridge, 93 placements
+ *
+ * Raising the threshold to 0.5 to separate those two alpha-tested ron_kab0 and
+ * punched rectangular holes clean through the wall — the same failure as the
+ * 5% threshold, moved to a different object. A sheet that is 94% clear and
+ * draws as solid stone, next to gates and foliage in the same band, is why no
+ * value here separates anything. Kept at 0.05 because that is the number the
+ * census in HANDOFF was taken at.
+ */
+const CUTOUT_CLEAR = 0.05
+
+/**
+ * Measure how a decoded texture actually uses its alpha channel.
+ *
+ * Thresholds come from the census in HANDOFF §0: in South Gustaberg's 47 DXT3
+ * textures, 21 are cutouts (gateston 98% clear, gus_04 87%, kabe 57%), 25 are
+ * terrain with essentially no clear texels at all, and a handful — water and
+ * spray, `effect mwr1` 95% partial, `umsb` 98% — are genuinely translucent.
+ *
+ * Order matters. Translucent is tested first because a spray sheet can be both
+ * mostly partial and several percent clear. The band between 0.5% and 5% clear
+ * falls to `solid`, deliberately: alpha-testing terrain that does not need it
+ * is the old failure mode that shot four separate attempts full of holes, so
+ * the uncertain middle takes the harmless answer.
+ */
+export function computeAlphaProfile(rgba: Uint8Array): AlphaProfile {
+  const total = rgba.length / 4
+  if (total === 0) return { cls: 'solid', clear: 0, partial: 0, opaque: 0 }
+
+  let clear = 0, opaque = 0
+  for (let i = 3; i < rgba.length; i += 4) {
+    const a = rgba[i]
+    if (a === 0) clear++
+    else if (a >= OPAQUE_ALPHA) opaque++
+  }
+  const partial = total - clear - opaque
+
+  const clearShare = clear / total
+  const partialShare = partial / total
+  const cls =
+    partialShare > TRANSLUCENT_PARTIAL ? 'translucent'
+      : clearShare > CUTOUT_CLEAR ? 'cutout'
+        : 'solid'
+
+  return { cls, clear: clearShare, partial: partialShare, opaque: opaque / total }
+}
+
+/**
+ * Build a `ParsedTexture`, profiling its alpha on the way through.
+ *
+ * Every decode path goes through here so none can forget the profile — the
+ * renderer now picks materials from it, and a texture without one would fall
+ * back to the guesswork this replaced.
+ */
+export function makeTexture(
+  width: number,
+  height: number,
+  rgba: Uint8Array,
+  format: string,
+): ParsedTexture {
+  return { width, height, rgba, format, alphaProfile: computeAlphaProfile(rgba) }
+}
 
 /**
  * Unpack a RGB565 color value into RGBA bytes at the given offset in `out`.
@@ -195,7 +281,7 @@ export function parseTextureBlock(
 
     return {
       name: id.trim(),
-      texture: { width, height, rgba, format: fmt },
+      texture: makeTexture(width, height, rgba, fmt),
     }
   }
 
@@ -221,7 +307,7 @@ export function parseTextureBlock(
 
     return {
       name: id.trim(),
-      texture: { width, height, rgba, format: fmt },
+      texture: makeTexture(width, height, rgba, fmt),
     }
   }
 
@@ -284,7 +370,7 @@ export function decodeB1Indexed(
     }
   }
 
-  return { width, height, rgba, format: 'indexed' }
+  return makeTexture(width, height, rgba, 'indexed')
 }
 
 /**
@@ -328,14 +414,14 @@ function parseB1AsDXT(
     const pixelOffset = dataOffset + dataLength - expectedDXT3
     reader.seek(pixelOffset)
     const pixelData = reader.readBytes(expectedDXT3)
-    return { name, texture: { width, height, rgba: decompressDXT3(pixelData, width, height), format: 'dxt3-b1' } }
+    return { name, texture: makeTexture(width, height, decompressDXT3(pixelData, width, height), 'dxt3-b1') }
   }
 
   if (dataLength >= expectedDXT1 + B1_HEADER_SIZE) {
     const pixelOffset = dataOffset + dataLength - expectedDXT1
     reader.seek(pixelOffset)
     const pixelData = reader.readBytes(expectedDXT1)
-    return { name, texture: { width, height, rgba: decompressDXT1(pixelData, width, height), format: 'dxt1-b1' } }
+    return { name, texture: makeTexture(width, height, decompressDXT1(pixelData, width, height), 'dxt1-b1') }
   }
 
   console.warn(`[TextureParser] 0xB1 texture "${name}" (${width}×${height}) doesn't fit indexed or DXT layout`)

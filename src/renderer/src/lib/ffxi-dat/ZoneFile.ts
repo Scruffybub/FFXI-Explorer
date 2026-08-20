@@ -347,7 +347,14 @@ export function parseZoneFile(
   )
   onProgress?.(`Result: ${prefabs.length} prefabs, ${instances.length} instances, ${textures.length} textures`)
 
-  return { prefabs, instances, textures, collision }
+  // Invert the name map into an array aligned to `textures`, so a texture
+  // index alone is enough to name the sheet in any diagnostic.
+  const textureNames: string[] = new Array(textures.length).fill('')
+  for (const [name, idx] of textureNameMap) {
+    if (idx >= 0 && idx < textureNames.length) textureNames[idx] = name
+  }
+
+  return { prefabs, instances, textures, textureNames, collision }
 }
 
 /** Concatenate collision from every MZB block in the file, rebasing indices. */

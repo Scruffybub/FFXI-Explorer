@@ -16,6 +16,34 @@ export interface ParsedMesh {
   dualBoneWeights?: Float32Array
 }
 
+/**
+ * How a texture's alpha channel is actually used, measured from the decoded
+ * pixels rather than guessed from a mesh flag.
+ *
+ * FFXI's DXT3 alpha is effectively binary once POLUtils' rule is applied (see
+ * `decompressDXT3`): about three quarters of texels are opaque, a quarter are
+ * cut clean out, and a few percent are genuinely partial. Which of those a
+ * texture is made of says what material it wants — and it is a property of the
+ * *texture*, where the blending flag is a property of the *mesh*. They answer
+ * different questions; expect to consult both.
+ */
+export type AlphaClass = 'solid' | 'cutout' | 'translucent'
+
+export interface AlphaProfile {
+  cls: AlphaClass
+  /** Share of texels fully clear — DXT3 nibble 0. */
+  clear: number
+  /** Share genuinely partial — nibbles 1-6, i.e. alpha 32..192. */
+  partial: number
+  /**
+   * Share opaque. This counts alpha >= 224, NOT >= 250: nibbles 7 and 8 are
+   * FFXI's dithered opaque pair and 7 decodes to 224. Counting only 255 would
+   * put ~70% of every terrain texture in the partial bucket and classify the
+   * whole world translucent.
+   */
+  opaque: number
+}
+
 export interface ParsedTexture {
   width: number
   height: number
@@ -30,6 +58,11 @@ export interface ParsedTexture {
    * stored bottom-up where DXT ones are not (see MapViewer).
    */
   format: string
+  /**
+   * Measured alpha usage, set by every decode path in `TextureParser` and
+   * `MinimapParser` — required so a new decode path cannot silently omit it.
+   */
+  alphaProfile: AlphaProfile
 }
 
 export interface ParsedBone {
@@ -71,6 +104,13 @@ export interface ParsedZone {
   prefabs: ParsedZoneMesh[]       // unique MMB mesh prefabs
   instances: ZoneMeshInstance[]    // MZB placement transforms
   textures: ParsedTexture[]       // reused from entity pipeline
+  /**
+   * The name each texture carries in the DAT, indexed alike to `textures`.
+   * Diagnostic: a prefab's `textureName` only covers sheets some mesh uses,
+   * and the effect and weather sheets merged from companion DATs are used by
+   * none of them.
+   */
+  textureNames: string[]
   collision: ParsedCollision | null // MZB collision mesh, raw DAT space
 }
 

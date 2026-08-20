@@ -1,7 +1,7 @@
 import { DatReader } from './DatReader'
 import type { ParsedTexture } from './types'
 import {
-  decompressDXT1, decompressDXT3, decodeB1Indexed,
+  decompressDXT1, decompressDXT3, decodeB1Indexed, makeTexture,
   B1_PALETTE_OFFSET, B1_PALETTE_SIZE,
 } from './TextureParser'
 
@@ -150,14 +150,14 @@ function parseB1AsDXT(
     const pixelOffset = dataOffset + dataLength - expectedDXT3
     reader.seek(pixelOffset)
     const pixelData = reader.readBytes(expectedDXT3)
-    return { width, height, rgba: normaliseAlpha(decompressDXT3(pixelData, width, height)), format: 'dxt3-b1' }
+    return makeTexture(width, height, normaliseAlpha(decompressDXT3(pixelData, width, height)), 'dxt3-b1')
   }
 
   if (dataLength >= expectedDXT1 + B1_HEADER_SIZE) {
     const pixelOffset = dataOffset + dataLength - expectedDXT1
     reader.seek(pixelOffset)
     const pixelData = reader.readBytes(expectedDXT1)
-    return { width, height, rgba: normaliseAlpha(decompressDXT1(pixelData, width, height)), format: 'dxt1-b1' }
+    return makeTexture(width, height, normaliseAlpha(decompressDXT1(pixelData, width, height)), 'dxt1-b1')
   }
 
   return null
@@ -191,5 +191,5 @@ function parseA1Style(reader: DatReader, dataOffset: number): ParsedTexture | nu
     return null
   }
 
-  return { width, height, rgba, format: ddsType === '3TXD' ? 'dxt3' : 'dxt1' }
+  return makeTexture(width, height, rgba, ddsType === '3TXD' ? 'dxt3' : 'dxt1')
 }
