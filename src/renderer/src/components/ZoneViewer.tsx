@@ -287,7 +287,124 @@ const BLEND_MODE =
     : ''
 
 /** Diagnostic, PICK-only: drop vertex colours, which are very dark here. */
+/**
+ * Experiment: choose materials from the texture's measured alpha profile
+ * (`ParsedTexture.alphaProfile`) instead of the mesh's blend flag.
+ *
+ *   1  full — cutout alpha-tests, translucent blends, solid does neither
+ *   2  translucent only — cutout and solid keep today's behaviour exactly
+ *   6  per-mesh **maximum** alpha over the UV rect. The one measure that
+ *      separates the 4b black boxes from the art they sit beside.
+ *
+ *      scripts/uv-alpha-dump.cjs settled why the others could not: gateston's
+ *      arch reads alpha 0 at 100% of its triangle centroids, and every one of
+ *      those texels carries stone-grey RGB. The sheet keeps its art in RGB and
+ *      a mask in alpha, so "how clear is this mesh" answers 100% for the arch
+ *      and 100% for a black box alike. The arch only survives an alpha test at
+ *      all because the GPU samples filtered and mipmapped, averaging in the
+ *      1.8% of texels that are not zero — which is also why it speckles.
+ *      A footprint MAX sees those texels directly: 224 for the arch, 0 for a
+ *      box that is genuinely in dead space.
+ *   5  per-mesh, sampled at the vertices rather than over the UV rect. The
+ *      rect is far too coarse on an atlas: every gateston mesh measured
+ *      >50% clear because its bounding rect covers empty sheet its triangles
+ *      never touch, so mode 4 pinholed the arch while correctly deleting the
+ *      black boxes. Vertex UVs land where the mesh actually is.
+ *   4  per-mesh — ignore the texture-wide class entirely and ask what each
+ *      mesh samples through its own UVs. The sheet is an atlas: gateston
+ *      carries the Gustaberg arch, its banners, AND the quads that draw as
+ *      §4b black boxes, all in one 98%-clear image. A texture-wide label
+ *      cannot separate them because they are the same texture; a UV
+ *      footprint can.
+ *   3  conjunction — the flag decides *whether* a mesh is special, the
+ *      profile decides *how*. Nothing happens to a mesh whose flag is 0.
+ *
+ * Mode 3 exists because ?blendexp measured worse both times, before and
+ * after the alpha decode was fixed: it blends every flagged mesh, and 27-40%
+ * of visible geometry carries 0x8000, most of it terrain whose texture has
+ * no clear texels at all. Blending solid ground is what darkened the scene.
+ * The flag alone is too broad and the profile alone is too broad; this is
+ * the one combination neither experiment has tried.
+ *
+ * Default 0, and deliberately so. Mode 1 is the plan HANDOFF §0 agreed, but
+ * the same census that classifies `gateston` a cutout at 98% clear also
+ * classifies West Ronfaure's `ron_kab0` a cutout at 94% clear — and §5a
+ * records that sheet rendering as solid ground, sampled over its whole UV
+ * range. Clear share has now failed to separate cutouts from terrain three
+ * independent ways, so this ships as a measurement rather than a default.
+ */
+const MAT_PROFILE =
+  typeof window !== 'undefined'
+    ? Number(new URLSearchParams(window.location.search).get('matprofile') ?? 0) || 0
+    : 0
+
+/**
+ * Diagnostic, PICK-only: frame a single instance placement instead of all of
+ * them.
+ *
+ * A sheet used by 81 placements spread over 600 units renders as 81 specks a
+ * few pixels across, which is enough to locate geometry and not enough to say
+ * what it is. `?pickinst=0` frames the first placement alone; the log reports
+ * how many there were to choose from.
+ */
+const PICK_INST =
+  typeof window !== 'undefined'
+    ? (() => {
+        const raw = new URLSearchParams(window.location.search).get('pickinst')
+        const n = raw === null ? -1 : Number(raw)
+        return Number.isFinite(n) ? n : -1
+      })()
+    : -1
+
+/**
+ * Diagnostic: isolate prefabs by index, e.g. `?pickprefab=156` or `156,128`.
+ *
+ * `?pick=` matches a texture name, which is the right handle when hunting an
+ * effect but useless once a dump has narrowed the suspect to one prefab out of
+ * nine sharing a sheet. Takes precedence over `?pick=` when both are set.
+ */
+const PICK_PREFAB =
+  typeof window !== 'undefined'
+    ? new Set(
+        (new URLSearchParams(window.location.search).get('pickprefab') ?? '')
+          .split(',')
+          .map(t => t.trim())
+          // Empty tokens must go BEFORE Number(): an absent param splits to
+          // [''], and Number('') is 0, so the whole zone rendered as prefab 0
+          // alone — a single cloud plate — with every default view broken.
+          .filter(t => t.length > 0)
+          .map(t => Number(t))
+          .filter(n => Number.isFinite(n) && n >= 0),
+      )
+    : new Set<number>()
+
 /** Experiment selector for FFXI blend-flag handling; see the use site. */
+/**
+ * Mode 5 threshold: how clear a mesh must be, at its own vertices, before it is
+ * alpha-tested. Default 0.95, i.e. "this mesh is entirely in empty space".
+ *
+ * 0.5 was tried first and pinholed the Gustaberg arch. The stone regions of
+ * gateston carry scattered zero-alpha texels of their own — the data-mask use
+ * of the channel from 5a — so alpha-testing a mesh that is merely mostly clear
+ * perforates whatever solid art it also covers. Only a mesh that is clear
+ * almost everywhere is safe, and such a mesh is one FFXI meant to be invisible:
+ * a 4b black box.
+ */
+const MESH_CLEAR =
+  typeof window !== 'undefined'
+    ? (() => {
+        const raw = new URLSearchParams(window.location.search).get('meshclear')
+        const n = raw === null ? 0.95 : Number(raw)
+        return Number.isFinite(n) ? n : 0.95
+      })()
+    : 0.95
+
+/** Diagnostic for the mode 5 sampler: read v upside down, as it was first written. */
+const V_FLIP =
+  typeof window !== 'undefined'
+    ? new URLSearchParams(window.location.search).get('vflip') === '1'
+    : false
+
 const BLEND_EXP =
   typeof window !== 'undefined'
     ? Number(new URLSearchParams(window.location.search).get('blendexp') ?? 0) || 0
@@ -2254,6 +2371,7 @@ export default function ZoneViewer({
     /** prefab index -> its weather state, for tagging the meshes below. */
     const prefabWeatherState = new Map<number, string>()
     let unresolvedTextures = 0
+    let meshCutouts = 0
     let vertexAlphaMeshes = 0
     let uvOverflowMeshes = 0
 
@@ -2296,7 +2414,9 @@ export default function ZoneViewer({
       // switched without rebuilding the zone — a rebuild takes seconds and
       // makes flicking between states unusable.
       let prefabWeather = ''
-      if (PICK) {
+      if (PICK_PREFAB.size > 0) {
+        if (!PICK_PREFAB.has(prefabIdx)) continue
+      } else if (PICK) {
         // Isolation mode: the pick replaces the sky/weather filter rather than
         // stacking with it, so hidden geometry can be examined.
         if (!(prefab.textureName ?? '').toLowerCase().includes(PICK)) continue
@@ -2583,7 +2703,14 @@ export default function ZoneViewer({
         //
         // So cutouts whose blending flag is 0 still draw their transparent
         // regions as solid colour. Fixing that needs a signal none of the
-        // alpha statistics provide; suspect the DXT3 decode first.
+        // alpha statistics provide.
+        //
+        // Sixth attempt, 2026-08-18: the DXT3 decode was suspected, was fixed
+        // (POLUtils rule), and the per-texture classification built on top of
+        // it fails the same way. Alpha-testing the measured cutout class shot
+        // 9.02% of West Ronfaure full of holes, because ron_kab0 measures
+        // 94.4% clear over 56 meshes and is solid ground. Clear share is not
+        // the signal, at any threshold. See ?matprofile below and HANDOFF §0.
         const useAlpha = prefab.blending > 0
         const common = {
           ...(texture && { map: texture }),
@@ -2629,6 +2756,181 @@ export default function ZoneViewer({
           : gameSunActive
             ? new THREE.MeshLambertMaterial(common)
             : new THREE.MeshBasicMaterial(common)
+
+        // Experiment: ?matprofile=N picks the material from what the texture's
+        // alpha channel measurably *is* rather than from the mesh's blend flag.
+        // The two answer different questions — the profile describes the sheet,
+        // the flag describes the mesh — so this replaces only the alpha decision
+        // and leaves water, overlays and the flag experiments untouched.
+        //
+        // Solid loses its alpha test entirely: alpha-testing terrain that does
+        // not need it is the failure mode four earlier attempts hit.
+        // Mode 4: alpha-test a mesh when the region of the sheet *it actually
+        // samples* is mostly clear. A ground or wall face samples opaque
+        // texels and keeps its test off; a quad whose whole UV rect is
+        // transparent is meant to be invisible, and today draws as a black
+        // box. Per mesh, so two meshes on one atlas can differ.
+        //
+        // §5a measured this as a zone-wide *average* and found no separation
+        // (51.8% sheet vs 55.7% sampled over 192 meshes). An average over the
+        // zone cannot answer a per-mesh question, and the ron_kab0 case that
+        // sank it was a wall misread as ground.
+        // Mode 5: the same question as mode 4, asked at the vertices. A quad
+        // meant to be invisible has every corner in clear space; an arch face
+        // has its corners on stone even when the sheet around it is empty.
+        // Mode 6: alpha-test only a mesh whose whole UV footprint is dead —
+        // max alpha zero. That is a quad FFXI meant to be invisible, and today
+        // it draws as a 4b black box. Anything with a single live texel in
+        // range keeps todays behaviour, so art is untouched by construction.
+        if (MAT_PROFILE === 6 && !isWater && !isOverlay && tex) {
+          let u0 = Infinity, v0 = Infinity, u1 = -Infinity, v1 = -Infinity
+          for (let i = 0; i + 1 < prefab.uvs.length; i += 2) {
+            const u = prefab.uvs[i], v = prefab.uvs[i + 1]
+            if (u < u0) u0 = u; if (u > u1) u1 = u
+            if (v < v0) v0 = v; if (v > v1) v1 = v
+          }
+          if (Number.isFinite(u0)) {
+            const cu0 = Math.max(0, Math.min(1, u0)), cu1 = Math.max(0, Math.min(1, u1))
+            const cv0 = Math.max(0, Math.min(1, v0)), cv1 = Math.max(0, Math.min(1, v1))
+            const x0 = Math.floor(cu0 * (tex.width - 1)), x1 = Math.ceil(cu1 * (tex.width - 1))
+            const y0 = Math.floor(cv0 * (tex.height - 1)), y1 = Math.ceil(cv1 * (tex.height - 1))
+            // Subsampled on a fixed grid. Scanning every texel of every rect
+            // stalled the zone build long enough that the harness captured an
+            // unrendered frame — 99.8% black, which is a measurement of nothing.
+            // A live texel in FFXI mask art comes in runs, not single pixels, so
+            // a 128-step grid still finds one; the risk is a false "dead" on art
+            // thinner than the step, which is why this stays behind a switch.
+            const stepX = Math.max(1, Math.floor((x1 - x0 + 1) / 128))
+            const stepY = Math.max(1, Math.floor((y1 - y0 + 1) / 128))
+            let maxA = 0
+            for (let y = y0; y <= y1 && maxA === 0; y += stepY) {
+              for (let x = x0; x <= x1; x += stepX) {
+                const av = tex.rgba[(y * tex.width + x) * 4 + 3]
+                if (av > maxA) { maxA = av; break }
+              }
+            }
+            const m = mat as THREE.MeshBasicMaterial
+            if (maxA === 0) {
+              m.transparent = false
+              m.alphaTest = 0.1
+              m.needsUpdate = true
+              meshCutouts++
+            }
+          }
+        } else if (MAT_PROFILE === 5 && !isWater && !isOverlay && tex) {
+          // Sampled at triangle centroids, not at vertices. Vertex UVs sit on
+          // tile borders, which on an atlas are exactly the clear margin — so
+          // corner sampling called 7 of the 9 gateston meshes clear, arch
+          // included, and pinholed the stone. A centroid lands in the middle of
+          // the art the triangle actually shows.
+          let clear = 0, n = 0
+          const idx = prefab.indices
+          for (let t = 0; t + 2 < idx.length; t += 3) {
+            let cu = 0, cv = 0
+            for (let k = 0; k < 3; k++) {
+              cu += prefab.uvs[idx[t + k] * 2]
+              cv += prefab.uvs[idx[t + k] * 2 + 1]
+            }
+            cu /= 3; cv /= 3
+            cu -= Math.floor(cu); cv -= Math.floor(cv)
+            const x = Math.min(tex.width - 1, Math.max(0, Math.round(cu * (tex.width - 1))))
+            // The DataTexture is built with flipY = false, so a UV v of 0 is the
+            // TOP row of tex.rgba. Sampling it as the bottom mirrors every
+            // lookup into a different tile of the atlas, which is what made
+            // almost every triangle read as clear while the surface renders as
+            // solid stone. ?vflip=1 restores the old reading for comparison.
+            const yv = V_FLIP ? 1 - cv : cv
+            const y = Math.min(tex.height - 1, Math.max(0, Math.round(yv * (tex.height - 1))))
+            if (tex.rgba[(y * tex.width + x) * 4 + 3] === 0) clear++
+            n++
+          }
+          const vertClear = n ? clear / n : 0
+          const m = mat as THREE.MeshBasicMaterial
+          m.transparent = false
+          m.alphaTest = vertClear > MESH_CLEAR ? 0.1 : 0
+          m.needsUpdate = true
+          if (vertClear > MESH_CLEAR) meshCutouts++
+        } else if (MAT_PROFILE === 4 && !isWater && !isOverlay && tex) {
+          let u0 = Infinity, v0 = Infinity, u1 = -Infinity, v1 = -Infinity
+          for (let i = 0; i + 1 < prefab.uvs.length; i += 2) {
+            const u = prefab.uvs[i], v = prefab.uvs[i + 1]
+            if (u < u0) u0 = u; if (u > u1) u1 = u
+            if (v < v0) v0 = v; if (v > v1) v1 = v
+          }
+          if (Number.isFinite(u0)) {
+            // A mesh that tiles samples the whole sheet, so clamp rather than
+            // skip: the question is still what it lands on.
+            const cu0 = Math.max(0, Math.min(1, u0)), cu1 = Math.max(0, Math.min(1, u1))
+            const cv0 = Math.max(0, Math.min(1, v0)), cv1 = Math.max(0, Math.min(1, v1))
+            const x0 = Math.floor(cu0 * (tex.width - 1)), x1 = Math.ceil(cu1 * (tex.width - 1))
+            const y0 = Math.floor(cv0 * (tex.height - 1)), y1 = Math.ceil(cv1 * (tex.height - 1))
+            // Cap the sample count so a 512x512 rect costs the same as a small one.
+            const stepX = Math.max(1, Math.floor((x1 - x0 + 1) / 64))
+            const stepY = Math.max(1, Math.floor((y1 - y0 + 1) / 64))
+            let clear = 0, n = 0
+            for (let y = y0; y <= y1; y += stepY) {
+              for (let x = x0; x <= x1; x += stepX) {
+                if (tex.rgba[(y * tex.width + x) * 4 + 3] === 0) clear++
+                n++
+              }
+            }
+            const sampledClear = n ? clear / n : 0
+            const m = mat as THREE.MeshBasicMaterial
+            m.transparent = false
+            m.alphaTest = sampledClear > 0.5 ? 0.1 : 0
+            m.needsUpdate = true
+            if (sampledClear > 0.5) meshCutouts++
+          }
+        } else if (MAT_PROFILE === 3 && !isWater && !isOverlay) {
+          // The flag says FFXI marked this mesh as needing something other
+          // than plain opaque; the profile says which. A mesh at flag 0 is
+          // left exactly as it is today, which is what keeps terrain safe:
+          // ron_kab0 ground meshes at flag 0 never reach the alpha test that
+          // mode 1 shot them with.
+          const cls = tex?.alphaProfile?.cls
+          const m = mat as THREE.MeshBasicMaterial
+          const flagged = (prefab.blending >>> 0) !== 0
+          if (flagged && cls === 'translucent') {
+            m.transparent = true
+            m.blending = THREE.NormalBlending
+            m.depthWrite = false
+            m.alphaTest = 0
+            m.needsUpdate = true
+          } else if (flagged && cls === 'cutout') {
+            m.transparent = false
+            m.alphaTest = 0.1
+            m.needsUpdate = true
+          } else if (flagged) {
+            // Solid texture on a flagged mesh: the flag means nothing the
+            // renderer can act on, so drop the alpha test it used to get.
+            m.transparent = false
+            m.alphaTest = 0
+            m.needsUpdate = true
+          }
+        } else if (MAT_PROFILE > 0 && !isWater && !isOverlay) {
+          const cls = tex?.alphaProfile?.cls
+          const m = mat as THREE.MeshBasicMaterial
+          if (cls === 'translucent') {
+            // Water, spray and the effect sheets: 95% of their texels are
+            // genuinely partial, which is the one class no reading of the data
+            // disputes. depthWrite goes off here and only here — these are the
+            // glass case, unlike the coplanar terrain overlays of 4c that
+            // popped in and out when they stopped writing depth.
+            m.transparent = true
+            m.blending = THREE.NormalBlending
+            m.depthWrite = false
+            m.alphaTest = 0
+            m.needsUpdate = true
+          } else if (MAT_PROFILE === 1 && cls === 'cutout') {
+            m.transparent = false
+            m.alphaTest = 0.1
+            m.needsUpdate = true
+          } else if (MAT_PROFILE === 1) {
+            m.transparent = false
+            m.alphaTest = 0
+            m.needsUpdate = true
+          }
+        }
 
         // Experiment: ?blendexp=N changes how FFXI's blend flags composite,
         // globally. Gated behind a param because 0x8000 sits on 27-40% of the
@@ -2771,6 +3073,35 @@ export default function ZoneViewer({
       // Hand the whole parsed zone to the page so harnesses can dump textures,
       // UVs and geometry without another log format being invented each time.
       ;(window as unknown as { __zoneData?: unknown }).__zoneData = zoneData
+
+      // [ALPHAPROFILE] — what each texture's alpha channel is actually for,
+      // measured in the parser (`computeAlphaProfile`) and now the input to
+      // the material choice below.
+      //
+      // Read the shares against the classes: a cutout is mostly opaque with a
+      // hard-clear region, terrain is opaque with essentially nothing clear,
+      // and water and spray sit almost entirely in the partial band. The
+      // percentages are printed so a surprising class can be checked rather
+      // than argued about.
+      {
+        const tally: Record<string, number> = { solid: 0, cutout: 0, translucent: 0 }
+        const rows: string[] = []
+        for (let ti = 0; ti < zoneData.textures.length; ti++) {
+          const t = zoneData.textures[ti]
+          const ap = t.alphaProfile
+          if (!ap) continue
+          tally[ap.cls] = (tally[ap.cls] ?? 0) + 1
+          const pct = (v: number) => (100 * v).toFixed(1).padStart(5)
+          rows.push(
+            `${(zoneData.textureNames?.[ti] || '#' + ti).padEnd(12)} ${(t.format ?? '?').padEnd(9)} ` +
+            `${ap.cls.padEnd(11)} clear ${pct(ap.clear)}%  partial ${pct(ap.partial)}%  opaque ${pct(ap.opaque)}%`)
+        }
+        rows.sort()
+        console.log(
+          `[ALPHAPROFILE] ${zoneData.textures.length} textures: ` +
+          `${tally.solid} solid, ${tally.cutout} cutout, ${tally.translucent} translucent\n  ` +
+          rows.join('\n  '))
+      }
 
       // Every unreferenced prefab, in full. This is deliberately not filtered
       // by isSkyWeatherMesh: the point is to see what that filter catches and
@@ -3044,6 +3375,9 @@ export default function ZoneViewer({
     if (vertexAlphaMeshes > 0) {
       console.log(`[ZoneViewer] ${vertexAlphaMeshes} meshes blend via vertex alpha`)
     }
+    if (MAT_PROFILE >= 4) {
+      console.log(`[MESHCUTOUT] ${meshCutouts} meshes alpha-tested by mode ${MAT_PROFILE}`)
+    }
     if (unresolvedTextures > 0) {
       console.log(`[ZoneViewer] ${unresolvedTextures} prefabs had no usable texture → fallback[${fallbackTextureIndex}]`)
     }
@@ -3183,21 +3517,89 @@ export default function ZoneViewer({
 
   const { center, size, camPos, farPlane } = useMemo(() => {
     const bbox = new THREE.Box3()
-    if (PICK) {
+    if (PICK || PICK_PREFAB.size > 0) {
       // Isolation mode frames the picked geometry instead of the zone. The
       // bounds are otherwise built from the instance list, and everything worth
       // picking — every weather dome and effect — is unreferenced, so the
       // camera framed the whole empty zone and the subject sat off-screen.
-      // Prefab vertices are already in world space, under the same Y/Z flip the
-      // zone group applies.
-      for (const p of zoneData.prefabs) {
-        if (!(p.textureName ?? '').toLowerCase().includes(PICK)) continue
-        for (let v = 0; v + 2 < p.vertices.length; v += 3) {
-          bbox.expandByPoint(new THREE.Vector3(p.vertices[v], -p.vertices[v + 1], -p.vertices[v + 2]))
-        }
+      //
+      // Prefab vertices are only in world space for the *unreferenced* prefabs,
+      // which draw at identity. A referenced prefab is drawn once per MZB
+      // instance, through `inst.transform`, and framing its raw vertices aims
+      // the camera at wherever the untransformed copy would sit — usually empty
+      // space. That is why ?pick=ron_kab0 rendered a blank viewport while
+      // reporting perfectly sensible bounds: 56 meshes were drawn, none of them
+      // anywhere near where the camera was looking.
+      //
+      // Bounds come from the eight corners of each prefab through each of its
+      // instance matrices, which is exact for a box and avoids walking every
+      // vertex of every copy.
+      const picked: number[] = []
+      for (let i = 0; i < zoneData.prefabs.length; i++) {
+        const hit = PICK_PREFAB.size > 0
+          ? PICK_PREFAB.has(i)
+          : (zoneData.prefabs[i].textureName ?? '').toLowerCase().includes(PICK)
+        if (hit) picked.push(i)
       }
+      const pickedSet = new Set(picked)
+      const localBox = new Map<number, THREE.Box3>()
+      for (const i of picked) {
+        const p = zoneData.prefabs[i]
+        const box = new THREE.Box3()
+        for (let v = 0; v + 2 < p.vertices.length; v += 3) {
+          box.expandByPoint(new THREE.Vector3(p.vertices[v], p.vertices[v + 1], p.vertices[v + 2]))
+        }
+        localBox.set(i, box)
+      }
+      // The same Y/Z flip the zone group applies, after placement.
+      const addFlipped = (v: THREE.Vector3) =>
+        bbox.expandByPoint(new THREE.Vector3(v.x, -v.y, -v.z))
+      const corners = (box: THREE.Box3) => [
+        new THREE.Vector3(box.min.x, box.min.y, box.min.z),
+        new THREE.Vector3(box.min.x, box.min.y, box.max.z),
+        new THREE.Vector3(box.min.x, box.max.y, box.min.z),
+        new THREE.Vector3(box.min.x, box.max.y, box.max.z),
+        new THREE.Vector3(box.max.x, box.min.y, box.min.z),
+        new THREE.Vector3(box.max.x, box.min.y, box.max.z),
+        new THREE.Vector3(box.max.x, box.max.y, box.min.z),
+        new THREE.Vector3(box.max.x, box.max.y, box.max.z),
+      ]
+      let placed = 0
+      const instanced = new Set<number>()
+      const hits = zoneData.instances.filter(i => pickedSet.has(i.meshIndex))
+      // ?pickinst=N frames one placement. Out-of-range wraps, so a harness can
+      // walk them without knowing the count in advance.
+      const chosen = PICK_INST >= 0 && hits.length
+        ? [hits[PICK_INST % hits.length]]
+        : hits
+      for (const inst of chosen) {
+        const box = localBox.get(inst.meshIndex)
+        if (!box || box.isEmpty()) continue
+        const m = new THREE.Matrix4().fromArray(inst.transform)
+        for (const c of corners(box)) addFlipped(c.applyMatrix4(m))
+        instanced.add(inst.meshIndex)
+        placed++
+      }
+      // Unreferenced picks draw at identity, so their own vertices are already
+      // in place. This is the weather and effect case the switch was built for.
+      // Only prefabs with no placement at all draw at identity. Keying this on
+      // the ones actually framed would drag every other placed prefab back in
+      // whenever ?pickinst= narrows to one.
+      const hasInstance = new Set(hits.map(i => i.meshIndex))
+      let identity = 0
+      for (const i of picked) {
+        if (hasInstance.has(i)) continue
+        const box = localBox.get(i)
+        if (!box || box.isEmpty()) continue
+        for (const c of corners(box)) addFlipped(c)
+        identity++
+      }
+      console.log(`[PICK] "${PICK}" matched ${picked.length} prefabs: ` +
+        `${placed} instance placements` +
+        (PICK_INST >= 0 ? ` (instance ${PICK_INST % Math.max(1, hits.length)} of ${hits.length})` : '') +
+        `, ${identity} drawn at identity`)
     }
-    if (PICK) {
+    if (PICK || PICK_PREFAB.size > 0) {
       console.log(`[PICK] "${PICK}" bounds ${bbox.isEmpty() ? 'EMPTY — falling back to zone' :
         `min(${bbox.min.x.toFixed(1)},${bbox.min.y.toFixed(1)},${bbox.min.z.toFixed(1)}) ` +
         `max(${bbox.max.x.toFixed(1)},${bbox.max.y.toFixed(1)},${bbox.max.z.toFixed(1)})`}`)
@@ -3227,8 +3629,10 @@ export default function ZoneViewer({
     let camPos: [number, number, number] = [
       center.x, center.y + diagonalSize * 0.15, center.z + diagonalSize * 0.4,
     ]
-    if (PICK) {
-      const dist = Math.max(diagonalSize * 0.9, 5)
+    if (PICK || PICK_PREFAB.size > 0) {
+      // One placement is often only a few units across, where the 0.9 factor and
+      // the near plane leave it a dot. Frame it tighter.
+      const dist = Math.max(diagonalSize * (PICK_INST >= 0 ? 0.7 : 0.9), 3)
       // `pickaxis` overrides the thin-axis guess. A stack of rings reads as a
       // flat annulus from above and as a funnel from the side, so which axis
       // you look down decides what the thing appears to be.
@@ -3375,7 +3779,7 @@ export default function ZoneViewer({
       ) : hasCameraOverride ? (
         <CameraOrientation />
       ) : scene.cameraMode === 'orbit' ? (
-        <SmartOrbitControls size={size} lookAt={PICK ? center : undefined} />
+        <SmartOrbitControls size={size} lookAt={PICK || PICK_PREFAB.size > 0 ? center : undefined} />
       ) : scene.cameraMode === 'walk' ? (
         <WalkCamera world={collisionWorld} center={center} size={size} scene={scene} body={walkBody} />
       ) : (
