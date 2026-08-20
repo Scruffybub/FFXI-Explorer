@@ -38,49 +38,361 @@ faster than any amount of squinting at screenshots.
 
 | | Status |
 |---|---|
-| **Materials from the alpha profile** | **Agreed as the next job (2026-08-17).** Plan and thresholds are written up immediately below. The alpha decode is now correct and each texture can be classified — cutout, solid, or genuinely translucent — but the renderer still picks materials by `prefab.blending > 0`. See the new §3 section on DXT3 alpha. This is §4a and §4f both |
+| **Materials from the alpha profile** | **Built and measured 2026-08-18. The classification ships; the material change does not.** Every texture now carries an `alphaProfile` and the census is one harness run away, but driving materials from it fails in both directions — read "What the alpha profile actually settled" below before touching this again |
 | **4c — pale ground squares** | Mostly fixed, still open, and the fix ships **off** by default (Ryan's call). Some squares survive in Gustaberg, unexplained |
 | **4e — white screen with bloom** | Not reproduced. Needs Ryan to say *where* it happens |
 | **Weather placement** | Textures are now correct; **placement is still absent from the zone files**. Do not confuse the two — §0b |
 | **Model viewer animations** | On Ryan's own known-issues list. POLUtils' TetraViewer is the obvious reference, and unexamined |
 | **Diorama** | Still the only unstarted roadmap item that builds rather than debugs |
 
-### Next task, agreed 2026-08-17: choose materials from the alpha profile
+### What the alpha profile actually settled — measured 2026-08-18
 
-The decode is correct and every texture now classifies cleanly. The renderer
-still ignores all of it and picks materials by `prefab.blending > 0`, which is
-the last thing standing between the correct data and a visible improvement.
-This is §4a and §4f both.
+The plan agreed on 2026-08-17 was to classify every texture from its alpha and
+let the renderer pick materials from the class instead of `prefab.blending > 0`.
+**The classification was built and it is right. Using it to pick materials is
+wrong, in both directions, and both are now measured.**
 
-**The classification, already measured.** Counting raw DXT3 alpha nibbles per
-texture (`scripts/` has no harness for this yet — the one used was ad hoc; write
-it properly):
+**What shipped, and is worth keeping:**
 
-| Class | Test | South Gustaberg | Treatment |
-|---|---|---|---|
-| **Cutout** | more than ~5% of texels at nibble 0 | 21 of 47 — `gateston` 98%, `gus_04` 87%, `gu_to01c` 84%, `kabe` 57%, `moonshap` 68% | alpha test, no blending |
-| **Solid** | under ~0.5% clear | 25 of 47, all terrain | no alpha test at all |
-| **Translucent** | most texels partial (nibbles 1-6) | `effect mwr1` 95%, `umsb` 98%, `umw1` 95% | real blending, `depthWrite: false` |
+- `ParsedTexture.alphaProfile` — `cls` plus the raw `clear` / `partial` /
+  `opaque` shares, computed in `TextureParser.computeAlphaProfile` where the
+  pixels already are. Every decode path in `TextureParser` and `MinimapParser`
+  goes through `makeTexture`, so no path can omit it.
+- `ParsedZone.textureNames` — the DAT's own name per texture index. Prefab
+  `textureName` only names sheets some mesh uses, which is why the first
+  census reported half its rows as `#28`.
+- `[ALPHAPROFILE]` under `?census=1`, `scripts/alpha-profile.cjs` for the
+  census across zones, and `scripts/img-diff.cjs` for the numeric comparison
+  that has been rewritten ad hoc a dozen times.
 
-**Suggested shape.** Compute the profile in the parser, where the pixels already
-are, and hang it off `ParsedTexture` — something like
-`alphaProfile: 'solid' | 'cutout' | 'translucent'` plus the raw percentages for
-diagnostics. `ZoneViewer`'s material build then reads it instead of guessing.
-Log it under a `[ALPHAPROFILE]` tag so a census is one smoke run away.
+The numbers reproduce the ad-hoc census exactly — `gateston` 98.2% clear,
+`gus_04` 87.3%, `gu_to01c` 84.2%, `kabe` 56.6%, `effect mwr1` 95.1%
+partial, `umsb` 97.5%. The decode and the measurement are not in question.
 
-**Do not simply replace the blend flag with the profile.** They answer different
-questions: the profile is a property of the *texture*, the flag a property of
-the *mesh* (§4f, and the water shader in §0b diverts `taki`/`kawa` by name before
-either is consulted). Expect to combine them, and expect the water work in §4a to
-fall out of the translucent class.
+**Watch the opaque threshold.** A texel counts as opaque at **224, not 250**:
+nibbles 7 and 8 are FFXI's dithered opaque pair and 7 decodes to 224. Counting
+only >=250 puts ~70% of every terrain sheet in the partial bucket and calls the
+whole world translucent. That is the same misreading §5a chased for months, one
+layer down.
 
-**How to know it worked.** Fences and gates keep their holes without fringing;
-terrain gains no holes at all — that was the old failure mode; water and spray
-stop reading as flat cloth. Verify **in motion, by hand**, not only in stills:
-anything touching materials, transparency or draw order is exactly what a
-screenshot cannot judge, and that is how the overlay-blend regression got through
-last time. `?nowater=1` isolates the water path; `?pick=<substr>` frames one
-prefab; `scripts/smoke.cjs` plus an image diff quantifies what moved.
+**Why the census population changed.** The old ad-hoc pass counted 47 DXT3
+textures in South Gustaberg; the harness reports 90 textures, 81 of them DXT3.
+The extra ones are the effect, weather and sky sheets merged from companion
+DATs, most of them used by no mesh in the zone. Same textures, wider net.
+
+#### Direction 1: cutout -> alpha test shoots terrain full of holes
+
+`?matprofile=1` implements the agreed plan — cutout alpha-tests, translucent
+blends, solid does neither. In West Ronfaure, same view, preset 0:
+
+> **mean abs difference 3.167 of 255, 9.02% of viewport pixels changed** — and
+> the screenshot shows sky and water through the ground across the whole zone.
+
+The cause was predictable from data already in this file, and was predicted
+before the run: **`ron_kab0` measures 94.4% clear and is used by 56 meshes**,
+and §5a records that exact sheet rendering as solid ground, sampled over its
+full UV range. It classifies `cutout` under any clear-share threshold. South
+Gustaberg's ground atlases say the same thing more quietly — `gus_01` 23.2%,
+`gus_03` 22.3%, `gus_07` 34.5%, all terrain, all used by dozens of meshes.
+
+**This is the sixth failure of clear share as a cutout signal**, after the five
+in §4b, and the first that was predicted rather than discovered. Clear share
+does not separate cutouts from terrain, and nothing derived from it will. Do
+not propose a different threshold; `ron_kab0` defeats every one of them.
+
+#### Direction 2: translucent -> real blending changes nothing visible
+
+`?matprofile=2` applies only the translucent half, the class no reading of
+the data disputes. Measured against baseline:
+
+| Zone | mean abs difference | pixels changed |
+|---|---|---|
+| West Ronfaure (100) | **0.000** | 0.00% |
+| Lufaise Meadows (24) | **0.000** | 0.00% |
+
+Not a subtle change — no change at all. `[CENSUS]` says why: in Lufaise every
+translucent sheet that any mesh uses sits on **unreferenced, `skip: true`
+geometry parked at the origin** — all 8 `effect kaw1` prefabs, `strm`,
+`shir`, `uturo6`, `nam1`. That is the weather and effect set of §0b,
+which FFXI ships no placement for. The one class that is unambiguously correct
+lands almost entirely on geometry the zone never draws.
+
+#### Second round: the flag, the conjunction, and where the class actually lands
+
+Three more things were tried the same day, after the two above. None of them
+rescues the plan, and together they close it off properly.
+
+**1. `?blendexp` was re-run on the corrected alpha, because §4f said to.**
+§4f measured blending as worse and concluded "alpha first, blending second" —
+but that measurement was taken while an opaque texel still decoded to 119 of
+255. The alpha is right now, so the experiment was repeated. West Ronfaure,
+same view, against baseline:
+
+| | mean abs difference | dark px |
+|---|---|---|
+| baseline | — | 0.78% |
+| `?blendexp=1` | 1.023 | **1.39%** |
+| `?blendexp=2` | 1.606 | **1.35%** |
+
+Still darkens, in the same direction and for the same reason. **§4f no longer
+has an open action item** — fixing the alpha did not change its verdict.
+
+**2. The conjunction — flag AND profile — is a no-op.** `?matprofile=3` lets
+the flag decide *whether* a mesh is special and the profile decide *how*, which
+is the one combination neither §4f nor mode 1 tested: it never touches a mesh at
+flag 0, so `ron_kab0` ground can never be alpha-tested. It measures **0.000**
+in West Ronfaure and Lufaise. That is real, not a broken switch — mode 1
+reproduces its 3.167 / 9.02% exactly under the same build. Mode 3 is a no-op by
+construction: flagged cutouts already alpha-test today, flagged solids have no
+clear texels for the test to discard, and flagged translucents are the case
+below.
+
+**3. The translucent class has almost nothing drawn to act on.** The harness now
+separates *used by a mesh* from *drawn* — referenced by an MZB instance rather
+than parked. Across six zones (100, 107, 24, 25, 103, 130):
+
+> **126 translucent textures, and exactly 2 of them are drawn** —
+> `model hyousiki` in West Ronfaure (a signpost, 2 meshes, 92.1% partial)
+> and `model ten` in Misareaux (3 meshes, 100% partial, flag 0x0 so even
+> mode 3 would not touch it).
+
+Every other translucent sheet in all six zones is weather and effect geometry
+that FFXI ships no placement for. **The one class the data is unambiguous about
+is a §0b problem, not a materials problem.** That is the finding worth keeping
+from the whole exercise.
+
+**POLUtils cannot answer this one.** Its source was checked for render state:
+TetraViewer is a thin data-file viewer, and there is no zone mesh renderer,
+no D3D render state, nothing about alpha test or blend mode anywhere in the
+repository. It is an oracle for *decoding*, which is what it already settled.
+Do not go looking there again for how to *draw* this geometry.
+
+#### The Ashita private-server tools — read 2026-08-18, and worth knowing about
+
+Ryan supplied two more references, both about eight years old:
+<https://git.ashitaxi.com/PrivateServerTools/MapLib> and
+<https://git.ashitaxi.com/PrivateServerTools/MapViewer>. They are small C++ /
+Direct3D 9 projects. What they gave, and did not give:
+
+**They independently confirm the MMB layout this codebase parses.** MapLib's
+`ParseObject` walks exactly the structure `MmbParser` walks — name at 0x20, a
+flag deciding a 0x20 / 0x40 / flag*4 skip, then per strip a 16-byte texture name,
+`short vertexCount` at +16, vertices at +20 with a **36-byte stride**, then
+an index count and 16-bit indices. Our stride, offsets and triangle-strip
+handling all match a second implementation. That is reassuring and it is the
+first outside confirmation the geometry path has ever had.
+
+**Neither tool reads the blending field.** Both step over the two shorts at +16
+as a single 4-byte skip. Whatever `blending` means, it was not needed to draw
+a zone recognisably, and no outside source explains it yet.
+
+**MapViewer alpha-tests everything, globally, at `ALPHAREF 0x80` with
+`D3DCMP_GREATER`.** That is FFXI's 0x80 convention again, this time as a
+render state rather than a decode rule. Its commented-out texture path also
+shows the intended stage setup: `MODULATE2X` for colour and **`MODULATE4X`
+for alpha** — effective alpha is vertex alpha times texture alpha, scaled back
+up — with `SRCALPHA/INVSRCALPHA` blending for DXT1 sheets.
+
+**It does not resolve the contradiction, and here is why it cannot.** Under any
+of those rules a texel at nibble 0 fails the test, and multiplying by vertex
+alpha cannot rescue a zero. `ron_kab0` is 94.4% nibble 0 and **56 drawn
+meshes name it explicitly** — that was checked directly, because the obvious
+suspicion was that they were untextured meshes inheriting the zone fallback
+sheet. They are not: West Ronfaure has 17 blank-name meshes in total and they
+all resolve to `ron_wf`, not `ron_kab0`. So the file really does put a
+94%-clear sheet on 56 drawn meshes, and a viewer that alpha-tested them at 0x80
+would put 56 holes in West Ronfaure.
+
+The conclusion that survives: **FFXI must be deciding per mesh, and `blending`
+is the only per-mesh field there is.** Today's rule already alpha-tests every
+flagged mesh, so mode 1's new holes came specifically from the *unflagged*
+`ron_kab0` meshes. Whatever the flag means, "alpha test when set" is closer
+to right than anything measured since.
+
+#### The pick framing was broken, and fixing it identified the geometry
+
+**`?pick=` framed prefab-space bounds.** That is correct for the weather and
+effect prefabs it was written for — they are unreferenced and draw at identity —
+and wrong for everything else. A referenced prefab is drawn once per MZB
+instance through `inst.transform`, so the camera was aimed at wherever the
+untransformed copy would sit, usually empty space. `?pick=ron_kab0` reported
+sensible bounds and rendered a blank viewport while 93 placements were on screen
+somewhere else entirely.
+
+Fixed: bounds now come from the eight corners of each picked prefab through each
+of its instance matrices, falling back to identity for unreferenced picks. The
+log says which case it took — `93 instance placements, 0 drawn at identity`.
+**Any earlier conclusion drawn from `?pick=` on referenced geometry is
+suspect**, including the weather work if it ever picked a placed prefab.
+
+#### What the sheets actually are, and a threshold that looked right for an hour
+
+With framing fixed, two identifications:
+
+- **`ron_wf` is the entire West Ronfaure floor** — 81 prefabs, **1098
+  placements**, the whole landmass with its paths and river. It is 27.4% clear
+  and classifies `cutout`. It is also the sheet every blank-name mesh in the
+  zone falls back to. **This is the sheet that mode 1 shot full of holes**, not
+  `ron_kab0`.
+- **`ron_kab0` is a stone wall** along the ridge — 56 prefabs, 93 placements,
+  94.4% clear.
+
+**A 50% threshold was tried on the strength of that, and it is wrong.** From
+directly overhead the wall reads as a line of posts with gaps between them, and
+the split looked clean: holes-in-the-middle objects above 50%, terrain below
+40%. Alpha-testing at 0.5 keeps the terrain intact (3.02% of pixels changed, no
+speckling) — and punches **rectangular holes clean through the wall**, which the
+baseline draws as solid stone. The overhead ticks are buttresses, not gaps.
+
+So a sheet that is **94% clear and drawn as solid stone** sits in the same band
+as gates and foliage. That is the seventh failure of clear share, and the first
+with the geometry identified by eye rather than inferred. §5a's `ron_kab0`
+observation was right in substance — a 94%-clear sheet on solid surfaces — and
+only wrong in calling it ground.
+
+**The threshold is back at 0.05**, where the census in this file was taken. It
+labels a diagnostic and must not pick materials.
+
+#### What the 98%-clear sheets actually are — and why the class is dead
+
+With `?pickinst=N` added (frame a single placement; the whole set renders as
+specks when a sheet has 81 of them), the two extreme cutout candidates were
+isolated:
+
+- **`gateston` (98.2% clear, South Gustaberg) is a stone archway** with hanging
+  banners — the Bastok-side gate. It draws as **solid stone**, correctly, and it
+  carries **two black rectangles floating above the pillars**. That is §4b's
+  black-box artifact, isolated and photographed for the first time.
+- **`guard_b` (98.8% clear, West Ronfaure) is a wooden watchtower** — a tapered
+  frame with cross-bracing. Its open panels **already render see-through and
+  correct** under today's rule.
+
+So in the 94-99% band sit three objects needing three different treatments: a
+wall that must stay solid (`ron_kab0`), an arch that must stay solid but has
+invisible quads that must go (`gateston`), and a tower that must be open
+(`guard_b`). **The cutout class is not empty — membership in it simply does
+not determine treatment.** That is the end of the texture-wide idea, and it is
+now shown with pictures rather than percentages.
+
+#### Per-mesh alpha: two estimators, and a discrepancy left open
+
+`?matprofile=4` asks what each mesh samples through its **UV bounding rect**,
+and `?matprofile=5` asks the same at **triangle centroids** (`?meshclear=` sets
+the threshold, default 0.95; `?vflip=1` flips the sampler's v axis). The
+motivation is sound — an atlas carries the arch and its black boxes in one
+sheet, so only a per-mesh question can separate them.
+
+Result: **both delete the black boxes, and both pinhole the arch.** West
+Ronfaure at mode 5, centroids, 0.95: 3.02% of pixels changed and dark pixels
+rise 0.78% to 1.62%.
+
+**The discrepancy is resolved, and the sampler was right.**
+`scripts/uv-alpha-dump.cjs` dumps a mesh triangle by triangle with the RGBA it
+reads. Prefab #116, the arch body, 356 triangles, blend 0x0000:
+
+> **alpha 0 at 100% of centroids, and 100% of those texels carry a non-black
+> colour** — rgba(156,150,140,0), rgba(161,153,148,0), stone grey throughout.
+
+There was never a disagreement between sampler and GPU. The sheet keeps its art
+in **RGB** and something else in **alpha**, and the arch draws as solid stone
+because the default material never consults alpha at all. This is §5a's thesis
+shown directly on identified geometry, which it never was before.
+
+It also explains the speckling. An alpha test compares the GPU's *filtered*
+sample: mipmapping averages in the ~1.8% of texels that are not zero, so most
+pixels survive the test and only the deepest-zero patches are cut. A point
+sample sees one texel; the GPU sees a neighbourhood. **Every clear-share
+measure in this file — mine and §5a's — has been measuring a channel the
+renderer does not read.**
+
+#### Mode 6: safe, and not yet sufficient
+
+If the black boxes are meshes sitting in genuinely dead sheet space, the measure
+that separates them from art is not *how clear* the footprint is but whether it
+holds **any live texel at all**. `?matprofile=6` alpha-tests a mesh only when the
+maximum alpha over its UV rect is zero.
+
+| | result |
+|---|---|
+| West Ronfaure, whole view | **0.000** mean difference, 12 meshes tested — art untouched, by construction |
+| Gustaberg arch, isolated | **no speckling** — the arch is clean where modes 4 and 5 pinholed it |
+| The two black boxes | **still there** |
+
+So mode 6 is the first rule that cannot damage anything, and it does not yet fix
+the thing it was built for: the black-box meshes have a live texel somewhere in
+their UV *bounding rect*, which is far coarser than their triangles.
+
+**Next step, and it is one flag away.** `uv-alpha-dump.cjs` picks the largest
+drawn prefab; teach it to take a prefab index and dump **#128** — 8 triangles,
+blend 0x8000, uv[0.00,0.50]x[0.50,1.00], the shape and size of a black box. Two
+outcomes, both decisive: if it samples alpha 0 over *black* RGB then the boxes
+are dead quads and a per-triangle max fixes them; if it samples real colour then
+they are art being drawn where FFXI hides it some other way, and no alpha rule
+will ever remove them.
+
+**Note the profiling cost.** Scanning every texel of every prefab rect stalled
+the zone build long enough that the harness captured an unrendered frame — 99.8%
+black, a measurement of nothing. The scan is now subsampled on a 128 grid. If a
+per-triangle version follows, watch this again.
+#### Hunting the black boxes: three causes ruled out on the exact geometry
+
+The dump was pointed at the suspects. All nine `gateston` prefabs in South
+Gustaberg, sampled at their triangle centroids:
+
+| | tris | blend | mean RGB | vertex colour | vertex alpha |
+|---|---|---|---|---|---|
+| #27 | 44 | 0x0000 | 98 | 0.502 | 0.502 |
+| #95 | 32 | 0x0000 | 124 | 0.502 | 0.502 |
+| #97 | 32 | 0x0000 | 126 | 0.502 | 0.502 |
+| #99 | 64 | 0x0000 | 126 | 0.502 | 0.502 |
+| #112 | 40 | 0x0000 | 109 | 0.502 | 0.502 |
+| #116 | 356 | 0x0000 | 138 | 0.394 | 0.998 |
+| #128 | 8 | 0x8000 | 142 | 0.451 | 0.480 |
+| #156 | 78 | 0x0000 | **58** | 0.502 | 1.000 |
+| #278 | 64 | 0x0000 | 143 | 0.716 | 0.502 |
+
+**Not the alpha.** Every prefab reads mean alpha 0. The channel says the same
+thing about the arch, the banners and the boxes alike.
+
+**Not the vertex colour.** The obvious second suspect — this project has seen
+0.07 vertex colours on the pond bed — is flat 0.4-0.7 across all nine. Nothing
+is being multiplied to black.
+
+**Not the blend flag.** Eight of nine are 0x0000; the one 0x8000 (#128) samples
+the brightest stone of the set.
+
+**And not #156, the one that looked guilty.** At mean RGB 58 it is half as
+bright as anything else, so it was isolated with the new `?pickprefab=` switch:
+it is a small dark brazier or post, not a rectangle. **The black-box prefab is
+still unidentified among the nine** — but it is now a bounded question, with
+`?pickprefab=N` and `?pickinst=N` to walk them one at a time, and three
+mechanisms already eliminated on the exact geometry rather than in the abstract.
+
+Whatever hides those quads in the real game, it is not in the texture alpha, not
+in the vertex colour and not in the blend flag — which is every per-mesh channel
+this parser currently reads.
+
+#### Where that leaves it
+
+The profile is right, the renderer's use of it is not, and the two halves fail
+for unrelated reasons. Options, none of them started:
+
+1. **Accept it as data, not as a material selector.** Alpha-testing at 0.1 is
+   "ignore the channel", which is what terrain needs; the profile stays a
+   diagnostic. After five experiments this is the honest reading, and it costs
+   nothing — the classification is already built and useful for hunting.
+2. **Find a per-mesh signal.** Every attempt so far has measured the *texture*.
+   `lat_wf` (§4b, pale slabs) is 49.6% clear across 220 meshes in Lufaise, so
+   that sheet is shared between the waterfall and things that are not it — the
+   discriminator, if one exists, is on the mesh or its geometry, not the sheet.
+3. **Chase water through placement, not materials.** The translucent class is
+   correct and its geometry is unplaced — 2 drawn sheets in six zones. Every
+   material scheme downstream of it is blocked on §0b, not on the alpha. If
+   the water and spray of §4a are ever to look right, the missing half is
+   *where FFXI puts this geometry*, and no amount of material work substitutes
+   for it.
+
+`?matprofile=1|2|3` stays in the tree so none of the three is retried blind.
 
 ### Finished 2026-08-17, do not redo
 
@@ -122,7 +434,11 @@ All are query params on the built app; `scripts/smoke.cjs` passes them through
 
 | Switch | What it gives |
 |---|---|
-| `?census=1` | `[CENSUS]`, `[BLENDHIST]`, `[ALPHAHIST]`, `[CUTOUT]`, `[UVALPHA]`, `[UVSTRADDLE]`, and exposes **`window.__zoneData`** — the whole parsed zone, for any harness |
+| `?census=1` | `[CENSUS]`, `[BLENDHIST]`, `[ALPHAHIST]`, `[ALPHAPROFILE]`, `[CUTOUT]`, `[UVALPHA]`, `[UVSTRADDLE]`, and exposes **`window.__zoneData`** — the whole parsed zone, for any harness |
+| `?matprofile=1..6` | Pick materials from alpha: `1` full, `2` translucent only, `3` conjunction with the blend flag, `4` per-mesh over the UV rect, `5` per-mesh at triangle centroids, `6` per-mesh footprint maximum. **1-5 measured and rejected; 6 is safe but does not yet fix the black boxes** — see §0 |
+| `?meshclear=<0..1>` `?vflip=1` | Mode 5 threshold, and a v-axis flip for its sampler |
+| `?pickinst=N` | With `?pick=`, frame a single placement instead of all of them. Wraps, so a harness can walk them |
+| `?pickprefab=N[,N]` | Isolate prefabs by **index** rather than texture name — the handle you want once a dump has narrowed nine prefabs on one sheet to one suspect. Takes precedence over `?pick=` |
 | `?pick=<substr>` `?pickaxis=` | Draw only matching prefabs, framed. How the weather geometry was identified |
 | `?valpha=off\|direct\|double` | Override the terrain-overlay alpha reading |
 | `?uvfix=1` | Tested and rejected for 4c; kept so it is not retried |
@@ -617,6 +933,9 @@ All launch the built app headless via Electron and capture PNGs.
 | `expansion-check.cjs` | Read the expansion tag the sidebar renders for all 285 zones and cross-check it against the CSV's archive and the name rules |
 | `panel-inventory.cjs` | List every control the settings panel renders, with whether it has an info icon. `EXTRA_QUERY` reveals the conditional ones |
 | `version-test.cjs` | 15 cases for the update check's version comparison. Runs without Electron: `node scripts/version-test.cjs` |
+| `alpha-profile.cjs [zones] [waitMs]` | Census of `alphaProfile` per texture, with the DAT name, decode format, blend flags, and how many meshes *use* it against how many are actually *drawn*. That last column is the one that mattered. Reads `window.__zoneData`, so it measures what the renderer sees rather than a copy of it |
+| `uv-alpha-dump.cjs <zone> <texSubstring> [tris]` | Dumps every matching prefab with its blend flag and UV bounds, then one prefab triangle by triangle: UVs, and the **RGBA** each vertex and centroid reads. RGB sits next to alpha deliberately — stone-coloured RGB under alpha 0 is what proves the channel is a mask rather than opacity |
+| `img-diff.cjs a.png b.png [--full]` | Mean absolute difference and changed-pixel share over the viewport region, plus dark and blown counts. The comparison §2 describes, finally written down |
 | `palette-dump.cjs` | Walk a map DAT's blocks and dump its palette bytes. This is what showed byte 0 is alpha, not blue |
 | `make-icon.cjs` / `set-icon.cjs` | Build the multi-size .ico, and stamp it onto the packaged exe with rcedit |
 
@@ -1471,6 +1790,24 @@ empty frame, which is what sharing a scale with Misareaux Coast actually means.
 whether two captures stitch, and it needs the canvas size — which only exists
 inside the Canvas, hence the report upward rather than a sum in the panel.
 
+### A query param that defaulted to "prefab 0" and broke every default view
+
+Added 2026-08-18 with `?pickprefab=`, caught by the standing image diff before
+it went anywhere:
+
+```
+(params.get('pickprefab') ?? '').split(',').map(Number).filter(n => n >= 0)
+```
+
+With the parameter absent this is not empty. `''.split(',')` is `['']`, and
+`Number('')` is **0** — a finite number, >= 0, so the filter keeps it. Every
+zone then drew prefab 0 and nothing else: West Ronfaure rendered as a single
+cloud plate seen from above, 95% of pixels changed.
+
+**Filter empty tokens before `Number()`, not after.** And the general point:
+this was caught only because the default render is diffed against a pre-change
+baseline after every change. A diagnostic switch is still shipped code.
+
 ### Smaller ones
 
 - `vColor` is declared `vec4` in this three.js version even without
@@ -1580,6 +1917,7 @@ line. Do not repeat them:
 | Gate on per-mesh zero-alpha share ≥0.3 | Holes through terrain |
 | Same at ≥0.02 | Holes through terrain |
 | Noesis blendhack guard (force opaque ≥0.9) | Cutout sprites became black boxes |
+| Alpha-test the measured `cutout` class (`?matprofile=1`, 2026-08-18) | Holes through terrain. `ron_kab0` is 94.4% clear and is ground; 9.02% of West Ronfaure changed |
 
 The measurement does not separate the cases: West Ronfaure's terrain `ron_w01c`
 measures 0.50 transparent, the same band as genuine cutouts (`lat_wf` 0.42–0.67).
