@@ -3497,13 +3497,42 @@ export default function ZoneViewer({
           if (sp.tint[3] === 0) startHidden++
           continue
         }
-        const translucent = sp.tint[3] < 128
         const matrix = spawnMatrix(sp)
         for (const prefabIdx of sp.prefabIndices) {
-          const geo = geoMap.get(prefabIdx)
+          const baseGeo = geoMap.get(prefabIdx)
           const prefab = zoneData.prefabs[prefabIdx]
           const tex = prefab ? zoneData.textures[prefab.materialIndex] : undefined
-          if (!geo || !tex) continue
+          if (!baseGeo || !prefab || !tex) continue
+
+          // FFXI multiplies three things in gamma space, each on its 0x80 =
+          // identity scale: texture × vertex colour × generator tint. The first
+          // pass dropped the vertex colour and applied the tint as a *linear*
+          // multiplier, which drew Gustaberg's sea mid-navy where the game is
+          // near-black charcoal — Ryan's in-game screenshot, 2026-09-27. The sea
+          // meshes carry vertex colour ~84 (0.66 of identity) and a 48 tint
+          // (0.375): about a quarter brightness in gamma terms.
+          //
+          // Multiplication survives gamma decoding — (ab)^γ = a^γ·b^γ — so each
+          // factor is decoded to linear on its own and three multiplies them.
+          // Vertex alpha is not gamma-encoded and is only rescaled. It matters:
+          // each sea chunk pairs its main sheet with a 0x8000 fringe mesh whose
+          // vertex alpha runs 0.35-0.59, which is how the sea edge fades out.
+          const vCount = prefab.vertices.length / 3
+          const colours = new Float32Array(vCount * 4)
+          let minAlpha = 1
+          for (let v = 0; v < vCount; v++) {
+            for (let ch = 0; ch < 3; ch++) {
+              const c = Math.min(1, (prefab.colors[v * 4 + ch] ?? 0.5) * 2)
+              colours[v * 4 + ch] = c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)
+            }
+            const a = Math.min(1, (prefab.colors[v * 4 + 3] ?? 0.5) * 2)
+            colours[v * 4 + 3] = a
+            if (a < minAlpha) minAlpha = a
+          }
+          const geo = baseGeo.clone()
+          geo.setAttribute('color', new THREE.Float32BufferAttribute(colours, 4))
+          geometries.push(geo)
+          const translucent = sp.tint[3] < 128 || minAlpha < 0.99
           const map = new THREE.DataTexture(new Uint8Array(tex.rgba), tex.width, tex.height, THREE.RGBAFormat)
           map.wrapS = THREE.RepeatWrapping
           map.wrapT = THREE.RepeatWrapping
@@ -3516,7 +3545,10 @@ export default function ZoneViewer({
           textures.push(map)
           const mat = new THREE.MeshBasicMaterial({
             map,
-            color: new THREE.Color(sp.tint[0] / 128, sp.tint[1] / 128, sp.tint[2] / 128),
+            // The tint is authored in gamma space like everything else FFXI does.
+            color: new THREE.Color().setRGB(
+              sp.tint[0] / 128, sp.tint[1] / 128, sp.tint[2] / 128, THREE.SRGBColorSpace),
+            vertexColors: true,
             transparent: translucent,
             opacity: Math.min(1, sp.tint[3] / 128),
             depthWrite: !translucent,
