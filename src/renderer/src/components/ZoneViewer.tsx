@@ -2397,6 +2397,9 @@ export default function ZoneViewer({
   const gameSunActive = !lit && lighting.gameSun
   const shaderVariant = gameSunActive ? 'lambert' : 'std'
 
+  // The panel toggle, or ?genspawn=1 for harnesses — the packaged app has no
+  // address bar, so a URL switch alone is invisible to anyone using it.
+  const genSpawn = GEN_SPAWN || scene.generatorWater
   const { instancedMeshes, waterMaterials, litMaterials, textures, weatherStates, spawnScrolls, disposeAll } = useMemo(() => {
     const geometries: THREE.BufferGeometry[] = []
     const materials: THREE.Material[] = []
@@ -3443,7 +3446,7 @@ export default function ZoneViewer({
     {
       const referenced = new Set(zoneData.instances.map(i => i.meshIndex))
       const spawnTargets = new Set<number>()
-      if (GEN_SPAWN) {
+      if (genSpawn) {
         for (const sp of zoneData.spawns ?? []) {
           if (drawsInWorld(sp)) for (const i of sp.prefabIndices) spawnTargets.add(i)
         }
@@ -3486,7 +3489,7 @@ export default function ZoneViewer({
     // A shader that fails to compile drops its draws silently, which is how the
     // water shader hid for days. The cost is no fog on these meshes for now.
     const spawnScrolls: { tex: THREE.Texture; uv: [number, number] }[] = []
-    if (GEN_SPAWN) {
+    if (genSpawn) {
       let built = 0
       let startHidden = 0
       for (const sp of zoneData.spawns ?? []) {
@@ -3564,7 +3567,7 @@ export default function ZoneViewer({
     }
     // Rebuild materials when PCSS is toggled so they compile against the
     // shadow chunk that is actually installed.
-  }, [zoneData, lit, scene.wireframe, shaderVariant, scene.overlayBlend])
+  }, [zoneData, lit, scene.wireframe, shaderVariant, scene.overlayBlend, genSpawn])
 
   /**
    * Anisotropy, applied to the zone's textures in place.

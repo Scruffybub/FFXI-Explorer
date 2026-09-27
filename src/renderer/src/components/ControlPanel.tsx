@@ -942,6 +942,12 @@ export default function ControlPanel({
           info="FFXI lays an overlay layer over base ground and fades it in with a per-vertex weight. Dropping that weight draws every overlay at full strength, which is what the pale mismatched squares in the Gustabergs are. Off for now: the fix is real but incomplete, and some squares survive it."
         />
         <Toggle
+          label="Generator water (beta)"
+          checked={scene.generatorWater}
+          onChange={v => onScene({ generatorWater: v })}
+          info="Draw the seas and rivers FFXI places with its effect generators, tinted and slowly scrolling as in game. The water was always in the zone files; nothing was reading what positions it. Beta: South Gustaberg's sea is the known-good case. Some zones may show stray shapes, and some water layers that fade in over time are not drawn yet."
+        />
+        <Toggle
           label="Wireframe" checked={scene.wireframe}
           onChange={v => onScene({ wireframe: v })}
           info="Draw every zone mesh as edges only. Useful for seeing how the terrain is actually built, and how much of a zone is instanced repeats."

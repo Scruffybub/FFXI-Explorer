@@ -268,6 +268,14 @@ export interface SceneSettings {
   overlayBlend: boolean
 
   /**
+   * Draw the water FFXI places with generator chunks — seas and river sheets,
+   * tinted and scrolling. The meshes were always in the zone files; nothing
+   * read the generators that position and scale them. Beta: off by default
+   * until it has been checked against the game. Same as `?genspawn=1`.
+   */
+  generatorWater: boolean
+
+  /**
    * Anisotropic filtering, as a sample count: 1 is off, up to 16.
    *
    * Mipmapping picks one level for the whole fragment, so ground seen at a
@@ -423,6 +431,7 @@ export const DEFAULT_SCENE: SceneSettings = {
   weatherState: '',
   weatherFollowsCamera: true,
   overlayBlend: false,
+  generatorWater: false,
   anisotropy: 16,
   mapView: false,
   mapZoom: 1,
