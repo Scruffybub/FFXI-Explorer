@@ -29,7 +29,7 @@
  *                    translucent, the same 0x80 convention as everything else
  *   section 3  0x27  U scroll per frame      0x28  V scroll per frame
  *
- * Frames are retail effect frames, 30 per second.
+ * Frames are FFXI effect frames, 60 per second (xim Fps.internalFps).
  */
 
 export interface RawModelSpawn {
@@ -40,7 +40,31 @@ export interface RawModelSpawn {
   tint: [number, number, number, number]
   uvScroll: [number, number]
   followCamera: boolean
+  /** Frames a particle lives; 0 means forever (the sea is one of these). */
+  life: number
+  /**
+   * KeyFrame chunk names this generator samples over each particle's life, by
+   * the channel they drive. See KEYFRAME_CHANNELS.
+   */
+  tracks: Partial<Record<KeyFrameChannel, string>>
 }
+
+/**
+ * Section-2 opcodes 0x21-0x2F bind a KeyFrame chunk (4-char id at payload+4) to
+ * a particle channel; the matching section-3 updater, 0x12 lower (0x0F-0x1D),
+ * samples it by life progress each frame. Table from xim's
+ * ParticleGeneratorParser.kt (github.com/Heyrio/FFXI-BROWSER-GAME, GPL-3.0; read
+ * as a format reference only). Gustaberg's rolling surf is 0x2E, texture U:
+ * the foam texture slides across each surf strip and back on a bell curve.
+ */
+export const KEYFRAME_CHANNELS = {
+  0x21: 'posX', 0x22: 'posY', 0x23: 'posZ',
+  0x24: 'rotX', 0x25: 'rotY', 0x26: 'rotZ',
+  0x27: 'scaleX', 0x28: 'scaleY', 0x29: 'scaleZ',
+  0x2a: 'r', 0x2b: 'g', 0x2c: 'b', 0x2d: 'alpha',
+  0x2e: 'u', 0x2f: 'v',
+} as const
+export type KeyFrameChannel = (typeof KEYFRAME_CHANNELS)[keyof typeof KEYFRAME_CHANNELS]
 
 const HEADER_LEN = 0x80
 const OP_END = 0x00
@@ -82,6 +106,8 @@ export function parseModelSpawn(body: Uint8Array): RawModelSpawn | null {
   let rotation: [number, number, number] = [0, 0, 0]
   let scale: [number, number, number] = [1, 1, 1]
   let tint: [number, number, number, number] = [0x80, 0x80, 0x80, 0x80]
+  let life = 0
+  const tracks: Partial<Record<KeyFrameChannel, string>> = {}
 
   for (const { op, p } of records(view, body, 0x74)) {
     if (op === 0x01 && p + 30 <= body.length) {
@@ -91,12 +117,19 @@ export function parseModelSpawn(body: Uint8Array): RawModelSpawn | null {
       model = String.fromCharCode(...body.subarray(p + 8, end)).trim()
       position = f3(p + 16)
       linked = body[p + 29]
+      // u16 max life in frames at +30 (0 = forever), u16 variance at +32.
+      if (p + 32 <= body.length) life = view.getUint16(p + 30, true)
     } else if (op === 0x09 && p + 12 <= body.length) {
       rotation = f3(p)
     } else if (op === 0x0f && p + 12 <= body.length) {
       scale = f3(p)
     } else if (op === 0x16 && p + 4 <= body.length) {
       tint = [body[p], body[p + 1], body[p + 2], body[p + 3]]
+    } else if (op in KEYFRAME_CHANNELS && p + 8 <= body.length) {
+      let end = p + 4
+      while (end < p + 8 && body[end] !== 0) end++
+      const id = String.fromCharCode(...body.subarray(p + 4, end)).trim()
+      if (id) tracks[KEYFRAME_CHANNELS[op as keyof typeof KEYFRAME_CHANNELS]] = id
     }
   }
   if (linked !== LINKED_MODEL || !model) return null
@@ -108,7 +141,40 @@ export function parseModelSpawn(body: Uint8Array): RawModelSpawn | null {
   }
 
   return {
-    model, position, rotation, scale, tint, uvScroll,
+    model, position, rotation, scale, tint, uvScroll, life, tracks,
     followCamera: (flags & FLAG_FOLLOW_CAMERA) !== 0,
   }
+}
+
+/**
+ * A KeyFrame chunk (DAT block type 0x19): (time, value) pairs of f32, time
+ * running 0 to 1 across a particle's life, ending at time 1; anything after is
+ * padding. Gustaberg's surf curve `ngpu` rises 0 -> 0.36 at t = 0.5 and back.
+ * Returned flat as [t0, v0, t1, v1, ...].
+ */
+export function parseKeyFrames(body: Uint8Array): number[] | null {
+  const view = new DataView(body.buffer, body.byteOffset, body.byteLength)
+  const out: number[] = []
+  let last = -1
+  for (let o = 0; o + 8 <= body.length; o += 8) {
+    const t = view.getFloat32(o, true)
+    const v = view.getFloat32(o + 4, true)
+    if (!(t >= last) || t > 1.0001) break   // times rise monotonically to 1
+    out.push(t, v)
+    last = t
+    if (t >= 0.9999) break
+  }
+  return out.length >= 4 ? out : null
+}
+
+/** Linear interpolation into a curve from parseKeyFrames. */
+export function sampleKeyFrames(curve: number[], t: number): number {
+  if (t <= curve[0]) return curve[1]
+  for (let i = 2; i < curve.length; i += 2) {
+    if (t <= curve[i]) {
+      const t0 = curve[i - 2], v0 = curve[i - 1], t1 = curve[i], v1 = curve[i + 1]
+      return t1 > t0 ? v0 + ((t - t0) / (t1 - t0)) * (v1 - v0) : v1
+    }
+  }
+  return curve[curve.length - 1]
 }

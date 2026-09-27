@@ -7,6 +7,7 @@ import {
 } from '@react-three/postprocessing'
 import * as THREE from 'three'
 import type { ParsedZone, ParsedDatFile } from '../lib/ffxi-dat'
+import { sampleKeyFrames } from '../lib/ffxi-dat/GeneratorParser'
 import { buildModel, type BuiltModel } from '../lib/modelBuild'
 import { invertRigidMatrix4, poseSkeleton, skinMeshes } from '../lib/skinning'
 import { CollisionWorld } from '../lib/CollisionWorld'
@@ -396,13 +397,54 @@ const GEN_SPAWN =
  *    relative to the sky, not the world — drawn at their raw position the
  *    sun sheet stood 80 units tall in the middle of Lufaise
  *  - anything flagged to follow the camera, for the same reason
- *  - alpha 0 tints, which start invisible and are faded in by a keyframe
- *    track this parser does not read yet
+ *  - alpha 0 tints with no alpha curve: nothing would ever make them visible.
+ *    With a curve they are drawn and faded in by it — four of Gustaberg's
+ *    whitecap patches start at 0 and breathe in and out on `naa1`-style bells
  */
-function drawsInWorld(sp: { dir: string; followCamera: boolean; tint: number[] }): boolean {
+function drawsInWorld(sp: {
+  dir: string; followCamera: boolean; tint: number[]; curves?: { alpha?: number[] }
+}): boolean {
   if (/(^|\/)weat(\/|$)/.test(sp.dir)) return false
   if (sp.followCamera) return false
-  return sp.tint[3] > 0
+  return sp.tint[3] > 0 || !!sp.curves?.alpha
+}
+
+/**
+ * FFXI's two texture stages for generator-drawn meshes, as a material patch.
+ *
+ *   stage 0  texture x vertex colour, MODULATE2X — the doubling is already in
+ *            the vertex colour, which arrives on the 0x80 = identity scale
+ *   stage 1  x tint: MODULATE2X on colour, MODULATE4X on alpha
+ *
+ * With the tint also on the 0x80 scale, alpha carries one more doubling than
+ * colour. D3D saturates each stage, so the clamp sits between them — clamping
+ * only at the end, or before the texel multiply, gives different answers.
+ * From kuluu-ffxi particle_sim.rs (CMoD3m.cpp ZeroOneTSS; the MMB branch of
+ * ZoneRenderer::DoD3mDraw uses the same stage ops). The first pass missed the
+ * alpha doubling, which left the sea foam at 3-6% opacity where the table puts
+ * it at 6-9%.
+ *
+ * The material itself is white and fully opaque; the tint arrives as a uniform
+ * so the stage-0 clamp can happen before it is applied.
+ */
+function applySpawnStages(mat: THREE.MeshBasicMaterial, tint: number[]): THREE.Vector4 {
+  const decode = (c: number) => (c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4))
+  // Colour is gamma-authored; alpha is a weight and is not.
+  const uTint = new THREE.Vector4(
+    decode(tint[0] / 128), decode(tint[1] / 128), decode(tint[2] / 128), tint[3] / 128)
+  mat.onBeforeCompile = shader => {
+    shader.uniforms.uSpawnTint = { value: uTint }
+    shader.fragmentShader = shader.fragmentShader
+      .replace('void main() {', 'uniform vec4 uSpawnTint;\nvoid main() {')
+      .replace('#include <color_fragment>', [
+        '#include <color_fragment>',
+        'vec4 spawnStage0 = clamp(diffuseColor, 0.0, 1.0);',
+        'diffuseColor = clamp(vec4(spawnStage0.rgb * uSpawnTint.rgb,',
+        '  spawnStage0.a * uSpawnTint.a * 2.0), 0.0, 1.0);',
+      ].join('\n'))
+  }
+  mat.customProgramCacheKey = () => 'genspawn-stages'
+  return uTint
 }
 
 /**
@@ -756,14 +798,47 @@ function createWaterMaterial(texture: THREE.DataTexture | null): THREE.ShaderMat
   })
 }
 
+/** FFXI's internal effect clock: frames per second of generator time. */
+const EFFECT_FPS = 60
+
+/** One generator-placed mesh the animator drives each frame. */
+interface SpawnAnim {
+  tex: THREE.Texture
+  uv: [number, number]                   // steady scroll per frame
+  tint: THREE.Vector4                    // the stage uniform; w is tint alpha on /128
+  life: number                           // frames per particle; 0 = forever
+  curves: { alpha?: number[]; u?: number[]; v?: number[] }
+}
+
 /**
- * Advances generator UV scrolls. The authored values are a texture offset per
- * retail effect frame, and FFXI runs effects at 30 frames a second.
+ * Animates generator-placed meshes in FFXI effect frames — 60 a second.
+ *
+ * 60, not 30: FFXI counts effect time in 1/60 s (xim Fps.internalFps = 60.0).
+ * The first build used kuluu's RETAIL_FPS of 30 and Ryan saw the surf roll at
+ * half the game's speed, 2026-09-27. Scroll, life and curves all run on this
+ * clock, so the sea scroll and the whitecap fades were half-speed too.
+ *
+ * Steady UV scroll accumulates forever. KeyFrame curves are sampled by the
+ * particle's life progress; when a particle expires the generator re-emits it
+ * (Gustaberg's surf: life 1000, re-emitted every 998 frames), so progress is
+ * simply the frame count modulo the life. The U/V curves add to the texture
+ * offset — that slide is the rolling surf. The alpha curve is the tint alpha
+ * on the byte/255 scale, converted to the /128 scale the stage patch uses.
  */
-function SpawnScroller({ scrolls }: { scrolls: { tex: THREE.Texture; uv: [number, number] }[] }) {
+function SpawnAnimator({ anims }: { anims: SpawnAnim[] }) {
   useFrame(({ clock }) => {
-    const frames = clock.getElapsedTime() * 30
-    for (const { tex, uv } of scrolls) tex.offset.set((uv[0] * frames) % 1, (uv[1] * frames) % 1)
+    const frames = clock.getElapsedTime() * EFFECT_FPS
+    for (const a of anims) {
+      let ox = a.uv[0] * frames
+      let oy = a.uv[1] * frames
+      if (a.life > 0) {
+        const progress = (frames % a.life) / a.life
+        if (a.curves.u) ox += sampleKeyFrames(a.curves.u, progress)
+        if (a.curves.v) oy += sampleKeyFrames(a.curves.v, progress)
+        if (a.curves.alpha) a.tint.w = (sampleKeyFrames(a.curves.alpha, progress) * 255) / 128
+      }
+      a.tex.offset.set(ox % 1, oy % 1)
+    }
   })
   return null
 }
@@ -2400,7 +2475,7 @@ export default function ZoneViewer({
   // The panel toggle, or ?genspawn=1 for harnesses — the packaged app has no
   // address bar, so a URL switch alone is invisible to anyone using it.
   const genSpawn = GEN_SPAWN || scene.generatorWater
-  const { instancedMeshes, waterMaterials, litMaterials, textures, weatherStates, spawnScrolls, disposeAll } = useMemo(() => {
+  const { instancedMeshes, waterMaterials, litMaterials, textures, weatherStates, spawnAnims, disposeAll } = useMemo(() => {
     const geometries: THREE.BufferGeometry[] = []
     const materials: THREE.Material[] = []
     const waterMaterials: THREE.ShaderMaterial[] = []
@@ -2451,6 +2526,9 @@ export default function ZoneViewer({
     // Most-used texture in the zone, used when a prefab's own one is missing.
     const usage = new Map<number, number>()
     for (const p of zoneData.prefabs) {
+      // D3M effect meshes are not zone geometry; counting them could move the
+      // fallback sheet in an effects-heavy zone and change the default view.
+      if (p.d3m) continue
       if (zoneData.textures[p.materialIndex]) {
         usage.set(p.materialIndex, (usage.get(p.materialIndex) ?? 0) + 1)
       }
@@ -3456,6 +3534,7 @@ export default function ZoneViewer({
         if (SKIP_UNREFERENCED) continue
         if (referenced.has(prefabIdx)) continue
         if (spawnTargets.has(prefabIdx)) continue
+        if (zoneData.prefabs[prefabIdx]?.d3m) continue
         const mat = matMap.get(prefabIdx)
         if (!mat) continue
         const mesh = new THREE.InstancedMesh(geo, mat, 1)
@@ -3488,7 +3567,7 @@ export default function ZoneViewer({
     // colours, and these sheets carry near-black ones that the tint replaces.
     // A shader that fails to compile drops its draws silently, which is how the
     // water shader hid for days. The cost is no fog on these meshes for now.
-    const spawnScrolls: { tex: THREE.Texture; uv: [number, number] }[] = []
+    const spawnAnims: SpawnAnim[] = []
     if (genSpawn) {
       let built = 0
       let startHidden = 0
@@ -3522,7 +3601,9 @@ export default function ZoneViewer({
           let minAlpha = 1
           for (let v = 0; v < vCount; v++) {
             for (let ch = 0; ch < 3; ch++) {
-              const c = Math.min(1, (prefab.colors[v * 4 + ch] ?? 0.5) * 2)
+              // No clamp here: FFXI saturates after multiplying by the texel, so a
+              // vertex colour above identity still brightens (kuluu ffxi_particle.wgsl).
+              const c = (prefab.colors[v * 4 + ch] ?? 0.5) * 2
               colours[v * 4 + ch] = c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)
             }
             const a = Math.min(1, (prefab.colors[v * 4 + 3] ?? 0.5) * 2)
@@ -3532,7 +3613,8 @@ export default function ZoneViewer({
           const geo = baseGeo.clone()
           geo.setAttribute('color', new THREE.Float32BufferAttribute(colours, 4))
           geometries.push(geo)
-          const translucent = sp.tint[3] < 128 || minAlpha < 0.99
+          // Effective alpha before the texel: tint x2 (MODULATE4X) x vertex alpha.
+          const translucent = (sp.tint[3] / 128) * 2 * minAlpha < 0.99
           const map = new THREE.DataTexture(new Uint8Array(tex.rgba), tex.width, tex.height, THREE.RGBAFormat)
           map.wrapS = THREE.RepeatWrapping
           map.wrapT = THREE.RepeatWrapping
@@ -3545,32 +3627,36 @@ export default function ZoneViewer({
           textures.push(map)
           const mat = new THREE.MeshBasicMaterial({
             map,
-            // The tint is authored in gamma space like everything else FFXI does.
-            color: new THREE.Color().setRGB(
-              sp.tint[0] / 128, sp.tint[1] / 128, sp.tint[2] / 128, THREE.SRGBColorSpace),
             vertexColors: true,
-            transparent: translucent,
-            opacity: Math.min(1, sp.tint[3] / 128),
-            depthWrite: !translucent,
+            // Blend byte 0x44 is an alpha blend: every layer is sorted and none
+            // writes depth, as in game. The tint is applied by the stage patch.
+            transparent: true,
+            depthWrite: false,
             side: THREE.DoubleSide,
           })
+          const tintUniform = applySpawnStages(mat, sp.tint)
           materials.push(mat)
           const mesh = new THREE.InstancedMesh(geo, mat, 1)
           mesh.userData.textureName = prefab.textureName ?? ''
           mesh.userData.generator = sp.generator
           mesh.frustumCulled = false
-          mesh.renderOrder = translucent ? 2 : 1
+          mesh.renderOrder = prefab.d3m ? 3 : translucent ? 2 : 1 // all blended; this orders them
           mesh.setMatrixAt(0, matrix)
           mesh.instanceMatrix.needsUpdate = true
           instancedMeshes.push(mesh)
-          if (sp.uvScroll[0] || sp.uvScroll[1]) spawnScrolls.push({ tex: map, uv: sp.uvScroll })
+          const animated = sp.life > 0 && !!(sp.curves.alpha || sp.curves.u || sp.curves.v)
+          if (sp.uvScroll[0] || sp.uvScroll[1] || animated) {
+            spawnAnims.push({ tex: map, uv: sp.uvScroll, tint: tintUniform, life: sp.life, curves: sp.curves })
+          }
           // One line per drawn mesh, so a harness can find the prefab index to
           // isolate with ?pickprefab= — the chunk name a generator uses is not
           // the texture name ?pick= matches (Gustaberg's umi1 sea is not an umi
           // texture).
           console.log(`[GENSPAWN] ${sp.generator} -> ${sp.model} prefab ${prefabIdx} tex "${(prefab.textureName ?? '').trim()}" ` +
             `pos(${sp.position.map(v => v.toFixed(1)).join(',')}) scale(${sp.scale.map(v => v.toFixed(1)).join(',')}) ` +
-            `tint(${sp.tint.join(',')}) uv(${sp.uvScroll.map(v => v.toFixed(4)).join(',')})`)
+            `tint(${sp.tint.join(',')}) uv(${sp.uvScroll.map(v => v.toFixed(4)).join(',')})` +
+            (sp.life ? ` life ${sp.life}` : '') +
+            (Object.keys(sp.curves).length ? ` curves[${Object.keys(sp.curves).join(',')}]` : ''))
           built++
         }
       }
@@ -3593,7 +3679,7 @@ export default function ZoneViewer({
     }
 
     return {
-      instancedMeshes, waterMaterials, litMaterials, textures, spawnScrolls,
+      instancedMeshes, waterMaterials, litMaterials, textures, spawnAnims,
       weatherStates: [...weatherStates].sort(),
       totalInstances: zoneData.instances.length, disposeAll,
     }
@@ -3895,7 +3981,7 @@ export default function ZoneViewer({
       <CameraPersistence store={cameraPose} />
       <RendererSettings post={post} shadows={shadowsActive} />
       <SkyAnimator skyMaterial={skyMaterial} timeOfDayRef={timeOfDayRef} exposure={post.exposure} />
-      {spawnScrolls.length > 0 && <SpawnScroller scrolls={spawnScrolls} />}
+      {spawnAnims.length > 0 && <SpawnAnimator anims={spawnAnims} />}
       {waterMaterials.length > 0 && (
         <WaterAnimator materials={waterMaterials} vertexTint={scene.waterTint} />
       )}

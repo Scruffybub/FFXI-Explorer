@@ -93,6 +93,12 @@ export interface ParsedZoneMesh {
   materialIndex: number   // texture index (sequential IMG block order)
   blending: number        // MMB blending flag (0=opaque, >0=alpha blend)
   textureName?: string    // original texture name from MMB model header
+  /**
+   * An effect mesh from a D3M chunk rather than an MMB. It has no placement of
+   * its own — only generators place it — so the renderer must never draw it at
+   * the origin the way it draws other unplaced prefabs.
+   */
+  d3m?: boolean
 }
 
 export interface ZoneMeshInstance {
@@ -115,8 +121,15 @@ export interface GeneratorSpawn {
   rotation: [number, number, number]      // radians
   scale: [number, number, number]
   tint: [number, number, number, number]  // raw bytes, 0x80 = identity
-  uvScroll: [number, number]              // texture offset per 30 fps frame
+  uvScroll: [number, number]              // texture offset per effect frame (1/60 s)
   followCamera: boolean                   // sky layers ride with the camera
+  life: number                            // frames per particle; 0 = forever
+  /**
+   * Resolved KeyFrame curves, flat [t0, v0, t1, v1, ...], sampled by life
+   * progress. Only the channels the renderer uses are resolved. `alpha` is the
+   * tint alpha on the 0..1 = byte/255 scale; `u`/`v` add to the texture offset.
+   */
+  curves: { alpha?: number[]; u?: number[]; v?: number[] }
 }
 
 export interface ParsedZone {

@@ -1,6 +1,7 @@
 import { DatReader } from './DatReader'
 import { parseTextureBlock } from './TextureParser'
-import { parseModelSpawn } from './GeneratorParser'
+import { parseModelSpawn, parseKeyFrames } from './GeneratorParser'
+import { parseD3m } from './D3mParser'
 import { decodeMzb, decodeMmb } from './ZoneDecrypt'
 import { parseMzbBlock } from './MzbParser'
 import { parseMzbCollision, type ParsedCollision } from './CollisionParser'
@@ -26,6 +27,10 @@ const BLOCK_MZB = 0x1C
 const BLOCK_MMB = 0x2E
 /** Effect emitters. They place the water, sky layers and lamp glows. */
 const BLOCK_GENERATOR = 0x05
+/** Effect meshes, spawned by generators — the sea foam is one. */
+const BLOCK_D3M = 0x1F
+/** Animation curves generators sample over a particle's life. */
+const BLOCK_KEYFRAME = 0x19
 
 interface DatBlock {
   name: string
@@ -390,6 +395,51 @@ export function parseZoneFile(
     if (idx >= 0 && idx < textureNames.length) textureNames[idx] = name
   }
 
+  // ── Pass 3b: D3M effect meshes ──
+  // Generators spawn these as well as MMBs. They join the prefab list flagged
+  // `d3m`, so the resolver below finds them in scope like any other mesh, while
+  // the renderer skips them on its draw-unplaced-at-origin path. Appended after
+  // the MZB pass so no MZB index or fallback-texture choice can shift.
+  let d3mCount = 0
+  for (const block of blocks.filter(b => b.type === BLOCK_D3M)) {
+    const start = block.dataOffset + BLOCK_PADDING
+    const len = block.dataLength - BLOCK_PADDING
+    if (len <= 0) continue
+    const d = parseD3m(new Uint8Array(buffer, start, len))
+    if (!d) continue
+    const idx = prefabs.length
+    prefabs.push({
+      vertices: d.vertices, normals: d.normals, colors: d.colors, uvs: d.uvs,
+      indices: d.indices,
+      materialIndex: textureNameMap.get(d.textureName) ?? -1,
+      blending: 0,
+      textureName: d.textureName,
+      d3m: true,
+    })
+    prefabChunk[idx] = block.name.trim()
+    prefabDir[idx] = block.dir
+    prefabSource[idx] = block.name.trim()
+    d3mCount++
+  }
+
+  // KeyFrame curves, keyed by directory and chunk name, for scoped lookup.
+  const keyframes = new Map<string, number[]>()
+  for (const block of blocks.filter(b => b.type === BLOCK_KEYFRAME)) {
+    const start = block.dataOffset + BLOCK_PADDING
+    const len = block.dataLength - BLOCK_PADDING
+    if (len <= 0) continue
+    const curve = parseKeyFrames(new Uint8Array(buffer, start, len))
+    if (curve) keyframes.set(block.dir + '|' + block.name.trim(), curve)
+  }
+  const findCurve = (dir: string, id: string): number[] | undefined => {
+    const parts = dir ? dir.split('/') : []
+    for (let depth = parts.length; depth >= 0; depth--) {
+      const hit = keyframes.get(parts.slice(0, depth).join('/') + '|' + id)
+      if (hit) return hit
+    }
+    return undefined
+  }
+
   // ── Pass 4: generator model spawns ──
   // Water, sky layers and lamp glows are placed here, not in the MZB. Resolved
   // by the MMB chunk name, which matched every water spawn in the zones
@@ -415,10 +465,16 @@ export function parseZoneFile(
       }
     }
     if (prefabIndices.length === 0) { unresolvedSpawns++; continue }
-    spawns.push({ generator: block.name.trim(), dir: block.dir, prefabIndices, ...raw })
+    const curves: GeneratorSpawn['curves'] = {}
+    for (const ch of ['alpha', 'u', 'v'] as const) {
+      const id = raw.tracks[ch]
+      const curve = id ? findCurve(block.dir, id) : undefined
+      if (curve) curves[ch] = curve
+    }
+    spawns.push({ generator: block.name.trim(), dir: block.dir, prefabIndices, ...raw, curves })
   }
   if (spawns.length || unresolvedSpawns) {
-    console.log(`[GENSPAWN] ${spawns.length} model spawns resolved, ${unresolvedSpawns} unresolved`)
+    console.log(`[GENSPAWN] ${spawns.length} model spawns resolved, ${unresolvedSpawns} unresolved; ${d3mCount} D3M effect meshes loaded`)
   }
 
   return { prefabs, instances, textures, textureNames, collision, spawns }
