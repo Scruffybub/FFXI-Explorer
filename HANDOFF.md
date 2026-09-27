@@ -75,6 +75,85 @@ the path.
 scrolls. That is §0b's missing placement. Not built yet — these are positioned
 relative to the sky, not the world.
 
+#### Checked against the game by Ryan, 2026-09-27 — colour, then foam
+
+Ryan's in-game screenshot of the Gustaberg coast: **near-black charcoal water
+with faint whiter foam on top**. Stage 1 drew mid-navy with no foam. Three
+corrections followed; Ryan confirmed the colour as right after the first.
+
+**Colour.** FFXI multiplies texture × vertex colour × tint, each on the 0x80
+scale, in gamma space. Stage 1 dropped the vertex colour (~84 on the sea) and
+applied the tint as a linear multiplier. Each factor is now gamma-decoded
+separately (multiplication survives the decode). The fringe meshes paired with
+each sea sheet carry vertex alpha 0.35–0.59, which is how the sea edge fades.
+
+**Foam is D3M, a second mesh type.** 34 more generators — `effe/umaw` (21
+thin surf strips along the coast, tint 188 so they *brighten*) and `effe/uma2`
+(13 broad whitecap patches) — spawn the D3M (block `0x1F`) `umw1`, textured
+with the foam sheet `umw1` that no zone mesh uses. `D3mParser.ts` reads the
+format (independent implementation from kuluu-ffxi's description). D3M meshes
+join the prefab list flagged `d3m`: the scoped resolver finds them, the
+draw-unplaced-at-origin path skips them, and they are excluded from the
+fallback-texture usage count so no default view can shift. Verified 0.000 on
+South Gustaberg, Lufaise and West Ronfaure with the toggle off.
+
+**FFXI's texture-stage math, which applies to every generator-drawn mesh.**
+Stage 0 is texture × vertex colour (MODULATE2X — folded into the 0x80-scale
+vertex colour); stage 1 is × tint with **MODULATE2X on colour and MODULATE4X
+on alpha**, each stage saturating. So alpha carries one more doubling than
+colour. `applySpawnStages()` patches the material shader to do exactly this. From
+kuluu `particle_sim.rs` (CMoD3m ZeroOneTSS). All Gustaberg sea and foam
+generators carry blend byte `0x44` (opcode `0x1E`, BlendFuncInitializer:
+low nibble 8 additive, 1/2 subtract, 4/6 alpha blend, bit 0x10 opaque), so every
+generator mesh is now blended without depth writes, sorted — coplanar sea
+layers stack in order instead of z-fighting. Moved the approved sea colour by
+0.82/255.
+
+**The foam is faint by design.** The D3M carries vertex alpha 19/128 and the
+tints 28–65/128, so even with the MODULATE4X doubling it lands at 6–9% of the
+foam texture's own alpha. Isolated from above it draws a clear pattern — surf
+lines tracing the coast and soft whitecap patches offshore. Over the sea it is
+subtle; Ryan to judge up close. Four of the patches start at alpha 0 and are
+not drawn; whatever fades them in (keyframes) is unparsed, and the surf may be
+meant to animate the same way.
+#### Rolling surf: particle lifetimes and KeyFrame curves
+
+Ryan: "the game does have rolling surf." It animates, and the data says how.
+
+**Emission and life.** Generator body `0x64`: u16 emission variance, u16
+frames-per-emission (+1), u8 particles per emission, u8 flags (`0x10` auto-run,
+`0x04` continuous singleton). Setup record (section 2 opcode `0x01`) payload
+`+30`: u16 **max life in frames**, `+32` variance; **0 = forever** (xim: "singleton
+particles, like the sea"). Gustaberg: the sea, and 9 whitecaps, live forever; the
+21 surf strips live **1000 frames and re-emit every 998** — one wave per strip,
+looping every ~16.7 s at 60 fps; 4 whitecaps live 2300–10000 frames.
+
+**Sections, by body offset** — `0x70` section 1, `0x74` section 2 (initializers:
+setup, rotation, scale, tint, blend, KeyFrame bindings), `0x78` section 3
+(per-frame updaters: UV velocity `0x27/0x28`, curve samplers), `0x7C` section 4 (on
+death: `0x05` relife). Offsets in the header count the 16-byte chunk header.
+
+**KeyFrame bindings.** Section-2 opcodes `0x21–0x2F` bind a KeyFrame chunk (4-char
+id at payload+4) to a channel: position XYZ, rotation XYZ, scale XYZ, colour
+RGBA (`0x2D` = alpha), **`0x2E` = texture U**, `0x2F` = texture V. Each has a
+section-3 sampler `0x12` lower (`0x1B` alpha, `0x1C` U). kuluu stops at `0x2D`;
+the U/V entries are from xim — `ParticleGeneratorParser.kt` in
+[Heyrio/FFXI-BROWSER-GAME](https://github.com/Heyrio/FFXI-BROWSER-GAME), also
+GPL-3.0, read as a format reference only.
+
+**KeyFrame chunks** (block `0x19`): (time, value) f32 pairs, time 0 → 1 over the
+particle's life, ending at 1; padding after. Both Gustaberg curves are bells:
+`ngpu` (surf U) 0 → 0.36 → 0, `naa1` (whitecap alpha) 0 → 0.16 → 0. Alpha curve
+values are tint alpha on the byte/255 scale.
+
+**What the surf is:** the foam texture sliding 0.36 of a tile across each strip
+and back, once per 16.7 s, while the four fading whitecaps breathe in and out on
+their own periods. `SpawnAnimator` samples alpha/U/V by `frames % life`. Only
+those three channels are wired; the rest of the table is parsed into
+`tracks` and waiting. Verified: foam differs by 3.85% of pixels between t = 11 s
+and t = 21 s; default view still 0.000. **Effect frames are 1/60 s** — first built
+at kuluu's 30, and Ryan saw the surf at half the game's speed. xim's
+`Fps.internalFps = 60.0` is the reference. Doubled at Ryan's request, and he confirmed the speed looks right.
 #### 3. The block cap was silently truncating 36 zones — fixed
 
 `ZoneFile.parseBlockChain` stopped at 2000 blocks. **97 of 285 zone files are
