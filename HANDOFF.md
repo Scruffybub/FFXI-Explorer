@@ -34,6 +34,95 @@ Three long-running problems fell in one afternoon once it was used:
 When a decode looks nearly right, stop theorising and get a reference. It is
 faster than any amount of squinting at screenshots.
 
+### Water, 2026-09-27: the placement was never missing — it was unread
+
+**Read this before §0b, §4a or anything about weather.** Three findings, each
+measured against retail DATs, and together they overturn "FFXI ships no
+placement for its water and weather".
+
+#### 1. Generator chunks place the water, the sky and the lamp glows
+
+DAT block type `0x05` is a **Generator** — an effect emitter. A generator
+can spawn a whole MMB and give it a position, rotation, **scale**, colour **tint**
+and per-frame **UV scroll**. None of it is in the MZB, which is why the sea
+sheets and cloud layers sat unplaced at the origin: they are small tiles the
+generator blows up (the Gustaberg sea ×17, the Lufaise sea 140×120) and scrolls.
+
+South Gustaberg's sea is three stacked layers at (476, 24.6, −562): an opaque
+dark base and two translucent layers scrolling in **opposite directions** — the
+classic FFXI shimmer. **Water gets its translucency from the generator tint
+alpha (below 0x80), not from the texture** — consistent with §5a's finding
+that the renderer never reads texture alpha as opacity.
+
+Format, from [kuluu-ffxi](https://github.com/jondwillis/kuluu-ffxi) — a faithful
+FFXI client in Rust that verifies against `FFXiMain.dll`. It is **GPL-3.0 and
+this repo is MIT**, so `GeneratorParser.ts` is an independent implementation
+from the documented layout; no code was copied. Credit it in
+`THIRD-PARTY-NOTICES.md` before release. Layout is in the file header.
+
+#### 2. A DAT is a directory tree, and chunk names are only unique inside one
+
+Type `0x01` opens a named directory, `0x00` closes it. South Gustaberg has an
+`umi3` **terrain** piece in `f_gu/mode` and an `umi3` **water sheet** in
+`f_gu/effe`; the wave generators live in `f_gu/effe/nami`. Resolving by name
+alone stamped coastline terrain ×17 across the ocean. Generators now resolve
+from their own directory outward, nearest match wins. `DatBlock.dir` carries
+the path.
+
+**Weather is the same mechanism.** Every sky generator sits under
+`<zone>/weat/<state>` — `suny`, `clod`, `mist`, `thdr`, `wind`,
+`fogd`. Each weather state carries its own sky layers, with scales and UV
+scrolls. That is §0b's missing placement. Not built yet — these are positioned
+relative to the sky, not the world.
+
+#### 3. The block cap was silently truncating 36 zones — fixed
+
+`ZoneFile.parseBlockChain` stopped at 2000 blocks. **97 of 285 zone files are
+longer** (Pso'Xja: 4195). In 36 the cut fell before real content: Northern San
+d'Oria lost 84 meshes, Sealion's Den 63 textures and 63 meshes, Yuhtunga Jungle
+33 meshes, Newton Movalpolos 27 and 27. A lost texture also sends every mesh
+that names it to the fallback sheet, so some "wrong texture" reports may be
+this. Lufaise lost 117 generators including the one that places its sea.
+
+Cap raised to 20000 with a warning. **This changes the default render for those
+36 zones**, for the better: Northern San d'Oria goes from 2,202 placed objects
+to 3,917 and gains Château d'Oraguille's spires and the long bridge (44% of the
+view changed). West Ronfaure and South Gustaberg, under the cap, re-verified
+byte-identical.
+
+`DatFile.ts` has its own cap of **500** for model and animation DATs. Unchecked —
+and a plausible suspect for the model viewer's wrong-animation reports.
+
+#### `?genspawn=1` — stage 1, off by default
+
+Draws generator-placed meshes at their transform, tinted (0x80 identity),
+translucent below alpha 0x80 with depth write off, UV-scrolled at 30 frames a
+second. `drawsInWorld()` excludes the `weat/` tree, camera-following
+generators, and alpha-0 tints. Every drawn mesh logs `[GENSPAWN]` with its
+prefab index, so `?pickprefab=` can isolate it; `?pick=` frames generator
+placements too.
+
+| Zone | Result |
+|---|---|
+| South Gustaberg | **A sea where there was void**, meeting the cliff bases. 8 meshes, 15.8% of the view |
+| Lufaise Meadows | Sea covers the east horizon; 34 meshes. First pass stood the sun sheet 80 units tall mid-zone — fixed by excluding `weat/` |
+| West Ronfaure | No generator water. **Its pond is MZB geometry** (`ron_riv`) — a separate problem |
+
+**Open, in order:**
+
+1. **Lufaise: a bright white patchy shape, top centre of the default view, new
+   with `?genspawn=1` and unidentified.** Find its `[GENSPAWN]` line before
+   trusting the stage.
+2. **Alpha-0 spawns are left out** — 123 in Lufaise. They start invisible and
+   something fades them in, presumably a keyframe track (section 2/3 opcodes,
+   not parsed). Some water layers are among them (`umi2`/`umi3` in Lufaise and
+   Misareaux).
+3. **Scroll unverified in motion.** Stills cannot see it; check by hand.
+4. No fog on spawned meshes — kept out of `patchZoneShader`, which assumes vertex
+   colours; a failed compile drops draws silently.
+5. Euler order `ZYX` is borrowed from the MZB convention. Every water spawn so
+   far rotates about one axis only, so it has not been tested.
+6. Build the sky stage from `weat/<state>` — that is weather.
 ### What is live and worth picking up
 
 | | Status |
