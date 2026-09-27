@@ -8,7 +8,17 @@ import type { ParsedZone, ParsedZoneMesh, ParsedTexture, ZoneMeshInstance } from
 
 const DATHEAD_SIZE = 8
 const BLOCK_PADDING = 8
-const BLOCK_LIMIT = 2000
+/**
+ * A runaway-loop guard only — the chain already ends on a zero-length block.
+ *
+ * It was 2000, and that silently truncated 97 of the 285 zone files. Pso'Xja
+ * runs to 4195 blocks. In 36 zones the cut fell before real content:
+ * Northern San d'Oria lost 84 meshes, Sealion's Den 63 textures and 63
+ * meshes, Yuhtunga Jungle 33 meshes — and a lost texture also sends every mesh
+ * that names it to the zone's fallback sheet. Lufaise lost 117 generators,
+ * including the one that places its sea. Found 2026-09-27.
+ */
+const BLOCK_LIMIT = 20000
 
 const BLOCK_IMG = 0x20
 const BLOCK_MZB = 0x1C
@@ -39,7 +49,10 @@ function parseBlockChain(reader: DatReader): DatBlock[] {
     })
     if (nextUnits === 0) break
     offset += blockSize
-    if (blocks.length > BLOCK_LIMIT) break
+    if (blocks.length > BLOCK_LIMIT) {
+      console.warn(`[ZoneFile] block limit ${BLOCK_LIMIT} reached — the rest of this file is not read`)
+      break
+    }
   }
   return blocks
 }
