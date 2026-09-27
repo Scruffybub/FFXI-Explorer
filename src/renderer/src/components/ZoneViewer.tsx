@@ -378,6 +378,45 @@ const PICK_PREFAB =
       )
     : new Set<number>()
 
+/**
+ * Draw the meshes FFXI places with Generator chunks — seas, rivers, lamp glows —
+ * at their generator transform, tinted and UV-scrolled. Without it they sit as
+ * specks at the origin, which is what the unreferenced-prefab path shows today.
+ * Camera-following sky layers are deliberately left out of this first stage.
+ * See GeneratorParser for the format. Off by default until checked in game.
+ */
+const GEN_SPAWN =
+  typeof window !== 'undefined' &&
+  new URLSearchParams(window.location.search).get('genspawn') === '1'
+
+/**
+ * Whether stage 1 draws this spawn in the world. Excluded:
+ *  - sky layers: everything under a `weat/` directory is a weather state's
+ *    sky (f_ta/weat/suny, /clod, /mist, /thdr, /wind, /fogd). Positioned
+ *    relative to the sky, not the world — drawn at their raw position the
+ *    sun sheet stood 80 units tall in the middle of Lufaise
+ *  - anything flagged to follow the camera, for the same reason
+ *  - alpha 0 tints, which start invisible and are faded in by a keyframe
+ *    track this parser does not read yet
+ */
+function drawsInWorld(sp: { dir: string; followCamera: boolean; tint: number[] }): boolean {
+  if (/(^|\/)weat(\/|$)/.test(sp.dir)) return false
+  if (sp.followCamera) return false
+  return sp.tint[3] > 0
+}
+
+/**
+ * The transform a generator gives its mesh, in DAT space. Composed exactly like
+ * the MZB placements (MzbParser: T · Rz·Ry·Rx · S), which is Euler order ZYX.
+ */
+function spawnMatrix(s: { position: number[]; rotation: number[]; scale: number[] }): THREE.Matrix4 {
+  return new THREE.Matrix4().compose(
+    new THREE.Vector3(s.position[0], s.position[1], s.position[2]),
+    new THREE.Quaternion().setFromEuler(new THREE.Euler(s.rotation[0], s.rotation[1], s.rotation[2], 'ZYX')),
+    new THREE.Vector3(s.scale[0], s.scale[1], s.scale[2]),
+  )
+}
+
 /** Experiment selector for FFXI blend-flag handling; see the use site. */
 /**
  * Mode 5 threshold: how clear a mesh must be, at its own vertices, before it is
@@ -715,6 +754,18 @@ function createWaterMaterial(texture: THREE.DataTexture | null): THREE.ShaderMat
     polygonOffsetFactor: -4,
     polygonOffsetUnits: -4,
   })
+}
+
+/**
+ * Advances generator UV scrolls. The authored values are a texture offset per
+ * retail effect frame, and FFXI runs effects at 30 frames a second.
+ */
+function SpawnScroller({ scrolls }: { scrolls: { tex: THREE.Texture; uv: [number, number] }[] }) {
+  useFrame(({ clock }) => {
+    const frames = clock.getElapsedTime() * 30
+    for (const { tex, uv } of scrolls) tex.offset.set((uv[0] * frames) % 1, (uv[1] * frames) % 1)
+  })
+  return null
 }
 
 function WaterAnimator({ materials, vertexTint }: { materials: THREE.ShaderMaterial[]; vertexTint: number }) {
@@ -2346,7 +2397,7 @@ export default function ZoneViewer({
   const gameSunActive = !lit && lighting.gameSun
   const shaderVariant = gameSunActive ? 'lambert' : 'std'
 
-  const { instancedMeshes, waterMaterials, litMaterials, textures, weatherStates, disposeAll } = useMemo(() => {
+  const { instancedMeshes, waterMaterials, litMaterials, textures, weatherStates, spawnScrolls, disposeAll } = useMemo(() => {
     const geometries: THREE.BufferGeometry[] = []
     const materials: THREE.Material[] = []
     const waterMaterials: THREE.ShaderMaterial[] = []
@@ -3391,10 +3442,17 @@ export default function ZoneViewer({
     // world space, so they render at identity.
     {
       const referenced = new Set(zoneData.instances.map(i => i.meshIndex))
+      const spawnTargets = new Set<number>()
+      if (GEN_SPAWN) {
+        for (const sp of zoneData.spawns ?? []) {
+          if (drawsInWorld(sp)) for (const i of sp.prefabIndices) spawnTargets.add(i)
+        }
+      }
       let added = 0
       for (const [prefabIdx, geo] of geoMap) {
         if (SKIP_UNREFERENCED) continue
         if (referenced.has(prefabIdx)) continue
+        if (spawnTargets.has(prefabIdx)) continue
         const mat = matMap.get(prefabIdx)
         if (!mat) continue
         const mesh = new THREE.InstancedMesh(geo, mat, 1)
@@ -3416,6 +3474,74 @@ export default function ZoneViewer({
       if (added > 0) console.log(`[ZoneViewer] rendered ${added} unreferenced prefabs`)
     }
 
+    // Generator-placed meshes (?genspawn=1). Each spawn draws its MMB at the
+    // generator transform with the generator tint: 0x80 is identity, and an
+    // alpha below 0x80 makes the layer translucent — which is where water gets
+    // its transparency, not from the texture alpha that §5a showed the renderer
+    // never reads. Opaque base layers write depth; translucent ones stack over
+    // them without it, drawn later.
+    //
+    // Deliberately unlit and outside patchZoneShader: that patch assumes vertex
+    // colours, and these sheets carry near-black ones that the tint replaces.
+    // A shader that fails to compile drops its draws silently, which is how the
+    // water shader hid for days. The cost is no fog on these meshes for now.
+    const spawnScrolls: { tex: THREE.Texture; uv: [number, number] }[] = []
+    if (GEN_SPAWN) {
+      let built = 0
+      let startHidden = 0
+      for (const sp of zoneData.spawns ?? []) {
+        if (!drawsInWorld(sp)) {
+          if (sp.tint[3] === 0) startHidden++
+          continue
+        }
+        const translucent = sp.tint[3] < 128
+        const matrix = spawnMatrix(sp)
+        for (const prefabIdx of sp.prefabIndices) {
+          const geo = geoMap.get(prefabIdx)
+          const prefab = zoneData.prefabs[prefabIdx]
+          const tex = prefab ? zoneData.textures[prefab.materialIndex] : undefined
+          if (!geo || !tex) continue
+          const map = new THREE.DataTexture(new Uint8Array(tex.rgba), tex.width, tex.height, THREE.RGBAFormat)
+          map.wrapS = THREE.RepeatWrapping
+          map.wrapT = THREE.RepeatWrapping
+          map.flipY = false
+          map.colorSpace = THREE.SRGBColorSpace
+          map.magFilter = THREE.LinearFilter
+          map.minFilter = THREE.LinearMipmapLinearFilter
+          map.generateMipmaps = true
+          map.needsUpdate = true
+          textures.push(map)
+          const mat = new THREE.MeshBasicMaterial({
+            map,
+            color: new THREE.Color(sp.tint[0] / 128, sp.tint[1] / 128, sp.tint[2] / 128),
+            transparent: translucent,
+            opacity: Math.min(1, sp.tint[3] / 128),
+            depthWrite: !translucent,
+            side: THREE.DoubleSide,
+          })
+          materials.push(mat)
+          const mesh = new THREE.InstancedMesh(geo, mat, 1)
+          mesh.userData.textureName = prefab.textureName ?? ''
+          mesh.userData.generator = sp.generator
+          mesh.frustumCulled = false
+          mesh.renderOrder = translucent ? 2 : 1
+          mesh.setMatrixAt(0, matrix)
+          mesh.instanceMatrix.needsUpdate = true
+          instancedMeshes.push(mesh)
+          if (sp.uvScroll[0] || sp.uvScroll[1]) spawnScrolls.push({ tex: map, uv: sp.uvScroll })
+          // One line per drawn mesh, so a harness can find the prefab index to
+          // isolate with ?pickprefab= — the chunk name a generator uses is not
+          // the texture name ?pick= matches (Gustaberg's umi1 sea is not an umi
+          // texture).
+          console.log(`[GENSPAWN] ${sp.generator} -> ${sp.model} prefab ${prefabIdx} tex "${(prefab.textureName ?? '').trim()}" ` +
+            `pos(${sp.position.map(v => v.toFixed(1)).join(',')}) scale(${sp.scale.map(v => v.toFixed(1)).join(',')}) ` +
+            `tint(${sp.tint.join(',')}) uv(${sp.uvScroll.map(v => v.toFixed(4)).join(',')})`)
+          built++
+        }
+      }
+      console.log(`[GENSPAWN] drew ${built} generator-placed meshes; ${startHidden} spawns start at alpha 0 and were left out`)
+    }
+
     const disposeAll = () => {
       geometries.forEach(g => g.dispose())
       materials.forEach(m => {
@@ -3432,7 +3558,7 @@ export default function ZoneViewer({
     }
 
     return {
-      instancedMeshes, waterMaterials, litMaterials, textures,
+      instancedMeshes, waterMaterials, litMaterials, textures, spawnScrolls,
       weatherStates: [...weatherStates].sort(),
       totalInstances: zoneData.instances.length, disposeAll,
     }
@@ -3586,6 +3712,21 @@ export default function ZoneViewer({
       // the ones actually framed would drag every other placed prefab back in
       // whenever ?pickinst= narrows to one.
       const hasInstance = new Set(hits.map(i => i.meshIndex))
+      let generatorPlaced = 0
+      if (GEN_SPAWN) {
+        for (const sp of zoneData.spawns ?? []) {
+          if (!drawsInWorld(sp)) continue
+          const m = spawnMatrix(sp)
+          for (const i of sp.prefabIndices) {
+            if (!pickedSet.has(i)) continue
+            const box = localBox.get(i)
+            if (!box || box.isEmpty()) continue
+            for (const c of corners(box)) addFlipped(c.applyMatrix4(m))
+            hasInstance.add(i)
+            generatorPlaced++
+          }
+        }
+      }
       let identity = 0
       for (const i of picked) {
         if (hasInstance.has(i)) continue
@@ -3597,7 +3738,7 @@ export default function ZoneViewer({
       console.log(`[PICK] "${PICK}" matched ${picked.length} prefabs: ` +
         `${placed} instance placements` +
         (PICK_INST >= 0 ? ` (instance ${PICK_INST % Math.max(1, hits.length)} of ${hits.length})` : '') +
-        `, ${identity} drawn at identity`)
+        `, ${generatorPlaced} generator-placed, ${identity} drawn at identity`)
     }
     if (PICK || PICK_PREFAB.size > 0) {
       console.log(`[PICK] "${PICK}" bounds ${bbox.isEmpty() ? 'EMPTY — falling back to zone' :
@@ -3719,6 +3860,7 @@ export default function ZoneViewer({
       <CameraPersistence store={cameraPose} />
       <RendererSettings post={post} shadows={shadowsActive} />
       <SkyAnimator skyMaterial={skyMaterial} timeOfDayRef={timeOfDayRef} exposure={post.exposure} />
+      {spawnScrolls.length > 0 && <SpawnScroller scrolls={spawnScrolls} />}
       {waterMaterials.length > 0 && (
         <WaterAnimator materials={waterMaterials} vertexTint={scene.waterTint} />
       )}

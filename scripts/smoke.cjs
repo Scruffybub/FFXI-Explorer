@@ -111,9 +111,9 @@ app.whenReady().then(async () => {
   // permanently in the list: a silent "program not valid" hid a broken water
   // shader for days, because a failed program drops its draws without erroring.
   const errors = logs.filter(l =>
-    /VALPHA|ALPHAPROFILE|UVFIX|UVSTRADDLE|UVALPHA|ALPHAHIST|BLENDHIST|MUSIC|WEATHER|MAPVIEW|ORPHANSRC|MZBMATCH|MMBNAMES|BLEND|NANSCAN|CUTOUT|Collision|Walk|unreferenced|ORPHANS|PICK|CENSUS|program not valid|VALIDATE_STATUS|shader|THREE\.\w+Error|Warning:/i.test(l),
+    /VALPHA|ALPHAPROFILE|GENSPAWN|UVFIX|UVSTRADDLE|UVALPHA|ALPHAHIST|BLENDHIST|MUSIC|WEATHER|MAPVIEW|ORPHANSRC|MZBMATCH|MMBNAMES|BLEND|NANSCAN|CUTOUT|Collision|Walk|unreferenced|ORPHANS|PICK|CENSUS|program not valid|VALIDATE_STATUS|shader|THREE\.\w+Error|Warning:/i.test(l),
   )
-  if (errors.length) console.log('CONSOLE ERRORS:\n' + errors.slice(0, 25).join('\n'))
+  if (errors.length) console.log('CONSOLE ERRORS:\n' + errors.slice(0, Number(process.env.LOG_LINES || 25)).join('\n'))
   else console.log('No console errors.')
 
   app.exit(0)

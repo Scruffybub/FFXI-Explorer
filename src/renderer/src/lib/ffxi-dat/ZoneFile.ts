@@ -1,10 +1,11 @@
 import { DatReader } from './DatReader'
 import { parseTextureBlock } from './TextureParser'
+import { parseModelSpawn } from './GeneratorParser'
 import { decodeMzb, decodeMmb } from './ZoneDecrypt'
 import { parseMzbBlock } from './MzbParser'
 import { parseMzbCollision, type ParsedCollision } from './CollisionParser'
 import { parseMmbBlock } from './MmbParser'
-import type { ParsedZone, ParsedZoneMesh, ParsedTexture, ZoneMeshInstance } from './types'
+import type { GeneratorSpawn, ParsedZone, ParsedZoneMesh, ParsedTexture, ZoneMeshInstance } from './types'
 
 const DATHEAD_SIZE = 8
 const BLOCK_PADDING = 8
@@ -23,10 +24,19 @@ const BLOCK_LIMIT = 20000
 const BLOCK_IMG = 0x20
 const BLOCK_MZB = 0x1C
 const BLOCK_MMB = 0x2E
+/** Effect emitters. They place the water, sky layers and lamp glows. */
+const BLOCK_GENERATOR = 0x05
 
 interface DatBlock {
   name: string
   type: number
+  /**
+   * The directory this block sits in, e.g. "f_gu/effe/nami". A DAT is a tree:
+   * type 0x01 opens a named directory and type 0x00 closes it. Chunk names are
+   * only unique within a directory — South Gustaberg has an `umi3` terrain
+   * piece in f_gu/mode and an `umi3` water sheet in f_gu/effe.
+   */
+  dir: string
   nextUnits: number
   dataOffset: number
   dataLength: number
@@ -34,6 +44,7 @@ interface DatBlock {
 
 function parseBlockChain(reader: DatReader): DatBlock[] {
   const blocks: DatBlock[] = []
+  const dirStack: string[] = []
   let offset = 0
   while (offset < reader.length - DATHEAD_SIZE) {
     reader.seek(offset)
@@ -44,9 +55,12 @@ function parseBlockChain(reader: DatReader): DatBlock[] {
     const blockSize = nextUnits * 16
     blocks.push({
       name, type, nextUnits,
+      dir: dirStack.join('/'),
       dataOffset: offset + DATHEAD_SIZE,
       dataLength: Math.max(0, blockSize - DATHEAD_SIZE),
     })
+    if (type === 0x01) dirStack.push(name.replace(/\0/g, '').trim())
+    else if (type === 0x00) dirStack.pop()
     if (nextUnits === 0) break
     offset += blockSize
     if (blocks.length > BLOCK_LIMIT) {
@@ -162,6 +176,11 @@ export function parseZoneFile(
   const mmbNameMap = new Map<string, { startIdx: number; count: number }[]>()
   // prefab index -> the MMB block name it came from, for diagnosing orphans
   const prefabSource: string[] = []
+  // prefab index -> the 4-char DAT chunk name of its MMB block. Generators name
+  // the mesh they spawn by this, not by the 16-char name the MZB uses.
+  const prefabChunk: string[] = []
+  // prefab index -> the DAT directory of its MMB block, for scoped lookups
+  const prefabDir: string[] = []
 
   // MMB block names for sky objects rendered by our procedural sky instead
   const skyObjectNames = new Set(['sunsphere', 'moonsphere'])
@@ -206,7 +225,11 @@ export function parseZoneFile(
           mmbNameMap.set(name, arr)
         }
         arr.push({ startIdx, count: meshes.length })
-        for (let m = 0; m < meshes.length; m++) prefabSource[startIdx + m] = name
+        for (let m = 0; m < meshes.length; m++) {
+          prefabSource[startIdx + m] = name
+          prefabChunk[startIdx + m] = block.name.trim()
+          prefabDir[startIdx + m] = block.dir
+        }
       }
     } catch { /* skip */ }
   }
@@ -367,7 +390,38 @@ export function parseZoneFile(
     if (idx >= 0 && idx < textureNames.length) textureNames[idx] = name
   }
 
-  return { prefabs, instances, textures, textureNames, collision }
+  // ── Pass 4: generator model spawns ──
+  // Water, sky layers and lamp glows are placed here, not in the MZB. Resolved
+  // by the MMB chunk name, which matched every water spawn in the zones
+  // measured (South Gustaberg, Lufaise, Misareaux).
+  const spawns: GeneratorSpawn[] = []
+  let unresolvedSpawns = 0
+  for (const block of blocks.filter(b => b.type === BLOCK_GENERATOR)) {
+    const start = block.dataOffset + BLOCK_PADDING
+    const len = block.dataLength - BLOCK_PADDING
+    if (len <= 0) continue
+    const raw = parseModelSpawn(new Uint8Array(buffer, start, len))
+    if (!raw) continue
+    // Look the model up in the generator's own directory first, then each
+    // parent in turn, and take the nearest match. Matching by name alone
+    // stamped a coastline terrain piece across the Gustaberg sea.
+    let prefabIndices: number[] = []
+    const parts = block.dir ? block.dir.split('/') : []
+    for (let depth = parts.length; depth >= 0 && prefabIndices.length === 0; depth--) {
+      const scope = parts.slice(0, depth).join('/')
+      prefabIndices = []
+      for (let p = 0; p < prefabChunk.length; p++) {
+        if (prefabChunk[p] === raw.model && prefabDir[p] === scope) prefabIndices.push(p)
+      }
+    }
+    if (prefabIndices.length === 0) { unresolvedSpawns++; continue }
+    spawns.push({ generator: block.name.trim(), dir: block.dir, prefabIndices, ...raw })
+  }
+  if (spawns.length || unresolvedSpawns) {
+    console.log(`[GENSPAWN] ${spawns.length} model spawns resolved, ${unresolvedSpawns} unresolved`)
+  }
+
+  return { prefabs, instances, textures, textureNames, collision, spawns }
 }
 
 /** Concatenate collision from every MZB block in the file, rebasing indices. */

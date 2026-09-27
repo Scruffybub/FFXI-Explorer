@@ -100,6 +100,25 @@ export interface ZoneMeshInstance {
   transform: number[]     // 4x4 matrix (16 floats, row-major)
 }
 
+/**
+ * A mesh placed by a Generator chunk rather than by the MZB. This is how FFXI
+ * positions its seas, rivers, sky layers and lamp glows — see GeneratorParser.
+ */
+export interface GeneratorSpawn {
+  generator: string                       // 4-char generator chunk name
+  dir: string                             // DAT directory, e.g. "f_ta/effe/nami" or
+                                          // "f_ta/weat/suny" — one weat/ subtree per
+                                          // weather state, holding its sky layers
+  model: string                           // linked MMB chunk name
+  prefabIndices: number[]                 // every prefab that MMB chunk produced
+  position: [number, number, number]      // DAT space, like MZB transforms
+  rotation: [number, number, number]      // radians
+  scale: [number, number, number]
+  tint: [number, number, number, number]  // raw bytes, 0x80 = identity
+  uvScroll: [number, number]              // texture offset per 30 fps frame
+  followCamera: boolean                   // sky layers ride with the camera
+}
+
 export interface ParsedZone {
   prefabs: ParsedZoneMesh[]       // unique MMB mesh prefabs
   instances: ZoneMeshInstance[]    // MZB placement transforms
@@ -111,6 +130,8 @@ export interface ParsedZone {
    * none of them.
    */
   textureNames: string[]
+  /** Meshes placed by generator chunks. Empty for zones that have none. */
+  spawns: GeneratorSpawn[]
   collision: ParsedCollision | null // MZB collision mesh, raw DAT space
 }
 
