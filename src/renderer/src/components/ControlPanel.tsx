@@ -942,6 +942,12 @@ export default function ControlPanel({
           info="FFXI lays an overlay layer over base ground and fades it in with a per-vertex weight. Dropping that weight draws every overlay at full strength, which is what the pale mismatched squares in the Gustabergs are. Off for now: the fix is real but incomplete, and some squares survive it."
         />
         <Toggle
+          label="FFXI transparency (beta)"
+          checked={scene.zoneTransparency}
+          onChange={v => onScene({ zoneTransparency: v })}
+          info="Decide transparency the way FFXI does: meshes named with a leading underscore (foliage, flags) are cut out, meshes flagged for blending (water surfaces, terrain overlays) blend softly, and everything else is solid. Beta: check it while moving — blended layers can pop if they sort badly."
+        />
+        <Toggle
           label="Generator water (beta)"
           checked={scene.generatorWater}
           onChange={v => onScene({ generatorWater: v })}

@@ -276,6 +276,17 @@ export interface SceneSettings {
   generatorWater: boolean
 
   /**
+   * Decide each zone mesh's transparency the way FFXI does: a mesh whose name
+   * starts with `_` is a cutout (alpha test 0.375 on vertex x texture alpha);
+   * a mesh whose render-state word has 0x8000 is blended, without depth
+   * writes; everything else is opaque. The texture's alpha is never the
+   * signal — that is why every attempt to read transparency from it failed.
+   * Beta: off by default until checked in motion. Rule from kuluu-ffxi
+   * dat_mmb.rs submesh_alpha_mode and zone_ffxi.wgsl.
+   */
+  zoneTransparency: boolean
+
+  /**
    * Anisotropic filtering, as a sample count: 1 is off, up to 16.
    *
    * Mipmapping picks one level for the whole fragment, so ground seen at a
@@ -432,6 +443,7 @@ export const DEFAULT_SCENE: SceneSettings = {
   weatherFollowsCamera: true,
   overlayBlend: false,
   generatorWater: false,
+  zoneTransparency: false,
   anisotropy: 16,
   mapView: false,
   mapZoom: 1,

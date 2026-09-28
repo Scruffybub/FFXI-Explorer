@@ -231,6 +231,7 @@ export function parseZoneFile(
         }
         arr.push({ startIdx, count: meshes.length })
         for (let m = 0; m < meshes.length; m++) {
+          meshes[m].meshName = name
           prefabSource[startIdx + m] = name
           prefabChunk[startIdx + m] = block.name.trim()
           prefabDir[startIdx + m] = block.dir
@@ -376,6 +377,25 @@ export function parseZoneFile(
       `from ${collisionParts.length} MZB block(s), ` +
       `bounds x[${r(minX)},${r(maxX)}] y[${r(minY)},${r(maxY)}] z[${r(minZ)},${r(maxZ)}]`,
     )
+    const heights = new Map<number, number>()
+    const wMin = [Infinity, Infinity], wMax = [-Infinity, -Infinity]
+    for (let f = 0; f < collision.waterHeight.length; f++) {
+      const h = collision.waterHeight[f]
+      if (Number.isNaN(h)) continue
+      heights.set(h, (heights.get(h) ?? 0) + 1)
+      for (let k = 0; k < 3; k++) {
+        const vi = collision.indices[f * 3 + k] * 3
+        wMin[0] = Math.min(wMin[0], v[vi]); wMax[0] = Math.max(wMax[0], v[vi])
+        wMin[1] = Math.min(wMin[1], v[vi + 2]); wMax[1] = Math.max(wMax[1], v[vi + 2])
+      }
+    }
+    if (heights.size > 0) {
+      console.log(
+        `[Collision] water on ${[...heights.values()].reduce((a, b) => a + b, 0)} tris at ` +
+        [...heights].sort((a, b) => a[0] - b[0]).slice(0, 12).map(([h, n]) => `${h.toFixed(2)} x${n}`).join(', ') +
+        `; footprint x[${r(wMin[0])},${r(wMax[0])}] z[${r(wMin[1])},${r(wMax[1])}]`,
+      )
+    }
   } else {
     console.log(`[Collision] none parsed from ${mzbBlocks.length} MZB block(s)`)
   }
@@ -493,6 +513,7 @@ function mergeCollision(parts: ParsedCollision[]): ParsedCollision | null {
   const indices = new Uint32Array(indexCount)
   const faceFlags = new Uint16Array(faceCount)
   const indexFlags = new Uint8Array(faceCount)
+  const waterHeight = new Float32Array(faceCount)
 
   let vOff = 0, iOff = 0, fOff = 0
   for (const part of parts) {
@@ -502,10 +523,11 @@ function mergeCollision(parts: ParsedCollision[]): ParsedCollision | null {
     }
     faceFlags.set(part.faceFlags, fOff)
     indexFlags.set(part.indexFlags, fOff)
+    waterHeight.set(part.waterHeight, fOff)
     vOff += part.vertices.length
     iOff += part.indices.length
     fOff += part.faceFlags.length
   }
 
-  return { vertices, indices, faceFlags, indexFlags }
+  return { vertices, indices, faceFlags, indexFlags, waterHeight }
 }

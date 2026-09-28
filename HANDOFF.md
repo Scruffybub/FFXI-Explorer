@@ -34,6 +34,147 @@ Three long-running problems fell in one afternoon once it was used:
 When a decode looks nearly right, stop theorising and get a reference. It is
 faster than any amount of squinting at screenshots.
 
+### FFXI's zone transparency rule — found 2026-09-27, behind a toggle
+
+**The answer to §4b, §4f and §5a, from kuluu-ffxi** (`dat_mmb.rs submesh_alpha_mode`,
+`zone_ffxi.wgsl`; kuluu verifies against FFXiMain.dll). For a zone mesh:
+
+| Condition | Treatment |
+|---|---|
+| mesh **name** (`SMMBHeader.imgID`, now `ParsedZoneMesh.meshName`) starts with `_` | cutout: alpha test **0.375** on vertex alpha (/128) × texel alpha |
+| render-state word has **`0x8000`** | **blended**, no depth write, z-biased over its base ("water/glass") |
+| anything else | **opaque — alpha ignored entirely** |
+
+The u16 this codebase calls `blending` is FFXI's **render-state word**. `0x8000`
+means blend, and `0x2000` means two-sided (back-face culling when clear). We had
+been alpha-*testing* `0x8000` — the opposite of what the game does.
+
+**The signal is the mesh name, never the texture.** That is why all seven
+texture-alpha attempts failed. Measured: Ronfaure's `_` meshes are `ron_w01c`/`w03c`
+vegetation and `ro_hata`/`hata1` flags; the Gustaberg arch is `gus_to`,
+`gus_dai01`… — no underscore, so **opaque**, which is why it is solid stone
+in game despite a 98%-clear sheet. Almost every model is a **pair**: an opaque
+`0x0000` part and a `0x8000` part on the same texture — `yama_1_m`, `kabe_1_m`,
+`san_tower`. Those `0x8000` parts are §4c's terrain overlays.
+
+**Scene → FFXI transparency (beta)**, off by default, implements the rule (it
+forces vertex alpha to the /128 scale and supersedes the overlay heuristic).
+Measured in West Ronfaure: 9.9% of the view changes, dark pixels 0.78% → 0.26%,
+no holes. **Unchecked in motion** — §4c's last blended-overlay attempt made
+geometry pop while flying, and this also blends without depth writes.
+
+**What it does not change:** the Gustaberg arch's two black boxes (0.008
+difference) — under the rule they are ordinary opaque meshes, so the game
+draws them solid too. They may be real geometry (lantern housings?). Check in
+game before hunting further.
+
+**West Ronfaure's pond** is `izu_1_m`–`izu_3_m` (*izumi*, spring): ground parts on
+`ron_wf` and pond-bed parts on `ron_riv`, each with a small `0x8000` part that
+turns out to be **bank and mud edging**, not a water surface. The rule barely
+changes it (0.013). Its water is generator-placed after all — see below.
+
+### Ponds and rivers, 2026-09-27: the water is in the collision data
+
+Ryan's in-game screenshot settled the pond: flat, neutral grey water (65, 66,
+68, lighter streaks) about 1.4 units under the grass. Ours was a **dry rocky
+ditch** 6.5 units deep. The MMBs are only the bed. (I then claimed no generator
+places water there — wrong; Generator water was simply off. See Ryan's verdict.)
+
+**Two traps on the way, both worth remembering:**
+
+- **Isolation captures lie about colour.** The first pond capture (`?pickprefab`)
+  showed a pale grey centre. That was our *height fog*: `fogHeightBase/Range`
+  and fog density are computed from the framed bounds, so isolating a 7-unit-deep
+  object makes its low centre maximally fogged. With fog off the bed is dark,
+  darkest where deepest (vertex colour 0.48 at the rim → 0.045 at depth).
+  **Judge looks from a full-zone view** — new `?campos=x,y,z` (world units) with
+  `?yaw=&pitch=` puts the camera anywhere.
+- `ron_riv`'s large clear regions are rock underneath (RGB with alpha forced
+  opaque): the texture is not a water sheet.
+
+**The surface height is in the MZB collision objects.** Each collision object
+record (the visEntry the grid points at) is a 4x4, its inverse, a 3x3 normal
+matrix, then a flags dword at +164 whose **bits 4–25 are a signed water height
+/1024**, raw DAT space, 0 = none; only in MZB format version > 0x19 (header byte
+3). From kuluu-ffxi `mzb.rs` (`CollisionObjectData::flags`), as a format
+reference. `CollisionParser` now returns `waterHeight` per triangle (NaN when
+none) and the `[Collision] water` log line lists levels and footprint:
+
+| Zone | Water levels (DAT y) |
+|---|---|
+| West Ronfaure 100 | -8.60 × 2631 tris — exactly the pond (x −440…−280) |
+| East Ronfaure 101 | seven, −58 … −7: the stepped river |
+| South Gustaberg 107 | 20.00 (the sea) + 41.6 / 43 / 44.5 |
+| Lufaise 24 | 2, 24, 32 |
+
+A collision-water sheet was built on this (`StillWater.tsx`: water triangles
+flattened onto their height, rasterised to a 1-unit grid, skipped under
+generator sheets, look matched to the screenshot) and **removed the same day at
+Ryan's request** — see his verdict below. The parser field and the
+`[Collision] water` log stay: cheap, and they confirmed the pond's height.
+
+**Ryan's verdict, same day: Generator water looks much more correct than this
+in both Ronfaures** — "the color just needs adjusting". I had missed that the
+pond *has* generator water: `f_ro/effe/miz1` holds five generators, `ike1-3`
+(*ike*, pond) and `ikm1-2`, all spawning layers textured `kaw1` at DAT y
+-8.7/-8.5 (the collision height is -8.6, so the two sources agree). With
+Generator water on, StillWater defers 2,600 of the pond's 2,631 triangles to
+them. **So collision water is only a fallback** for zones without generator
+water, and Ryan had the toggle removed.
+
+**Why the generator pond is too pale: we blend in linear light, FFXI (DX8)
+blends in gamma space.** `kaw1` is pure white (RGB 255); the ripples live in its
+alpha (mean 64). Each layer's colour is therefore just its tint on the /128
+scale — ike1 58 → 0.45, ike2 0.375, ike3 0.53, ikm1 0.84, ikm2 0.77 — a set of
+mid-grey veils over a near-black bed. Blending a light veil over black in linear
+light comes out far brighter than doing it on gamma values (white at 30% over
+black: ~150/255 linear vs ~85/255 gamma). Measured at the pond, full zone:
+
+| Blending | Pond water (mean RGB) |
+|---|---|
+| Post-processing on (linear HalfFloat target — the default) | 66–92 |
+| Post-processing off (three encodes to sRGB before blending — gamma, like DX8) | 56–76 |
+| Game, Ryan's screenshot | 65 |
+
+The Gustaberg sea was approved under linear blending: its main sheet is nearly
+opaque, where the two methods agree. Its surf is the translucent part, and
+under gamma blending it is subtler and the sea darker. **Ryan: "Gustaberg's
+water actually looks much better"** that way.
+
+Dead ends, so they are not retried:
+- A per-layer alpha exponent (a^2.2, exact only over black) matched the pond's
+  brightness but all but erased Gustaberg's surf. Reverted.
+- Scene lighting on generator meshes (FFXI does apply it — kuluu
+  `zone_ffxi.wgsl` generator chain) cannot explain water-vs-grass: it scales
+  both alike, and our default sun brightens rather than darkens (≈1.07 at noon).
+- `0x63` + section-3 `0x3F` on these generators is a **time-of-day alpha
+  multiplier** (KeyFrame `tika`: 1.28 at midnight → 1.69 → 1.66 → 1.28). It
+  makes the pond *more* opaque; not yet applied. `0x2E` in section 3 carries two
+  floats (60/120, 80/150, 100/200) — plausibly a distance fade; unread.
+- Our Ronfaure grass is itself darker than the game's (lum 40 vs 78), so
+  matching water to grass as a ratio misleads. Compare absolute values.
+
+**Built: `GammaBlendPass`** (`lib/GammaBlendPass.ts`). Generator meshes live on
+layer 5 (`GAMMA_BLEND_LAYER`). With the composer running, the camera skips that
+layer and the pass — the composer's first child, straight after its RenderPass —
+encodes the frame to sRGB into a temp target, copies it back over the input
+(leaving the input's depth buffer intact, so terrain still hides water), draws
+layer 5 with the spawn shaders writing sRGB (`uGammaOut`, set only during the
+pass), and decodes to linear for SMAA/AO/bloom. Without the composer (post off,
+or no effects) the layer is simply enabled and three's canvas output blends in
+gamma natively. The pass is disabled when Generator water is off; that path is
+byte-identical to before (max single-pixel 0).
+
+Result: Gustaberg with post on now matches the post-off look Ryan preferred;
+West Ronfaure's pond measured 56–76 → still "too light" to Ryan.
+
+**Ronfaure's water is darkened by hand** — `WATER_TONE` in ZoneViewer: tint RGB
+×0.65 for generators under `f_ro/effe/` whose texture is `kaw*` (both
+Ronfaures' ponds and rivers; waterfalls `tak1`, lamps and flags untouched).
+Not decoded — Ryan's eye. Pond now 34–46. The likely real cause is FFXI's zone
+lighting, which the game multiplies into generator meshes (kuluu generator
+chain) and we do not; if that is ever modelled, remove this entry and re-check.
+
 ### Water, 2026-09-27: the placement was never missing — it was unread
 
 **Read this before §0b, §4a or anything about weather.** Three findings, each

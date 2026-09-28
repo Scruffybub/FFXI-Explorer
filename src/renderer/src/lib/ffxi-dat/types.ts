@@ -94,6 +94,12 @@ export interface ParsedZoneMesh {
   blending: number        // MMB blending flag (0=opaque, >0=alpha blend)
   textureName?: string    // original texture name from MMB model header
   /**
+   * The MMB's own name (SMMBHeader.imgID) — what the MZB places it by. FFXI decides
+   * a zone mesh's transparency from it: a leading `_` marks a cutout (foliage,
+   * fences), alpha-tested at 0.375. See kuluu dat_mmb.rs submesh_alpha_mode.
+   */
+  meshName?: string
+  /**
    * An effect mesh from a D3M chunk rather than an MMB. It has no placement of
    * its own — only generators place it — so the renderer must never draw it at
    * the origin the way it draws other unplaced prefabs.

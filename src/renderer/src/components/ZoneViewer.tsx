@@ -11,6 +11,9 @@ import { sampleKeyFrames } from '../lib/ffxi-dat/GeneratorParser'
 import { buildModel, type BuiltModel } from '../lib/modelBuild'
 import { invertRigidMatrix4, poseSkeleton, skinMeshes } from '../lib/skinning'
 import { CollisionWorld } from '../lib/CollisionWorld'
+import {
+  GammaBlendPass, GAMMA_BLEND_LAYER, GAMMA_OUT_GLSL, gammaOutUniform,
+} from '../lib/GammaBlendPass'
 import type {
   LightingSettings, PointLightSettings, PostSettings, SceneSettings, SurfaceInfo, ToneMappingMode,
 } from '../lib/settings'
@@ -434,8 +437,10 @@ function applySpawnStages(mat: THREE.MeshBasicMaterial, tint: number[]): THREE.V
     decode(tint[0] / 128), decode(tint[1] / 128), decode(tint[2] / 128), tint[3] / 128)
   mat.onBeforeCompile = shader => {
     shader.uniforms.uSpawnTint = { value: uTint }
+    shader.uniforms.uGammaOut = gammaOutUniform
     shader.fragmentShader = shader.fragmentShader
-      .replace('void main() {', 'uniform vec4 uSpawnTint;\nvoid main() {')
+      .replace('void main() {', `uniform vec4 uSpawnTint;\n${GAMMA_OUT_GLSL.pars}\nvoid main() {`)
+      .replace('#include <dithering_fragment>', `#include <dithering_fragment>\n${GAMMA_OUT_GLSL.main}`)
       .replace('#include <color_fragment>', [
         '#include <color_fragment>',
         'vec4 spawnStage0 = clamp(diffuseColor, 0.0, 1.0);',
@@ -445,6 +450,27 @@ function applySpawnStages(mat: THREE.MeshBasicMaterial, tint: number[]): THREE.V
   }
   mat.customProgramCacheKey = () => 'genspawn-stages'
   return uTint
+}
+
+/**
+ * Per-region darkening of generator water, applied to the tint's colour.
+ *
+ * Not decoded from the data: Ryan's eye against the game. With gamma-space
+ * blending in place (GammaBlendPass) West Ronfaure's pond measured 56-76
+ * against the game's 65, and he still judged it too light, 2026-09-27. The
+ * remaining gap is likely FFXI's zone lighting, which it multiplies into
+ * generator meshes and this renderer does not yet (kuluu zone_ffxi.wgsl
+ * generator chain). Keyed on the generator's DAT directory and the water
+ * texture, so it covers every Ronfaure pond and river (f_ro/effe/miz1, kawa)
+ * and leaves waterfalls (tak1), lamps and flags alone.
+ */
+const WATER_TONE: { dir: string; texture: RegExp; rgb: number }[] = [
+  { dir: 'f_ro/effe/', texture: /^effect\s+kaw/, rgb: 0.65 },
+]
+
+function waterTone(dir: string, textureName: string | undefined): number {
+  const hit = WATER_TONE.find(t => dir.startsWith(t.dir) && t.texture.test(textureName ?? ''))
+  return hit ? hit.rgb : 1
 }
 
 /**
@@ -513,7 +539,8 @@ const hasCameraOverride =
   typeof window !== 'undefined' &&
   (new URLSearchParams(window.location.search).has('yaw') ||
     new URLSearchParams(window.location.search).has('pitch') ||
-    new URLSearchParams(window.location.search).has('gotowater'))
+    new URLSearchParams(window.location.search).has('gotowater') ||
+    new URLSearchParams(window.location.search).has('campos'))
 
 /**
  * FFXI truncates texture names to eight characters, so the full words this used
@@ -2242,7 +2269,8 @@ function Avatar({
 }
 
 /** Post-processing stack. Rebuilt when the set of enabled effects changes. */
-function PostStack({ post }: { post: PostSettings }) {
+function PostStack({ post, generatorLayer }: { post: PostSettings; generatorLayer: boolean }) {
+  const { scene: world, camera } = useThree()
   // N8AO is expensive; skip it on very large zones regardless of the setting.
   // No instance-count gate. This used to be `instanceCount < 2000`, which meant
   // AO was silently off in every real zone — West Ronfaure alone has 13,115
@@ -2302,7 +2330,30 @@ function PostStack({ post }: { post: PostSettings }) {
     effects.push(<Vignette key="vig" offset={0.3} darkness={post.vignetteDarkness} />)
   }
 
-  if (!post.enabled || effects.length === 0) return null
+  const composerActive = post.enabled && effects.length > 0
+
+  // Generator meshes sit on their own layer. With the composer running they are
+  // drawn by GammaBlendPass, so the main render pass must not see them; without
+  // it three draws them to the canvas, which already blends in gamma.
+  useEffect(() => {
+    if (composerActive) camera.layers.disable(GAMMA_BLEND_LAYER)
+    else camera.layers.enable(GAMMA_BLEND_LAYER)
+  }, [camera, composerActive])
+
+  // One pass per composer: the composer is rebuilt when its effect set changes.
+  const effectSet = effects.map(e => e.key).join('-')
+  const gammaPass = useMemo(
+    () => (composerActive ? new GammaBlendPass(world, camera) : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [world, camera, composerActive, effectSet],
+  )
+  useEffect(() => () => gammaPass?.dispose(), [gammaPass])
+  // Nothing on the layer, nothing to blend: skip the pass's three blits.
+  useEffect(() => {
+    if (gammaPass) gammaPass.enabled = generatorLayer
+  }, [gammaPass, generatorLayer])
+
+  if (!composerActive) return null
 
   // Keyed on which effects are enabled, not on their settings — otherwise
   // dragging a slider would tear down and rebuild the whole composer.
@@ -2313,7 +2364,7 @@ function PostStack({ post }: { post: PostSettings }) {
 
   return (
     <EffectComposer key={composerKey} multisampling={0}>
-      {effects}
+      {gammaPass ? [<primitive key="gamma" object={gammaPass} />, ...effects] : effects}
     </EffectComposer>
   )
 }
@@ -2494,7 +2545,10 @@ export default function ZoneViewer({
     let uvFixed = 0
     let overlayMeshes = 0
     // The query param overrides; otherwise the Scene toggle decides.
-    const alphaMode = VERTEX_ALPHA || (scene.overlayBlend ? 'direct' : 'off')
+    // FFXI transparency rules need vertex alpha on the /128 scale ('double'):
+    // FFXI's zone alpha is vertex alpha x texel alpha with 128 as identity.
+    const zoneRule = scene.zoneTransparency
+    const alphaMode = VERTEX_ALPHA || (zoneRule ? 'double' : scene.overlayBlend ? 'direct' : 'off')
     /** Every weather state this zone carries geometry for. */
     const weatherStates = new Set<string>()
     /** prefab index -> its weather state, for tagging the meshes below. */
@@ -2670,7 +2724,7 @@ export default function ZoneViewer({
       }
       // Blend only meshes whose alpha actually varies AND ends up partial.
       // Everything else stays opaque: no sorting cost, no popping.
-      const isOverlay = useVertexAlpha && (rawMax - rawMin) > 0.02 && minScaledAlpha < 0.99
+      const isOverlay = !zoneRule && useVertexAlpha && (rawMax - rawMin) > 0.02 && minScaledAlpha < 0.99
       if (isOverlay) overlayMeshes++
       const uvArray = new Float32Array(prefab.uvs)
       for (let i = 0; i < uvArray.length; i++) {
@@ -2888,6 +2942,43 @@ export default function ZoneViewer({
           : gameSunActive
             ? new THREE.MeshLambertMaterial(common)
             : new THREE.MeshBasicMaterial(common)
+
+        // FFXI transparency rules (Scene → FFXI transparency). From kuluu-ffxi,
+        // which verifies against FFXiMain.dll — dat_mmb.rs submesh_alpha_mode:
+        //
+        //   name starts with `_`  cutout: alpha test 0.375 on vertex x texel
+        //                          alpha (foliage, flags — Ronfaure's `_` meshes
+        //                          are ron_w01c/w03c vegetation and ro_hata flags)
+        //   render state 0x8000   blended, no depth write, z-biased over the
+        //                          base (zone_ffxi.wgsl: "water/glass"; also every
+        //                          terrain overlay — models come in pairs, an
+        //                          opaque 0x0000 part and a 0x8000 part)
+        //   anything else         opaque; alpha is ignored entirely
+        //
+        // The signal is the mesh NAME and the render-state word, never the
+        // texture — seven attempts to read transparency from texture alpha
+        // failed because of that (HANDOFF §0). This renderer had been treating
+        // 0x8000 as an alpha test, the opposite of what FFXI does with it.
+        if (zoneRule && !isWater) {
+          const m = mat as THREE.MeshBasicMaterial
+          if ((prefab.meshName ?? '').startsWith('_')) {
+            m.transparent = false
+            m.alphaTest = 0.375
+            m.depthWrite = true
+          } else if ((prefab.blending >>> 0) & 0x8000) {
+            m.transparent = true
+            m.alphaTest = 0
+            m.depthWrite = false
+            m.polygonOffset = true
+            m.polygonOffsetFactor = -1
+            m.polygonOffsetUnits = -4
+          } else {
+            m.transparent = false
+            m.alphaTest = 0
+            m.depthWrite = true
+          }
+          m.needsUpdate = true
+        }
 
         // Experiment: ?matprofile=N picks the material from what the texture's
         // alpha channel measurably *is* rather than from the mesh's blend flag.
@@ -3634,12 +3725,16 @@ export default function ZoneViewer({
             depthWrite: false,
             side: THREE.DoubleSide,
           })
-          const tintUniform = applySpawnStages(mat, sp.tint)
+          const tone = waterTone(sp.dir, prefab.textureName)
+          const tint = tone === 1 ? sp.tint : [sp.tint[0] * tone, sp.tint[1] * tone, sp.tint[2] * tone, sp.tint[3]]
+          const tintUniform = applySpawnStages(mat, tint)
           materials.push(mat)
           const mesh = new THREE.InstancedMesh(geo, mat, 1)
           mesh.userData.textureName = prefab.textureName ?? ''
           mesh.userData.generator = sp.generator
           mesh.frustumCulled = false
+          // Drawn by GammaBlendPass when post-processing is on; see PostStack.
+          mesh.layers.set(GAMMA_BLEND_LAYER)
           mesh.renderOrder = prefab.d3m ? 3 : translucent ? 2 : 1 // all blended; this orders them
           mesh.setMatrixAt(0, matrix)
           mesh.instanceMatrix.needsUpdate = true
@@ -3685,7 +3780,7 @@ export default function ZoneViewer({
     }
     // Rebuild materials when PCSS is toggled so they compile against the
     // shadow chunk that is actually installed.
-  }, [zoneData, lit, scene.wireframe, shaderVariant, scene.overlayBlend, genSpawn])
+  }, [zoneData, lit, scene.wireframe, shaderVariant, scene.overlayBlend, scene.zoneTransparency, genSpawn])
 
   /**
    * Anisotropy, applied to the zone's textures in place.
@@ -3910,6 +4005,15 @@ export default function ZoneViewer({
         `looking at ${center.toArray().map(n => n.toFixed(1)).join(',')} size ${diagonalSize.toFixed(1)}`)
     }
 
+    // Diagnostic: ?campos=x,y,z (world units) puts the camera at a known spot,
+    // with ?yaw=&pitch= to aim it — for matching an in-game screenshot's view.
+    const forcedPos = typeof window !== 'undefined'
+      ? (new URLSearchParams(window.location.search).get('campos') ?? '').split(',').filter(t => t.trim() !== '').map(Number)
+      : []
+    if (forcedPos.length === 3 && forcedPos.every(Number.isFinite)) {
+      camPos = forcedPos as [number, number, number]
+    }
+
     return { center, size: diagonalSize, camPos, farPlane: Math.max(10000, diagonalSize * 3) }
   }, [zoneData])
 
@@ -4079,7 +4183,7 @@ export default function ZoneViewer({
       {/* Already world space — deliberately outside the rotated group. */}
       {scene.showCollision && <CollisionOverlay world={collisionWorld} />}
 
-      <PostStack post={post} />
+      <PostStack post={post} generatorLayer={genSpawn} />
     </Canvas>
   )
 }

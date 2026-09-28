@@ -71,7 +71,23 @@ export interface ParsedCollision {
   faceFlags: Uint16Array
   /** Per-triangle top-2-bit index flags, packed as (v0<<4)|(v1<<2)|v2. Meaning unknown. */
   indexFlags: Uint8Array
+  /**
+   * Per-triangle water surface height in raw DAT space (Y down), NaN where the
+   * collision object carries none. See WATER_HEIGHT_OFFSET.
+   */
+  waterHeight: Float32Array
 }
+
+/**
+ * The collision object record behind each visEntry: a 4x4 transform, its 4x4
+ * inverse and a 3x3 normal matrix, then a flags dword (164 bytes in). Bits 4-25
+ * of that dword are a signed water surface height in 1/1024 units, zero for
+ * none. Only files above format version 0x19 (header byte 3) carry the field;
+ * older records stop after the matrices. Layout from kuluu-ffxi mzb.rs
+ * (CollisionObjectData::flags), read as a format reference.
+ */
+const WATER_HEIGHT_OFFSET = 2 * 64 + 36
+const WATER_HEIGHT_MIN_VERSION = 0x1a
 
 /** Guard against a corrupt header sending us into a multi-gigabyte allocation. */
 const MAX_TRIANGLES = 2_000_000
@@ -112,7 +128,9 @@ export function parseMzbCollision(data: Uint8Array): ParsedCollision | null {
   const indices: number[] = []
   const faceFlags: number[] = []
   const indexFlags: number[] = []
+  const waterHeight: number[] = []
   const seen = new Set<number>()
+  const hasWaterField = data[3] >= WATER_HEIGHT_MIN_VERSION
 
   /** Read the 4x4 at visEntry and emit the geometry block's triangles through it. */
   const emitGridMesh = (visEntryOffset: number, geometryOffset: number): void => {
@@ -137,6 +155,13 @@ export function parseMzbCollision(data: Uint8Array): ParsedCollision | null {
     if (indices.length / 3 + triCount > MAX_TRIANGLES) return
 
     const baseVert = positions.length / 3
+
+    let water = NaN
+    if (hasWaterField) {
+      // Signed field in bits 4..25: shift it to the top, then back down.
+      const h = (i32(visEntryOffset + WATER_HEIGHT_OFFSET) << 6) >> 10
+      if (h !== 0) water = h / 1024
+    }
 
     for (let i = 0; i < vertCount; i++) {
       const x = f32(vertsOff + (i * 3 + 0) * 4)
@@ -179,6 +204,7 @@ export function parseMzbCollision(data: Uint8Array): ParsedCollision | null {
       indexFlags.push(
         (((raw0 >> 14) & 3) << 4) | (((raw1 >> 14) & 3) << 2) | ((raw2 >> 14) & 3),
       )
+      waterHeight.push(water)
     }
   }
 
@@ -242,5 +268,6 @@ export function parseMzbCollision(data: Uint8Array): ParsedCollision | null {
     indices: new Uint32Array(indices),
     faceFlags: new Uint16Array(faceFlags),
     indexFlags: new Uint8Array(indexFlags),
+    waterHeight: new Float32Array(waterHeight),
   }
 }
