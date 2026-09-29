@@ -348,7 +348,7 @@ placements too.
 | | Status |
 |---|---|
 | **Materials from the alpha profile** | **Built and measured 2026-08-18. The classification ships; the material change does not.** Every texture now carries an `alphaProfile` and the census is one harness run away, but driving materials from it fails in both directions — read "What the alpha profile actually settled" below before touching this again |
-| **4c — pale ground squares** | Mostly fixed, still open, and the fix ships **off** by default (Ryan's call). Some squares survive in Gustaberg, unexplained |
+| **4c — pale ground squares** | **Cause found 2026-09-27** — vertex alpha never reached the GPU (see §4c). Fixed under Scene → FFXI transparency (beta), off by default pending Ryan's check |
 | **4e — white screen with bloom** | Not reproduced. Needs Ryan to say *where* it happens |
 | **Weather placement** | Textures are now correct; **placement is still absent from the zone files**. Do not confuse the two — §0b |
 | **Model viewer animations** | On Ryan's own known-issues list. POLUtils' TetraViewer is the obvious reference, and unexamined |
@@ -2235,6 +2235,30 @@ West Ronfaure's per-mesh share histogram across 349 meshes is
 spread, not two clean clusters.
 
 ### 4c. MOSTLY FIXED, STILL OPEN — pale tiles are overlay layers drawn opaque
+
+**2026-09-27 — the real cause, and why the 2026-08-15 fix only looked like one.**
+Probed at a South Gustaberg sea cliff (`?census=1` + `window.__probeAt(x, y)`,
+which lists the whole stack of meshes under a point): every surviving square is
+an `umigake*_m` pair — the opaque `gus_02` ground and a `0x8000` overlay on
+`gus_07` (pale sand, texel alpha solid) whose vertex alpha is only ever 0 or 128.
+Hiding the `0x8000` layer removes every square. Two bugs in `patchZoneShader`
+meant **no vertex alpha had ever reached the screen**:
+
+1. It **replaces** three's `color_fragment` with its own baked-colour curve, which
+   multiplies `vColor.rgb` and silently drops `vColor.a`.
+2. Its old "DXT3 alpha fix" forces every texel brighter than 0.05 to alpha 1
+   unless `keepAlpha` is passed — and **no call site ever passed it**, including
+   the isOverlay path the comment says it exists for.
+
+So the overlays drew at full strength under every setting. The 08-15 "fix"
+changed sorting and depth writes, which moved pixels, not the fade. Fixed for
+the FFXI rule only (`zoneRuleAlpha`: `_` cutouts and `0x8000` blends keep their
+alpha, and vertex alpha is multiplied in). With the rule on, the cliff's squares
+become soft sandy blends. Default and the older **Blend terrain overlays**
+toggle are byte-identical to before — that toggle's `direct` reading was only
+tolerable because alpha was discarded; given real alpha it turns base ground
+translucent. It should be retired in favour of the rule once Ryan confirms.
+
 
 **Largely fixed 2026-08-15, but NOT closed.** Ryan, after the fix: *"there are still some squares in Gustaberg, although much less than before."* The mechanism below is right and the bulk of the artifact is gone; some remainder has a cause not yet identified. **Start here if picking 4c up: find what the surviving squares have in common that the fixed ones did not.** The obvious next cut is to dump the per-mesh vertex-alpha shape (flat vs ramp, min, max) for the meshes still showing pale, using `window.__zoneData` under `?census=1`, and compare against the ones that came good.
 

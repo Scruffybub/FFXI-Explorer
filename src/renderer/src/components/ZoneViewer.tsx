@@ -178,8 +178,15 @@ function patchZoneShader(
       // by 2 was tried and reverted: it brightened lit surfaces enough to look
       // glossy, and a uniform multiply cannot change shadow contrast anyway,
       // since shadowed and lit vertices scale together.
+      //
+      // Vertex alpha is FFXI's overlay weight and must survive this override for
+      // meshes that blend (keepAlpha): three's own color_fragment multiplies it
+      // in, and replacing the chunk silently dropped it, so no overlay ever faded
+      // (Gustaberg's squares, 2026-09-27). Left out otherwise, so the default
+      // and the older overlay toggle render exactly as they always have.
       `#if defined( USE_COLOR_ALPHA )
         diffuseColor.rgb *= pow( max( vColor.rgb, vec3( 0.0 ) ), vec3( bakedInfluence ) );
+        ${keepAlpha ? 'diffuseColor.a *= vColor.a;' : ''}
       #elif defined( USE_COLOR )
         diffuseColor.rgb *= pow( max( vColor.rgb, vec3( 0.0 ) ), vec3( bakedInfluence ) );
       #endif`
@@ -1478,6 +1485,47 @@ function CameraOrientation() {
       delete (window as unknown as { __aimCamera?: typeof aim }).__aimCamera
     }
   }, [camera])
+  return null
+}
+
+/**
+ * Diagnostic (?census=1): window.__probeAt(x, y), in 0..1 viewport fractions,
+ * lists every zone mesh under that point within a unit of the nearest — the
+ * whole stack of coplanar base and overlay layers, which the inspector's single
+ * nearest hit cannot tell apart. Per hit: prefab, names, render-state word, and
+ * the vertex alpha and UV interpolated at the hit. window.__zoneMeshes exposes the
+ * meshes themselves, so a harness can hide a class of them.
+ */
+function ProbeHook({ meshes, zoneData }: { meshes: THREE.Object3D[]; zoneData: ParsedZone }) {
+  const { camera } = useThree()
+  useEffect(() => {
+    const w = window as unknown as { __probeAt?: (x: number, y: number) => unknown }
+    w.__probeAt = (x: number, y: number) => {
+      const raycaster = new THREE.Raycaster()
+      raycaster.setFromCamera(new THREE.Vector2(x * 2 - 1, -(y * 2 - 1)), camera)
+      const hits = raycaster.intersectObjects(meshes.filter(m => m.visible), false)
+      if (!hits.length) return []
+      const near = hits[0].distance
+      return hits.filter(h => h.distance - near < 1).map(h => {
+        const idx = h.object.userData.prefabIdx as number
+        const p = zoneData.prefabs[idx]
+        const f = h.face
+        const bc = h.barycoord
+        const lerp = (arr: number[], stride: number, k: number) =>
+          f && bc ? arr[f.a * stride + k] * bc.x + arr[f.b * stride + k] * bc.y + arr[f.c * stride + k] * bc.z : NaN
+        return {
+          prefab: idx, d: +h.distance.toFixed(2), inst: h.instanceId,
+          name: p?.meshName, tex: (p?.textureName ?? '').trim(), rs: '0x' + ((p?.blending ?? 0) >>> 0).toString(16),
+          va: p ? +lerp(p.colors, 4, 3).toFixed(3) : null,
+          vc: p ? +lerp(p.colors, 4, 0).toFixed(3) : null,
+          uv: p ? [+lerp(p.uvs, 2, 0).toFixed(3), +lerp(p.uvs, 2, 1).toFixed(3)] : null,
+          renderOrder: h.object.renderOrder,
+        }
+      })
+    }
+    ;(window as unknown as { __zoneMeshes?: THREE.Object3D[] }).__zoneMeshes = meshes
+    return () => { delete w.__probeAt }
+  }, [camera, meshes, zoneData])
   return null
 }
 
@@ -3222,7 +3270,17 @@ export default function ZoneViewer({
         }
 
         if (lit) litMaterials.push(mat as THREE.MeshStandardMaterial)
-        patchZoneShader(mat, zoneUniforms.current, lit, shaderVariant)
+        // Under the FFXI rule, meshes whose alpha is real must keep it.
+        // patchZoneShader otherwise forces every texel that is not near-black to
+        // full opacity (its old DXT3 workaround), and nothing passed this flag —
+        // not even the older overlay toggle, whose isOverlay path therefore never
+        // blended by vertex alpha. It stays that way so that toggle is unchanged;
+        // the rule supersedes it. Without this:
+        // Gustaberg's pale sand overlays (gus_07, 0x8000, vertex alpha 0 or 128)
+        // drew as solid hard-edged squares under every setting, 2026-09-27.
+        const zoneRuleAlpha = zoneRule && !isWater &&
+          (((prefab.meshName ?? '').startsWith('_')) || ((prefab.blending >>> 0) & 0x8000) !== 0)
+        patchZoneShader(mat, zoneUniforms.current, lit, shaderVariant, zoneRuleAlpha)
         materials.push(mat)
         matMap.set(prefabIdx, mat)
       }
@@ -4154,6 +4212,7 @@ export default function ZoneViewer({
       )}
 
       {waterFocus && <CameraGoTo target={waterFocus} />}
+      {CENSUS && <ProbeHook meshes={instancedMeshes} zoneData={zoneData} />}
       {onInspectResult && (
         <SurfaceInspector
           meshes={instancedMeshes}
