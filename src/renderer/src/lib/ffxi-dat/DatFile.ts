@@ -25,8 +25,14 @@ export const BLOCK_ANIM = 0x2B
 
 const DATHEAD_SIZE = 8
 const BLOCK_PADDING = 8
-/** NPC and monster DATs routinely carry 100+ blocks. */
-const BLOCK_LIMIT = 500
+/**
+ * A runaway-chain guard, not a size estimate. It was 500 until 2026-09-28; a scan
+ * of all 52,876 DATs in a retail install found no mesh-carrying file past 500
+ * blocks (the largest model files stay well under), but 30 mesh-less files in
+ * ROM/296-300 do reach 504-509 with animation blocks after the cap, and the zone
+ * reader lost whole zones to the same kind of silent cap. Matches ZoneFile.ts.
+ */
+const BLOCK_LIMIT = 20000
 
 interface DatBlock {
   type: number
@@ -54,7 +60,10 @@ function parseBlockChain(reader: DatReader): DatBlock[] {
 
     if (nextUnits === 0) break
     offset += blockSize
-    if (blocks.length > BLOCK_LIMIT) break
+    if (blocks.length > BLOCK_LIMIT) {
+      console.warn(`[DatFile] block limit ${BLOCK_LIMIT} reached — the rest of this file is not read`)
+      break
+    }
   }
 
   return blocks
