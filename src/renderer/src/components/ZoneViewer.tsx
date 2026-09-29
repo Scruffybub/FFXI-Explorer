@@ -2596,7 +2596,9 @@ export default function ZoneViewer({
     // FFXI transparency rules need vertex alpha on the /128 scale ('double'):
     // FFXI's zone alpha is vertex alpha x texel alpha with 128 as identity.
     const zoneRule = scene.zoneTransparency
-    const alphaMode = VERTEX_ALPHA || (zoneRule ? 'double' : scene.overlayBlend ? 'direct' : 'off')
+    // ?valpha= still forces a mode for testing; the older overlay toggle that
+    // chose 'direct' was retired 2026-09-28 in favour of the rule (HANDOFF §4c).
+    const alphaMode = VERTEX_ALPHA || (zoneRule ? 'double' : 'off')
     /** Every weather state this zone carries geometry for. */
     const weatherStates = new Set<string>()
     /** prefab index -> its weather state, for tagging the meshes below. */
@@ -3838,7 +3840,7 @@ export default function ZoneViewer({
     }
     // Rebuild materials when PCSS is toggled so they compile against the
     // shadow chunk that is actually installed.
-  }, [zoneData, lit, scene.wireframe, shaderVariant, scene.overlayBlend, scene.zoneTransparency, genSpawn])
+  }, [zoneData, lit, scene.wireframe, shaderVariant, scene.zoneTransparency, genSpawn])
 
   /**
    * Anisotropy, applied to the zone's textures in place.

@@ -57,7 +57,11 @@ in game despite a 98%-clear sheet. Almost every model is a **pair**: an opaque
 `0x0000` part and a `0x8000` part on the same texture — `yama_1_m`, `kabe_1_m`,
 `san_tower`. Those `0x8000` parts are §4c's terrain overlays.
 
-**Scene → FFXI transparency (beta)**, off by default, implements the rule (it
+**Now the default (2026-09-28, Ryan's call after flying both Gustabergs):
+Scene → FFXI transparency**, on, with the older Blend terrain overlays toggle
+removed. The new default is pixel-identical to the rule-on renders and
+`scene_zoneTransparency=false` to the old default (zones 100, 107). As first
+built it was a beta toggle, off by default. It implements the rule (it
 forces vertex alpha to the /128 scale and supersedes the overlay heuristic).
 Measured in West Ronfaure: 9.9% of the view changes, dark pixels 0.78% → 0.26%,
 no holes. **Unchecked in motion** — §4c's last blended-overlay attempt made
@@ -310,8 +314,16 @@ to 3,917 and gains Château d'Oraguille's spires and the long bridge (44% of the
 view changed). West Ronfaure and South Gustaberg, under the cap, re-verified
 byte-identical.
 
-`DatFile.ts` has its own cap of **500** for model and animation DATs. Unchecked —
-and a plausible suspect for the model viewer's wrong-animation reports.
+`DatFile.ts` had its own cap of **500** for model and animation DATs. **Checked
+2026-09-28 and cleared as a suspect**: a header-only walk of all 52,876 DATs in
+the retail install found 373 past 500 blocks — 237 zone files (ZoneFile's reader,
+cap 20000), 30 mesh-less files in ROM/296–300 with two animation blocks after
+block 500, and 4 with only textures after it. **No mesh-carrying file exceeds
+500**, and the model browser refuses mesh-less files, so nothing loadable ever
+lost data to this cap; it does not explain the wrong-animation reports. Raised to
+20000 with a warning anyway, matching ZoneFile. To re-run the census, walk each
+file's headers only (name 4 bytes, then a u32: type = low 7 bits, size = bits
+7–25 × 16) — the whole install takes a couple of minutes.
 
 #### `?genspawn=1` — stage 1, off by default
 
@@ -348,7 +360,7 @@ placements too.
 | | Status |
 |---|---|
 | **Materials from the alpha profile** | **Built and measured 2026-08-18. The classification ships; the material change does not.** Every texture now carries an `alphaProfile` and the census is one harness run away, but driving materials from it fails in both directions — read "What the alpha profile actually settled" below before touching this again |
-| **4c — pale ground squares** | **Cause found 2026-09-27** — vertex alpha never reached the GPU (see §4c). Fixed under Scene → FFXI transparency (beta), off by default pending Ryan's check |
+| **4c — pale ground squares** | **Fixed** — vertex alpha never reached the GPU (see §4c). Fixed by the FFXI transparency rule, confirmed by Ryan and the default since 2026-09-28 |
 | **4e — white screen with bloom** | Not reproduced. Needs Ryan to say *where* it happens |
 | **Weather placement** | Textures are now correct; **placement is still absent from the zone files**. Do not confuse the two — §0b |
 | **Model viewer animations** | On Ryan's own known-issues list. POLUtils' TetraViewer is the obvious reference, and unexamined |
@@ -2212,6 +2224,26 @@ rivers from going black.
 
 ### 4b. Cutout alpha — black boxes and pale slabs
 
+**Re-checked 2026-09-28 under Scene → FFXI transparency, full-zone views
+(`?campos=`), rule off vs on:**
+
+- **Foliage:** fixed by the rule. Lufaise's cedars (`_tab_sugi*`, 0x2000,
+  underscore-named) draw as solid dark slabs with the rule off and as fine,
+  lacy needles with it on (alpha test 0.375 on real texel × vertex alpha).
+  West Ronfaure's canopy likewise gets airier, with no holes; dark pixels 35.8% → 31.4%.
+- **Lufaise `lat_wf` is not a waterfall** — it is the cliff-face sheet on every
+  `be_*_cl_*` cliff, each paired as a 0x0 solid part and a 0x8000 part (like
+  Gustaberg's ground). Under the rule the pale sand (`tab_suna`) lake bed below
+  the cliffs blends softly into the grass instead of ending in a hard edge.
+  The pale bed itself is covered by the generator sea when Generator water is on.
+- **Gustaberg arch "black boxes":** not present in a full-zone view, rule off
+  or on — an artefact of the isolated capture (its fog and framing). The rule
+  also softens the hard-edged pale path in front of the gate (the §4c bug).
+
+So the table below is history: the signal was the mesh name and render-state
+word all along, and the rule's cutout/blend paths were only usable once
+`patchZoneShader` stopped discarding alpha (§4c).
+
 Cutout art whose blending flag is `0` draws its transparent regions as solid
 colour: black rectangles behind foliage sprites, pale slabs across Lufaise's
 `lat_wf` waterfall.
@@ -2254,7 +2286,8 @@ So the overlays drew at full strength under every setting. The 08-15 "fix"
 changed sorting and depth writes, which moved pixels, not the fade. Fixed for
 the FFXI rule only (`zoneRuleAlpha`: `_` cutouts and `0x8000` blends keep their
 alpha, and vertex alpha is multiplied in). With the rule on, the cliff's squares
-become soft sandy blends. Default and the older **Blend terrain overlays**
+become soft sandy blends. (2026-09-28: the rule is now the default and that
+toggle is gone; `?valpha=` still forces a mode.) Default and the older **Blend terrain overlays**
 toggle are byte-identical to before — that toggle's `direct` reading was only
 tolerable because alpha was discarded; given real alpha it turns base ground
 translucent. It should be retired in favour of the rule once Ryan confirms.

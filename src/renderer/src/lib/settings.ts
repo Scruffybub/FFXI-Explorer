@@ -259,15 +259,6 @@ export interface SceneSettings {
    * what makes the capture usable as a plan.
    */
   /**
-   * Blend FFXI terrain overlay layers using their per-vertex alpha.
-   *
-   * The game lays an overlay mesh over base ground and fades it in with a
-   * per-vertex weight. Dropping that weight drew every overlay at full
-   * strength, which is what South Gustaberg's pale mismatched squares were.
-   */
-  overlayBlend: boolean
-
-  /**
    * Draw the water FFXI places with generator chunks — seas and river sheets,
    * tinted and scrolling. The meshes were always in the zone files; nothing
    * read the generators that position and scale them. Beta: off by default
@@ -281,8 +272,11 @@ export interface SceneSettings {
    * a mesh whose render-state word has 0x8000 is blended, without depth
    * writes; everything else is opaque. The texture's alpha is never the
    * signal — that is why every attempt to read transparency from it failed.
-   * Beta: off by default until checked in motion. Rule from kuluu-ffxi
-   * dat_mmb.rs submesh_alpha_mode and zone_ffxi.wgsl.
+   * On by default since 2026-09-28, after Ryan flew both Gustabergs with it:
+   * it fixes the pale ground squares (HANDOFF §4c) and foliage cutouts (§4b).
+   * It replaced the older "Blend terrain overlays" toggle, whose reading of
+   * vertex alpha only held while the shader discarded alpha. Rule from
+   * kuluu-ffxi dat_mmb.rs submesh_alpha_mode and zone_ffxi.wgsl.
    */
   zoneTransparency: boolean
 
@@ -441,9 +435,8 @@ export const DEFAULT_SCENE: SceneSettings = {
   showCollision: false,
   weatherState: '',
   weatherFollowsCamera: true,
-  overlayBlend: false,
   generatorWater: false,
-  zoneTransparency: false,
+  zoneTransparency: true,
   anisotropy: 16,
   mapView: false,
   mapZoom: 1,
