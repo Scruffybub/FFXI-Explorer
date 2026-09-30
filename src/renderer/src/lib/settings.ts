@@ -267,6 +267,15 @@ export interface SceneSettings {
   generatorWater: boolean
 
   /**
+   * Weather from the zone's own environment records (block 0x2F): the game's
+   * sky gradient, its terrain and water lighting (ambient, sun and moon, in
+   * its own vertex-lighting maths) and its fog, for the chosen weather state
+   * and time of day, blended between the hourly records as the game does.
+   * Lighting presets are set aside while it is on. Beta, off by default.
+   */
+  zoneWeather: boolean
+
+  /**
    * Decide each zone mesh's transparency the way FFXI does: a mesh whose name
    * starts with `_` is a cutout (alpha test 0.375 on vertex x texture alpha);
    * a mesh whose render-state word has 0x8000 is blended, without depth
@@ -436,6 +445,7 @@ export const DEFAULT_SCENE: SceneSettings = {
   weatherState: '',
   weatherFollowsCamera: true,
   generatorWater: false,
+  zoneWeather: false,
   zoneTransparency: true,
   anisotropy: 16,
   mapView: false,

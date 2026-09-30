@@ -34,6 +34,87 @@ Three long-running problems fell in one afternoon once it was used:
 When a decode looks nearly right, stop theorising and get a reference. It is
 faster than any amount of squinting at screenshots.
 
+### FFXI's lighting is data: the 0x2F environment records — found 2026-09-28
+
+Items "zone lighting on water" and "weather" turn out to be one job. Each zone
+DAT carries **0x2F chunks named by time of day (HHMM)** in `<zone>/weat/<state>/`
+(West Ronfaure: `fine`, `clod`, `mist`, `suny`; `ev01/…` records are indoor
+event variants). A record is 176 bytes (xim `EnvironmentSection.kt`, kuluu
+`ffxi-dat/src/weather.rs`, read as format references):
+
+| Offset | Field |
+|---|---|
+| 0 | u32 indoor flag (1 = indoors; moon colour then encodes a signed light direction) |
+| 12–36 | **model** light: sun RGBA, moon RGBA, ambient RGBA, fog RGBA, fog end f32, fog start f32, diffuse multiplier f32 |
+| 44–68 | **terrain** light, same layout |
+| 76 | clear colour; 88 far clip; 108–136 sky gradient 8 RGBA; 140–168 its 8 altitudes |
+
+Colours are R,G,B,A bytes. Ambient = byte × bias / 510, capped at 0.5 (the
+shader doubles it); diffuse = byte / 255 × multiplier; bias (1.4, 1.36, 1.45)
+applies only when every channel is below 0xCC. The sun direction follows the
+clock: (sin a, cos a, 0) with a = seconds × (π/2)/6 h, the moon opposite. FFXI
+multiplies ambient + N·L × sun into terrain AND generator meshes (kuluu
+`zone_ffxi.wgsl`: `lit = irradiance × vertex colour`, then the stage chain).
+
+West Ronfaure, terrain light at 12:00: fine amb (166,168,174) sun (198,198,164)
+×1.5; clod amb (155,156,164) sun (167,166,152) ×1.61; midnight fine amb
+(82,84,131), no sun. **At noon this brightens rather than darkens the pond**, so
+the hand darkening (WATER_TONE) is not explained by lighting alone — the
+screenshot's in-game time and weather matter. Dump tool: `env-dump.js`
+pattern — walk chunks, keep a directory stack, decode type 0x2F.
+
+**Built first, at Ryan's request: the sky dome — Weather → Zone sky (beta),
+off by default.** `EnvironmentParser.ts` reads every 0x2F under
+`<zone>/weat/<state>/` into `ParsedZone.environment` (`[ENV]` logs the count and
+states; `ev01/…` cutscene records are skipped, and all-black sky gradients are
+dropped as placeholders, as kuluu does). `sampleSkyGradient` blends the two
+records either side of the time of day, wrapping midnight. The dome shader
+finds a ray's ring position as asin(ray.y)/(π/2) — retail builds the dome as a
+lathe at angle = altitude × π/2 (1.57075 is retail's π/2 literal) — and
+interpolates the bracketing colours; below the horizon takes ring 0. Colours
+are sRGB bytes, decoded to linear for the uniforms. State: the Weather panel's
+choice if the zone has records for it, else `fine`, else `suny` (Lufaise has no
+`fine`), else the first. Checked: West Ronfaure fine at 12:00 deep blue to pale
+horizon, 06:00 golden, 18:00 orange-violet, 00:00 navy; clod at noon overcast
+grey-blue; South Gustaberg and Lufaise blue at noon. Toggle off is
+pixel-identical.
+
+**Then the rest of the weather, same day — the toggle is now Weather → Zone
+weather (beta)** (`scene.zoneWeather`): sky, lighting, fog and sky layers
+together; lighting presets are set aside while it runs (`zoneLight` forces the
+basic-material path with shader variant `'ffxi'`).
+
+- **Lighting** (`lib/zoneLighting.ts`): FFXI's own maths — per vertex
+  `L = ambient + N·Lsun·sun + N·Lmoon·moon`, then in gamma
+  `out = saturate(2 × texel × saturate(vc × L))`. Colours converted per xim
+  (ambient bias×byte/510 cap 0.5; diffuse byte/255×multiplier, biased when dim),
+  blended between records by the hour. Sun direction from the clock (overhead at
+  noon); moon opposite. Water layers get × L^2.2 (`applySpawnStages`, now in
+  `lib/spawnStages.ts`). **Trap found:** ZoneViewer stores every non-water
+  normal flipped (DAT normals point up; the built ones point down) and the
+  double-sided three.js materials hid it — the FFXI shader negates them.
+  Unflipped, the sun and moon lit nothing and midnight went black.
+- **Fog:** the record's terrain fog colour and start/end as THREE.Fog, linear,
+  no height falloff (FFXI has none). Map view leaves it off.
+- **Sky layers** (`components/SkyLayers.tsx`) from the weat/<state> generators
+  (now parsed: attach nibble at body[0], blend byte 0x1E, time-of-day curves
+  0x60–0x63, spin 0x0B): cloud canopies cld1/cld2 and the star domes follow the
+  camera, pushed out to the dome, faded by the fog they'd have had at retail
+  distance (as opacity — colour made a pale band); their colour and alpha come
+  from kcr1/kcg1/kcb1, ksta etc. sampled at the day fraction.
+- **Sun and moon: stand-in discs** (3° and 5°) at the data's directions,
+  coloured and faded by the generators' curves (ksr1/ksg1/ksb1, k000). The
+  retail meshes (`sunsphere`/`moonsphere`, previously skipped; now parsed as
+  `celestial` prefabs, appended last so nothing renumbers) are a flat disc
+  (render state 0 — retail's invisible lens-flare occlusion quad) plus an
+  0x8000 glow ring whose alpha falls 128→0 out to 25 units; at 70× and 900
+  units that glow whitened the whole sky, so it is not drawn until a reference
+  says how retail sizes or blends it. The Ronfaure sun disc proper is the
+  screen-space lens flare (lf02, not built); the moon's phase sprite is a 0x21
+  sheet (not parsed; no Vana'diel calendar either).
+- The Weather list shows the zone's recorded states while Zone weather is on
+  ("star"/"effect" mesh groups fell back to clear skies and looked identical).
+
 ### FFXI's zone transparency rule — found 2026-09-27, behind a toggle
 
 **The answer to §4b, §4f and §5a, from kuluu-ffxi** (`dat_mmb.rs submesh_alpha_mode`,

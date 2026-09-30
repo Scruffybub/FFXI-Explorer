@@ -27,7 +27,14 @@
  *              0x0F  scale 3 x f32
  *              0x16  tint RGBA bytes, 0x80 = identity — alpha below 0x80 is
  *                    translucent, the same 0x80 convention as everything else
+ *              0x1E  blend byte (low nibble 8 = additive, 4 = alpha blend)
+ *              0x60–0x63  time-of-day KeyFrame for R, G, B, alpha (id at +4),
+ *                    sampled at the fraction of the day by section-3 updaters
+ *                    0x3C–0x3F: colour is set from the curve, alpha multiplied
  *   section 3  0x27  U scroll per frame      0x28  V scroll per frame
+ *
+ *   body[0x00] u16 attach flags: low nibble 0xE = rides the sun's direction,
+ *              0xF = the moon's; clouds and stars carry 0 and follow the camera
  *
  * Frames are FFXI effect frames, 60 per second (xim Fps.internalFps).
  */
@@ -47,7 +54,17 @@ export interface RawModelSpawn {
    * the channel they drive. See KEYFRAME_CHANNELS.
    */
   tracks: Partial<Record<KeyFrameChannel, string>>
+  /** Attach type, the low nibble of body[0]: 0xE sun, 0xF moon, 0 none. */
+  attach: number
+  /** The 0x1E blend byte, or -1 when the generator carries none. */
+  blend: number
+  /** Time-of-day KeyFrame ids (0x60–0x63), sampled by the fraction of the day. */
+  todTracks: Partial<Record<'r' | 'g' | 'b' | 'alpha', string>>
+  /** 0x0B: rotation per frame, radians (West Ronfaure's cld1 turns 1.75e-4 about Y). */
+  spin: [number, number, number]
 }
+
+const TOD_CHANNELS = { 0x60: 'r', 0x61: 'g', 0x62: 'b', 0x63: 'alpha' } as const
 
 /**
  * Section-2 opcodes 0x21-0x2F bind a KeyFrame chunk (4-char id at payload+4) to
@@ -108,6 +125,14 @@ export function parseModelSpawn(body: Uint8Array): RawModelSpawn | null {
   let tint: [number, number, number, number] = [0x80, 0x80, 0x80, 0x80]
   let life = 0
   const tracks: Partial<Record<KeyFrameChannel, string>> = {}
+  const todTracks: RawModelSpawn['todTracks'] = {}
+  let blend = -1
+  let spin: [number, number, number] = [0, 0, 0]
+  const readId = (p: number) => {
+    let end = p + 4
+    while (end < p + 8 && body[end] !== 0) end++
+    return String.fromCharCode(...body.subarray(p + 4, end)).trim()
+  }
 
   for (const { op, p } of records(view, body, 0x74)) {
     if (op === 0x01 && p + 30 <= body.length) {
@@ -125,6 +150,13 @@ export function parseModelSpawn(body: Uint8Array): RawModelSpawn | null {
       scale = f3(p)
     } else if (op === 0x16 && p + 4 <= body.length) {
       tint = [body[p], body[p + 1], body[p + 2], body[p + 3]]
+    } else if (op === 0x0b && p + 12 <= body.length) {
+      spin = f3(p)
+    } else if (op === 0x1e && p + 1 <= body.length) {
+      blend = body[p]
+    } else if (op in TOD_CHANNELS && p + 8 <= body.length) {
+      const id = readId(p)
+      if (id) todTracks[TOD_CHANNELS[op as keyof typeof TOD_CHANNELS]] = id
     } else if (op in KEYFRAME_CHANNELS && p + 8 <= body.length) {
       let end = p + 4
       while (end < p + 8 && body[end] !== 0) end++
@@ -141,7 +173,8 @@ export function parseModelSpawn(body: Uint8Array): RawModelSpawn | null {
   }
 
   return {
-    model, position, rotation, scale, tint, uvScroll, life, tracks,
+    model, position, rotation, scale, tint, uvScroll, life, tracks, blend, todTracks, spin,
+    attach: view.getUint16(0, true) & 0xf,
     followCamera: (flags & FLAG_FOLLOW_CAMERA) !== 0,
   }
 }

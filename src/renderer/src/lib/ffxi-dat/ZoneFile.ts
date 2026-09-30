@@ -2,11 +2,12 @@ import { DatReader } from './DatReader'
 import { parseTextureBlock } from './TextureParser'
 import { parseModelSpawn, parseKeyFrames } from './GeneratorParser'
 import { parseD3m } from './D3mParser'
+import { parseEnvironmentRecord } from './EnvironmentParser'
 import { decodeMzb, decodeMmb } from './ZoneDecrypt'
 import { parseMzbBlock } from './MzbParser'
 import { parseMzbCollision, type ParsedCollision } from './CollisionParser'
 import { parseMmbBlock } from './MmbParser'
-import type { GeneratorSpawn, ParsedZone, ParsedZoneMesh, ParsedTexture, ZoneMeshInstance } from './types'
+import type { GeneratorSpawn, ParsedZone, ParsedZoneMesh, ParsedTexture, ZoneEnvRecord, ZoneMeshInstance } from './types'
 
 const DATHEAD_SIZE = 8
 const BLOCK_PADDING = 8
@@ -31,6 +32,8 @@ const BLOCK_GENERATOR = 0x05
 const BLOCK_D3M = 0x1F
 /** Animation curves generators sample over a particle's life. */
 const BLOCK_KEYFRAME = 0x19
+/** Environment records: sky gradient, lighting and fog, per weather and hour. */
+const BLOCK_ENVIRONMENT = 0x2F
 
 interface DatBlock {
   name: string
@@ -187,8 +190,9 @@ export function parseZoneFile(
   // prefab index -> the DAT directory of its MMB block, for scoped lookups
   const prefabDir: string[] = []
 
-  // MMB block names for sky objects rendered by our procedural sky instead
+  // MMB block names of the sun and moon meshes, which only sky generators place
   const skyObjectNames = new Set(['sunsphere', 'moonsphere'])
+  const celestial: { name: string; chunk: string; dir: string; meshes: ParsedZoneMesh[] }[] = []
 
   for (let i = 0; i < mmbBlocks.length; i++) {
     const block = mmbBlocks[i]
@@ -199,9 +203,6 @@ export function parseZoneFile(
       const blockData = new Uint8Array(buffer, start, len)
       const decryptedData = decodeMmb(blockData)
       const name = readMmbName(decryptedData)
-
-      // Skip sky objects — rendered by our procedural sky instead
-      if (skyObjectNames.has(name)) continue
 
       const meshes = parseMmbBlock(decryptedData)
 
@@ -218,6 +219,14 @@ export function parseZoneFile(
         } else {
           mesh.materialIndex = -1
         }
+      }
+
+      // The sun and moon: kept aside and appended after everything else, so
+      // they renumber nothing and play no part in the fallback texture. The
+      // procedural sky replaced them until sky generators could place them.
+      if (skyObjectNames.has(name)) {
+        if (meshes.length) celestial.push({ name, chunk: block.name.trim(), dir: block.dir, meshes })
+        continue
       }
 
       if (meshes.length > 0) {
@@ -257,6 +266,19 @@ export function parseZoneFile(
       if (p.materialIndex === -1) { p.materialIndex = fallbackTexIdx; count++ }
     }
     if (count > 0) console.log(`[ZoneFile] ${count} untextured meshes → fallback texture[${fallbackTexIdx}]`)
+  }
+
+  for (const c of celestial) {
+    const startIdx = prefabs.length
+    for (let m = 0; m < c.meshes.length; m++) {
+      const mesh = c.meshes[m]
+      mesh.meshName = c.name
+      mesh.celestial = true
+      prefabs.push(mesh)
+      prefabSource[startIdx + m] = c.name
+      prefabChunk[startIdx + m] = c.chunk
+      prefabDir[startIdx + m] = c.dir
+    }
   }
 
   onProgress?.(`MMB: ${prefabs.length} meshes from ${mmbBlocks.length} blocks, ${mmbNameMap.size} unique names`)
@@ -491,13 +513,38 @@ export function parseZoneFile(
       const curve = id ? findCurve(block.dir, id) : undefined
       if (curve) curves[ch] = curve
     }
-    spawns.push({ generator: block.name.trim(), dir: block.dir, prefabIndices, ...raw, curves })
+    const todCurves: GeneratorSpawn['todCurves'] = {}
+    for (const ch of ['r', 'g', 'b', 'alpha'] as const) {
+      const id = raw.todTracks[ch]
+      const curve = id ? findCurve(block.dir, id) : undefined
+      if (curve) todCurves[ch] = curve
+    }
+    spawns.push({ generator: block.name.trim(), dir: block.dir, prefabIndices, ...raw, curves, todCurves })
   }
   if (spawns.length || unresolvedSpawns) {
     console.log(`[GENSPAWN] ${spawns.length} model spawns resolved, ${unresolvedSpawns} unresolved; ${d3mCount} D3M effect meshes loaded`)
   }
 
-  return { prefabs, instances, textures, textureNames, collision, spawns }
+  // ── Pass 5: environment records under <zone>/weat/<state>/ ──
+  // Records elsewhere (event variants such as f_ro/ev01/fine) are cutscene
+  // settings, not the zone's weather, and are left out.
+  const environment: ZoneEnvRecord[] = []
+  for (const block of blocks.filter(b => b.type === BLOCK_ENVIRONMENT)) {
+    const parts = block.dir.split('/')
+    const w = parts.indexOf('weat')
+    if (w < 0 || w + 1 >= parts.length) continue
+    const start = block.dataOffset + BLOCK_PADDING
+    const len = block.dataLength - BLOCK_PADDING
+    if (len <= 0) continue
+    const rec = parseEnvironmentRecord(block.name, block.dir, parts[w + 1], new Uint8Array(buffer, start, len))
+    if (rec) environment.push(rec)
+  }
+  if (environment.length) {
+    const states = [...new Set(environment.map(r => r.state))]
+    console.log(`[ENV] ${environment.length} environment records, states ${JSON.stringify(states)}`)
+  }
+
+  return { prefabs, instances, textures, textureNames, collision, spawns, environment }
 }
 
 /** Concatenate collision from every MZB block in the file, rebasing indices. */

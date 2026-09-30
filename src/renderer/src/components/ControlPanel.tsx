@@ -861,6 +861,12 @@ export default function ControlPanel({
         title="Weather"
         info="Every zone carries a set of sky and weather meshes that the client swaps between at runtime. FFXI ships no placement for any of it, so where these sit is the viewer's choice, not the game's data."
       >
+        <Toggle
+          label="Zone weather (beta)"
+          checked={scene.zoneWeather}
+          onChange={v => onScene({ zoneWeather: v })}
+          info="Use the weather the zone's own data describes: FFXI stores a sky gradient, the sun, moon and ambient light, and the fog for each weather and hour, and blends between the hours as the clock moves. Follows the weather state and time of day; with no state chosen it shows clear weather. Lighting presets are set aside while this is on. Zones without the data keep the usual sky and lighting."
+        />
         {weatherStates.length === 0 ? (
           <p className="note small">This zone carries no weather geometry.</p>
         ) : (

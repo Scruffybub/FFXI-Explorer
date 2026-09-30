@@ -6,14 +6,20 @@ import {
   DepthOfField, Autofocus,
 } from '@react-three/postprocessing'
 import * as THREE from 'three'
-import type { ParsedZone, ParsedDatFile } from '../lib/ffxi-dat'
+import type { ParsedZone, ParsedDatFile, ZoneEnvRecord } from '../lib/ffxi-dat'
+import { sampleSkyGradient } from '../lib/ffxi-dat'
 import { sampleKeyFrames } from '../lib/ffxi-dat/GeneratorParser'
 import { buildModel, type BuiltModel } from '../lib/modelBuild'
 import { invertRigidMatrix4, poseSkeleton, skinMeshes } from '../lib/skinning'
 import { CollisionWorld } from '../lib/CollisionWorld'
 import {
-  GammaBlendPass, GAMMA_BLEND_LAYER, GAMMA_OUT_GLSL, gammaOutUniform,
+  GammaBlendPass, GAMMA_BLEND_LAYER, SRGB_GLSL,
 } from '../lib/GammaBlendPass'
+import {
+  ffxiLight, FFXI_LIGHT_PARS, FFXI_LIGHT_VERTEX, sampleTerrainLight, sunDirection,
+} from '../lib/zoneLighting'
+import { applySpawnStages } from '../lib/spawnStages'
+import { SkyLayers } from './SkyLayers'
 import type {
   LightingSettings, PointLightSettings, PostSettings, SceneSettings, SurfaceInfo, ToneMappingMode,
 } from '../lib/settings'
@@ -131,7 +137,12 @@ function patchZoneShader(
   variant: string,
   keepAlpha = false,
 ) {
+  // 'ffxi': Zone weather drives the lighting — FFXI's own vertex lighting and
+  // MODULATE2X stage in place of the baked-colour curve, and its plain linear
+  // fog with no height falloff. See lib/zoneLighting.ts.
+  const ffxi = variant === 'ffxi'
   material.onBeforeCompile = (shader) => {
+    if (ffxi) Object.assign(shader.uniforms, ffxiLight)
     shader.uniforms.fogHeightBase = uniforms.fogHeightBase
     shader.uniforms.fogHeightRange = uniforms.fogHeightRange
     shader.uniforms.bakedInfluence = uniforms.bakedInfluence
@@ -139,7 +150,8 @@ function patchZoneShader(
     shader.vertexShader = shader.vertexShader.replace(
       '#include <fog_pars_vertex>',
       `#include <fog_pars_vertex>
-      varying float vWorldY;`
+      varying float vWorldY;
+      ${ffxi ? FFXI_LIGHT_PARS : ''}`
     )
     shader.vertexShader = shader.vertexShader.replace(
       '#include <fog_vertex>',
@@ -149,14 +161,16 @@ function patchZoneShader(
       #else
         vec4 hfWorldPos = modelMatrix * vec4(position, 1.0);
       #endif
-      vWorldY = hfWorldPos.y;`
+      vWorldY = hfWorldPos.y;
+      ${ffxi ? FFXI_LIGHT_VERTEX : ''}`
     )
     shader.fragmentShader = shader.fragmentShader.replace(
       '#include <fog_pars_fragment>',
       `#include <fog_pars_fragment>
       varying float vWorldY;
       uniform float fogHeightBase;
-      uniform float fogHeightRange;`
+      uniform float fogHeightRange;
+      ${ffxi ? FFXI_LIGHT_PARS + SRGB_GLSL : ''}`
     )
 
     // Blend the baked vertex colour toward white so lit mode can reduce it.
@@ -184,7 +198,20 @@ function patchZoneShader(
       // in, and replacing the chunk silently dropped it, so no overlay ever faded
       // (Gustaberg's squares, 2026-09-27). Left out otherwise, so the default
       // and the older overlay toggle render exactly as they always have.
-      `#if defined( USE_COLOR_ALPHA )
+      ffxi
+        // FFXI: lit = saturate(vertex colour × light), then MODULATE2X with the
+        // texel, saturated — in gamma, as the game multiplies, so the texel is
+        // encoded for the multiply and the result decoded back.
+        ? `#if defined( USE_COLOR_ALPHA ) || defined( USE_COLOR )
+            vec3 ffLit = clamp( vColor.rgb * vFfxiL, 0.0, 1.0 );
+          #else
+            vec3 ffLit = clamp( 0.5 * vFfxiL, 0.0, 1.0 );
+          #endif
+          diffuseColor.rgb = gbDecode( clamp( 2.0 * gbEncode( diffuseColor.rgb ) * ffLit, 0.0, 1.0 ) );
+          #if defined( USE_COLOR_ALPHA )
+            ${keepAlpha ? 'diffuseColor.a *= vColor.a;' : ''}
+          #endif`
+        : `#if defined( USE_COLOR_ALPHA )
         diffuseColor.rgb *= pow( max( vColor.rgb, vec3( 0.0 ) ), vec3( bakedInfluence ) );
         ${keepAlpha ? 'diffuseColor.a *= vColor.a;' : ''}
       #elif defined( USE_COLOR )
@@ -218,10 +245,9 @@ function patchZoneShader(
         #ifdef FOG_EXP2
           float fogFactor = 1.0 - exp(-fogDensity * fogDensity * vFogDepth * vFogDepth);
         #else
-          float fogFactor = smoothstep(fogNear, fogFar, vFogDepth);
+          float fogFactor = ${ffxi ? '(vFogDepth - fogNear) / max(fogFar - fogNear, 0.0001)' : 'smoothstep(fogNear, fogFar, vFogDepth)'};
         #endif
-        float heightAtten = 1.0 - smoothstep(fogHeightBase, fogHeightBase + fogHeightRange, vWorldY);
-        fogFactor *= max(heightAtten, 0.06);
+        ${ffxi ? '' : 'float heightAtten = 1.0 - smoothstep(fogHeightBase, fogHeightBase + fogHeightRange, vWorldY); fogFactor *= max(heightAtten, 0.06);'}
         gl_FragColor.rgb = mix(gl_FragColor.rgb, fogColor, clamp(fogFactor, 0.0, 1.0));
       #endif`
     )
@@ -419,45 +445,6 @@ function drawsInWorld(sp: {
   return sp.tint[3] > 0 || !!sp.curves?.alpha
 }
 
-/**
- * FFXI's two texture stages for generator-drawn meshes, as a material patch.
- *
- *   stage 0  texture x vertex colour, MODULATE2X — the doubling is already in
- *            the vertex colour, which arrives on the 0x80 = identity scale
- *   stage 1  x tint: MODULATE2X on colour, MODULATE4X on alpha
- *
- * With the tint also on the 0x80 scale, alpha carries one more doubling than
- * colour. D3D saturates each stage, so the clamp sits between them — clamping
- * only at the end, or before the texel multiply, gives different answers.
- * From kuluu-ffxi particle_sim.rs (CMoD3m.cpp ZeroOneTSS; the MMB branch of
- * ZoneRenderer::DoD3mDraw uses the same stage ops). The first pass missed the
- * alpha doubling, which left the sea foam at 3-6% opacity where the table puts
- * it at 6-9%.
- *
- * The material itself is white and fully opaque; the tint arrives as a uniform
- * so the stage-0 clamp can happen before it is applied.
- */
-function applySpawnStages(mat: THREE.MeshBasicMaterial, tint: number[]): THREE.Vector4 {
-  const decode = (c: number) => (c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4))
-  // Colour is gamma-authored; alpha is a weight and is not.
-  const uTint = new THREE.Vector4(
-    decode(tint[0] / 128), decode(tint[1] / 128), decode(tint[2] / 128), tint[3] / 128)
-  mat.onBeforeCompile = shader => {
-    shader.uniforms.uSpawnTint = { value: uTint }
-    shader.uniforms.uGammaOut = gammaOutUniform
-    shader.fragmentShader = shader.fragmentShader
-      .replace('void main() {', `uniform vec4 uSpawnTint;\n${GAMMA_OUT_GLSL.pars}\nvoid main() {`)
-      .replace('#include <dithering_fragment>', `#include <dithering_fragment>\n${GAMMA_OUT_GLSL.main}`)
-      .replace('#include <color_fragment>', [
-        '#include <color_fragment>',
-        'vec4 spawnStage0 = clamp(diffuseColor, 0.0, 1.0);',
-        'diffuseColor = clamp(vec4(spawnStage0.rgb * uSpawnTint.rgb,',
-        '  spawnStage0.a * uSpawnTint.a * 2.0), 0.0, 1.0);',
-      ].join('\n'))
-  }
-  mat.customProgramCacheKey = () => 'genspawn-stages'
-  return uTint
-}
 
 /**
  * Per-region darkening of generator water, applied to the tint's colour.
@@ -995,11 +982,13 @@ function SunLight({
 }
 
 function SkyAnimator({
-  skyMaterial, timeOfDayRef, exposure,
+  skyMaterial, timeOfDayRef, exposure, zoneWeather = false,
 }: {
   skyMaterial: THREE.ShaderMaterial
   timeOfDayRef: React.RefObject<number>
   exposure: number
+  /** Zone weather owns the fog and the light; the clock must not rescale them. */
+  zoneWeather?: boolean
 }) {
   const { gl, scene } = useThree()
   useFrame(() => {
@@ -1014,6 +1003,10 @@ function SkyAnimator({
     const sunAngle = ((tod - 6) / 12) * Math.PI
     ;(u.sunDir.value as THREE.Vector3).set(Math.cos(sunAngle), Math.sin(sunAngle), -0.3).normalize()
 
+    if (zoneWeather) {
+      gl.toneMappingExposure = exposure
+      return
+    }
     gl.toneMappingExposure = params.exposure * exposure
 
     if (scene.fog) (scene.fog as THREE.FogExp2).color.set(params.fogColor)
@@ -1057,6 +1050,102 @@ function BackgroundUpdater({
     )
   })
 
+  return null
+}
+
+/**
+ * The zone's own sky: FFXI's eight-band gradient from its environment records.
+ *
+ * Retail builds the dome as a lathe of rings at angle = altitude × π/2, so a
+ * view ray's position on it is asin(ray.y) / (π/2), and its colour is the blend
+ * of the two rings either side (kuluu-ffxi skybox.wgsl, read as a reference;
+ * XIClient XiZone.cpp builds the rings). 1.57075 is retail's own π/2 literal.
+ * Rays below the horizon take the first ring: the dome has nothing beneath it.
+ */
+function createZoneSkyMaterial(): THREE.ShaderMaterial {
+  return new THREE.ShaderMaterial({
+    side: THREE.BackSide,
+    depthWrite: false,
+    uniforms: {
+      uSkyColors: { value: Array.from({ length: 8 }, () => new THREE.Vector3()) },
+      uSkyAlt: { value: [0, 1 / 7, 2 / 7, 3 / 7, 4 / 7, 5 / 7, 6 / 7, 1] },
+    },
+    vertexShader: `
+      varying vec3 vWorldPosition;
+      void main() {
+        vec4 worldPos = modelMatrix * vec4(position, 1.0);
+        vWorldPosition = worldPos.xyz;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      uniform vec3 uSkyColors[8];
+      uniform float uSkyAlt[8];
+      varying vec3 vWorldPosition;
+      void main() {
+        vec3 dir = normalize(vWorldPosition - cameraPosition);
+        float alt = asin(clamp(dir.y, 0.0, 1.0)) / 1.57075;
+        int lo = 0;
+        for (int i = 1; i < 8; i++) { if (uSkyAlt[i] <= alt) lo = i; }
+        int hi = min(lo + 1, 7);
+        float span = max(uSkyAlt[hi] - uSkyAlt[lo], 0.0001);
+        float t = clamp((alt - uSkyAlt[lo]) / span, 0.0, 1.0);
+        gl_FragColor = vec4(mix(uSkyColors[lo], uSkyColors[hi], t), 1.0);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+      }
+    `,
+  })
+}
+
+/**
+ * Zone weather, once a frame: the sky gradient, the terrain and water light
+ * (ffxiLight, read by every 'ffxi' zone shader and the generator stages), and
+ * the fog — all blended between the records either side of the time of day.
+ * The fog is FFXI's plain linear fog; `fog` false (map view) leaves it off.
+ */
+function ZoneWeatherAnimator({
+  material, records, timeOfDayRef, fog,
+}: {
+  material: THREE.ShaderMaterial
+  records: ZoneEnvRecord[]
+  timeOfDayRef: React.RefObject<number>
+  fog: boolean
+}) {
+  const { scene } = useThree()
+  const decode = (c: number) => (c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4))
+  useEffect(() => {
+    ffxiLight.uFfxiLightOn.value = 1
+    if (fog) scene.fog = new THREE.Fog(0x808080, 0, 1000)
+    return () => {
+      ffxiLight.uFfxiLightOn.value = 0
+      if (fog) scene.fog = null
+    }
+  }, [scene, fog])
+  useFrame(() => {
+    const minutes = (timeOfDayRef.current ?? 12) * 60
+    const light = sampleTerrainLight(records, minutes)
+    if (light) {
+      ffxiLight.uFfxiAmb.value.fromArray(light.ambient)
+      ffxiLight.uFfxiSun.value.fromArray(light.sun)
+      ffxiLight.uFfxiMoon.value.fromArray(light.moon)
+      sunDirection(minutes, ffxiLight.uFfxiSunDir.value)
+      ffxiLight.uFfxiMoonDir.value.copy(ffxiLight.uFfxiSunDir.value).negate()
+      const f = scene.fog
+      if (fog && f instanceof THREE.Fog) {
+        f.color.setRGB(light.fogColor[0], light.fogColor[1], light.fogColor[2], THREE.SRGBColorSpace)
+        f.near = light.fogStart
+        f.far = Math.max(light.fogEnd, light.fogStart + 1)
+      }
+    }
+    const g = sampleSkyGradient(records, minutes)
+    if (!g) return
+    const colors = material.uniforms.uSkyColors.value as THREE.Vector3[]
+    for (let i = 0; i < 8; i++) {
+      colors[i].set(decode(g.colors[i * 3]), decode(g.colors[i * 3 + 1]), decode(g.colors[i * 3 + 2]))
+    }
+    material.uniforms.uSkyAlt.value = g.altitudes
+  })
   return null
 }
 
@@ -2432,6 +2521,26 @@ export default function ZoneViewer({
   })
 
   const timeOfDayRef = useRef(scene.timeOfDay)
+
+  // Zone weather (Weather → Zone weather): the zone's environment records for the
+  // chosen weather state, or clear weather (fine, else suny — Lufaise has no
+  // fine) when none is chosen or the zone lacks it, or whatever state the zone
+  // has first. Empty means the procedural sky stays.
+  const zoneSkyMaterial = useMemo(() => createZoneSkyMaterial(), [])
+  useEffect(() => () => zoneSkyMaterial.dispose(), [zoneSkyMaterial])
+  const zoneSkyRecords = useMemo(() => {
+    if (!scene.zoneWeather) return []
+    const env = zoneData.environment ?? []
+    const pick = (state: string) => env.filter(r => r.state === state)
+    const chosen = pick(scene.weatherState)
+    if (chosen.length) return chosen
+    for (const clear of ['fine', 'suny']) {
+      const hit = pick(clear)
+      if (hit.length) return hit
+    }
+    return env.length ? pick(env[0].state) : []
+  }, [scene.zoneWeather, scene.weatherState, zoneData])
+  const domeMaterial = zoneSkyRecords.length ? zoneSkyMaterial : null
   timeOfDayRef.current = scene.timeOfDay
 
   // Lives outside the Canvas so it survives the remount that a depth-of-field
@@ -2549,7 +2658,10 @@ export default function ZoneViewer({
     })
   }, [])
 
-  const lit = lighting.mode === 'lit'
+  // Zone weather lights the zone from its own records, so it sets aside the
+  // lighting presets — both lit mode and the Original sun — while it runs.
+  const zoneLight = zoneSkyRecords.length > 0
+  const lit = lighting.mode === 'lit' && !zoneLight
 
   // A shadow-casting point light needs the shadow map enabled even when the
   // sun's own shadows are switched off.
@@ -2568,8 +2680,8 @@ export default function ZoneViewer({
   // ambient + N·L diffuse, no specular. This is why the files carry
   // per-vertex normals at all; a purely baked renderer would have no use
   // for them.
-  const gameSunActive = !lit && lighting.gameSun
-  const shaderVariant = gameSunActive ? 'lambert' : 'std'
+  const gameSunActive = !lit && lighting.gameSun && !zoneLight
+  const shaderVariant = zoneLight ? 'ffxi' : gameSunActive ? 'lambert' : 'std'
 
   // The panel toggle, or ?genspawn=1 for harnesses — the packaged app has no
   // address bar, so a URL switch alone is invisible to anyone using it.
@@ -2632,7 +2744,7 @@ export default function ZoneViewer({
     for (const p of zoneData.prefabs) {
       // D3M effect meshes are not zone geometry; counting them could move the
       // fallback sheet in an effects-heavy zone and change the default view.
-      if (p.d3m) continue
+      if (p.d3m || p.celestial) continue
       if (zoneData.textures[p.materialIndex]) {
         usage.set(p.materialIndex, (usage.get(p.materialIndex) ?? 0) + 1)
       }
@@ -3685,7 +3797,7 @@ export default function ZoneViewer({
         if (SKIP_UNREFERENCED) continue
         if (referenced.has(prefabIdx)) continue
         if (spawnTargets.has(prefabIdx)) continue
-        if (zoneData.prefabs[prefabIdx]?.d3m) continue
+        if (zoneData.prefabs[prefabIdx]?.d3m || zoneData.prefabs[prefabIdx]?.celestial) continue
         const mat = matMap.get(prefabIdx)
         if (!mat) continue
         const mesh = new THREE.InstancedMesh(geo, mat, 1)
@@ -3883,9 +3995,17 @@ export default function ZoneViewer({
   }, [instancedMeshes, scene.weatherState])
 
   // Report which states this zone actually carries, so the panel can list them.
+  // With Zone weather on, the list is the states the zone has records for —
+  // mesh groups such as 'star' or 'effect' are not weather and would silently
+  // fall back to clear skies, which read as 'several states look the same'.
+  const envStates = useMemo(
+    () => [...new Set((zoneData.environment ?? []).map(r => r.state))].sort(),
+    [zoneData],
+  )
+  const offeredStates = scene.zoneWeather && envStates.length ? envStates : weatherStates
   useEffect(() => {
-    onWeatherStates?.(weatherStates)
-  }, [weatherStates, onWeatherStates])
+    onWeatherStates?.(offeredStates)
+  }, [offeredStates, onWeatherStates])
 
   // Shadow casting is a per-mesh flag, toggled without a rebuild.
   useEffect(() => {
@@ -4144,7 +4264,17 @@ export default function ZoneViewer({
     >
       <CameraPersistence store={cameraPose} />
       <RendererSettings post={post} shadows={shadowsActive} />
-      <SkyAnimator skyMaterial={skyMaterial} timeOfDayRef={timeOfDayRef} exposure={post.exposure} />
+      <SkyAnimator skyMaterial={skyMaterial} timeOfDayRef={timeOfDayRef} exposure={post.exposure} zoneWeather={zoneLight} />
+      {zoneLight && (
+        <SkyLayers
+          zone={zoneData} state={zoneSkyRecords[0].state} timeOfDayRef={timeOfDayRef} radius={farPlane * 0.9}
+        />
+      )}
+      {zoneLight && (
+        <ZoneWeatherAnimator
+          material={zoneSkyMaterial} records={zoneSkyRecords} timeOfDayRef={timeOfDayRef} fog={!scene.mapView}
+        />
+      )}
       {spawnAnims.length > 0 && <SpawnAnimator anims={spawnAnims} />}
       {waterMaterials.length > 0 && (
         <WaterAnimator materials={waterMaterials} vertexTint={scene.waterTint} />
@@ -4176,11 +4306,11 @@ export default function ZoneViewer({
 
       {scene.showSky && effectiveFog > 0 ? (
         <>
-          <SkyDome size={farPlane * 0.9} material={skyMaterial} />
-          <FogController size={size} density={effectiveFog} />
+          <SkyDome size={farPlane * 0.9} material={domeMaterial ?? skyMaterial} />
+          {!zoneLight && <FogController size={size} density={effectiveFog} />}
         </>
       ) : scene.showSky ? (
-        <SkyDome size={farPlane * 0.9} material={skyMaterial} />
+        <SkyDome size={farPlane * 0.9} material={domeMaterial ?? skyMaterial} />
       ) : (
         <BackgroundUpdater
           timeOfDayRef={timeOfDayRef}
@@ -4244,7 +4374,7 @@ export default function ZoneViewer({
       {/* Already world space — deliberately outside the rotated group. */}
       {scene.showCollision && <CollisionOverlay world={collisionWorld} />}
 
-      <PostStack post={post} generatorLayer={genSpawn} />
+      <PostStack post={post} generatorLayer={genSpawn || zoneLight} />
     </Canvas>
   )
 }

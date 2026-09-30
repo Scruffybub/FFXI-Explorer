@@ -15,7 +15,7 @@ export const GAMMA_BLEND_LAYER = 5
 export const gammaOutUniform = { value: 0 }
 
 /** The sRGB curve, both ways; exact inverses, so a round trip is lossless. */
-const SRGB_GLSL = /* glsl */ `
+export const SRGB_GLSL = /* glsl */ `
   vec3 gbEncode(vec3 c) {
     c = max(c, vec3(0.0));
     return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(vec3(0.0031308), c));

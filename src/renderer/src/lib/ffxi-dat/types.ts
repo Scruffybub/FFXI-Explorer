@@ -105,6 +105,12 @@ export interface ParsedZoneMesh {
    * the origin the way it draws other unplaced prefabs.
    */
   d3m?: boolean
+  /**
+   * A sun or moon mesh (MMB `sunsphere` / `moonsphere` in <zone>/weat/). Only
+   * sky generators place it, riding the sun or moon's direction, so like a D3M
+   * it must never be drawn unplaced at the origin.
+   */
+  celestial?: boolean
 }
 
 export interface ZoneMeshInstance {
@@ -136,6 +142,36 @@ export interface GeneratorSpawn {
    * tint alpha on the 0..1 = byte/255 scale; `u`/`v` add to the texture offset.
    */
   curves: { alpha?: number[]; u?: number[]; v?: number[] }
+  attach: number                          // 0xE sun, 0xF moon, 0 none (body[0] low nibble)
+  blend: number                           // 0x1E blend byte, -1 when absent
+  /** Time-of-day curves (0x60–0x63), resolved like `curves`. */
+  todCurves: { r?: number[]; g?: number[]; b?: number[]; alpha?: number[] }
+  spin: [number, number, number]           // 0x0B rotation per frame, radians
+}
+
+/** One light set from an environment record. Colours are raw byte / 255. */
+export interface ZoneEnvLight {
+  sun: [number, number, number]
+  moon: [number, number, number]
+  ambient: [number, number, number]
+  fog: [number, number, number]
+  fogStart: number
+  fogEnd: number
+  diffuse: number                         // multiplier on sun and moon
+}
+
+/** An FFXI environment record (block 0x2F); see EnvironmentParser. */
+export interface ZoneEnvRecord {
+  state: string                           // weather directory: fine, clod, mist, suny…
+  dir: string                             // full DAT directory, e.g. f_ro/weat/fine
+  minutes: number                         // time of day, from the HHMM chunk name
+  indoors: boolean
+  model: ZoneEnvLight                     // light for characters and models
+  terrain: ZoneEnvLight                   // light for zone geometry
+  clearColor: [number, number, number]
+  farClip: number
+  skyColors: number[]                     // 8 × RGB, sRGB 0..1, horizon to zenith
+  skyAltitudes: number[]                  // 8 fractions from horizon (0) to zenith (1)
 }
 
 export interface ParsedZone {
@@ -151,6 +187,11 @@ export interface ParsedZone {
   textureNames: string[]
   /** Meshes placed by generator chunks. Empty for zones that have none. */
   spawns: GeneratorSpawn[]
+  /**
+   * The zone's environment records (block 0x2F under <zone>/weat/<state>/):
+   * sky gradient, lighting and fog per weather state and time of day.
+   */
+  environment: ZoneEnvRecord[]
   collision: ParsedCollision | null // MZB collision mesh, raw DAT space
 }
 
