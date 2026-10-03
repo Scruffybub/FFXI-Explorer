@@ -20,6 +20,7 @@ import {
 } from '../lib/zoneLighting'
 import { applySpawnStages } from '../lib/spawnStages'
 import { SkyLayers } from './SkyLayers'
+import { WeatherParticles } from './WeatherParticles'
 import type {
   LightingSettings, PointLightSettings, PostSettings, SceneSettings, SurfaceInfo, ToneMappingMode,
 } from '../lib/settings'
@@ -438,9 +439,12 @@ const GEN_SPAWN =
  *    whitecap patches start at 0 and breathe in and out on `naa1`-style bells
  */
 function drawsInWorld(sp: {
-  dir: string; followCamera: boolean; tint: number[]; curves?: { alpha?: number[] }
+  dir: string; followCamera: boolean; tint: number[]; curves?: { alpha?: number[] }; link?: string
 }): boolean {
   if (/(^|\/)weat(\/|$)/.test(sp.dir)) return false
+  // Sprite particles (rain, splashes, mist) need a particle system; only the
+  // weather's are drawn, by WeatherParticles.
+  if (sp.link === 'sprite') return false
   if (sp.followCamera) return false
   return sp.tint[3] > 0 || !!sp.curves?.alpha
 }
@@ -2744,7 +2748,7 @@ export default function ZoneViewer({
     for (const p of zoneData.prefabs) {
       // D3M effect meshes are not zone geometry; counting them could move the
       // fallback sheet in an effects-heavy zone and change the default view.
-      if (p.d3m || p.celestial) continue
+      if (p.d3m || p.celestial || p.sprite) continue
       if (zoneData.textures[p.materialIndex]) {
         usage.set(p.materialIndex, (usage.get(p.materialIndex) ?? 0) + 1)
       }
@@ -3797,7 +3801,7 @@ export default function ZoneViewer({
         if (SKIP_UNREFERENCED) continue
         if (referenced.has(prefabIdx)) continue
         if (spawnTargets.has(prefabIdx)) continue
-        if (zoneData.prefabs[prefabIdx]?.d3m || zoneData.prefabs[prefabIdx]?.celestial) continue
+        if (zoneData.prefabs[prefabIdx]?.d3m || zoneData.prefabs[prefabIdx]?.celestial || zoneData.prefabs[prefabIdx]?.sprite) continue
         const mat = matMap.get(prefabIdx)
         if (!mat) continue
         const mesh = new THREE.InstancedMesh(geo, mat, 1)
@@ -3990,9 +3994,11 @@ export default function ZoneViewer({
     for (const mesh of instancedMeshes) {
       const state = mesh.userData.weatherState as string | undefined
       if (!state) continue
-      mesh.visible = state === scene.weatherState
+      // Zone weather draws the sky from the generators (SkyLayers); these
+      // unplaced weather meshes would double up with it.
+      mesh.visible = !zoneLight && state === scene.weatherState
     }
-  }, [instancedMeshes, scene.weatherState])
+  }, [instancedMeshes, scene.weatherState, zoneLight])
 
   // Report which states this zone actually carries, so the panel can list them.
   // With Zone weather on, the list is the states the zone has records for —
@@ -4270,6 +4276,7 @@ export default function ZoneViewer({
           zone={zoneData} state={zoneSkyRecords[0].state} timeOfDayRef={timeOfDayRef} radius={farPlane * 0.9}
         />
       )}
+      {zoneLight && <WeatherParticles zone={zoneData} state={zoneSkyRecords[0].state} />}
       {zoneLight && (
         <ZoneWeatherAnimator
           material={zoneSkyMaterial} records={zoneSkyRecords} timeOfDayRef={timeOfDayRef} fog={!scene.mapView}

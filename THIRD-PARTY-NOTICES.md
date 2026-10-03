@@ -59,16 +59,36 @@ attribution of the format research.
 
 ## Zone and item tables — LandSandBoat (GPL-3.0 source data)
 
-**Files:** `resources/item-names.json`, `resources/zone-music.json`
+**Files:** `resources/item-names.json`, `resources/zone-music.json`,
+`resources/zone-weather.json`
 
-Built by `scripts/build-item-names.cjs` and `scripts/build-zone-music.cjs` from
-LandSandBoat's `item_equipment.sql` and `zone_settings.sql`. Those SQL files are
+Built by `scripts/build-item-names.cjs`, `scripts/build-zone-music.cjs` and
+`scripts/build-zone-weather.cjs` from LandSandBoat's `item_equipment.sql`,
+`zone_settings.sql`, `zone_weather.sql` and zone data files. Those sources are
 fetched at build time and are **not vendored** in this repository; the generated
-JSON contains item names and zone→music-id mappings extracted from them.
+JSON contains item names, zone→music-id mappings, and each zone's list of
+native weather types in order (no frequencies) extracted from them.
 
 The underlying facts are Square Enix's game data rather than LandSandBoat's
 creative work, but the extraction came from a GPL-3.0 project and is recorded
 here so anyone relying on it can make their own assessment.
+
+## File-format research — kuluu-ffxi and xim (GPL-3.0, reference only)
+
+**Files:** `src/renderer/src/lib/ffxi-dat/GeneratorParser.ts`, `D3mParser.ts`,
+`EnvironmentParser.ts`, `CollisionParser.ts` (water height),
+`src/renderer/src/lib/zoneLighting.ts`, `spawnStages.ts`, `GammaBlendPass.ts`,
+`src/renderer/src/components/SkyLayers.tsx`, and the zone transparency rule in
+`ZoneViewer.tsx`
+
+The layouts of generator chunks, D3M effect meshes, KeyFrame curves and
+environment (weather) records, FFXI's texture-stage and lighting maths, and its
+zone transparency rule were worked out with reference to
+[kuluu-ffxi](https://github.com/jondwillis/kuluu-ffxi) and to xim in
+[Heyrio/FFXI-BROWSER-GAME](https://github.com/Heyrio/FFXI-BROWSER-GAME), both
+GPL-3.0. Their source was read as a description of the file formats and of the
+game's behaviour; no code was copied, and these implementations were written
+independently. This notice records that research.
 
 ---
 

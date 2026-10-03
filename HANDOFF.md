@@ -115,6 +115,63 @@ basic-material path with shader variant `'ffxi'`).
 - The Weather list shows the zone's recorded states while Zone weather is on
   ("star"/"effect" mesh groups fell back to clear skies and looked identical).
 
+**Weather by zone, 2026-09-29.** Twenty states in the client's order (0 none/
+fair, 1 sunshine, 2 clouds, 3 fog, then fire/water/earth/wind/ice/lightning/
+light/dark as single then double) with their weat/ dirs — `lib/weatherTypes.ts`
+(a few zones use `1`-suffixed twins: sun1, clo1…). Each day of a zone's
+2160-day cycle has a normal/common/rare weather rolled 50/35/15%
+(LandSandBoat zone.cpp); fog replaces none/sunshine/clouds 02:00–07:00 outside
+cities. `scripts/build-zone-weather.cjs <LSB checkout>` writes
+`resources/zone-weather.json`: per zone the native weather ids, most typical
+first, **no frequencies** (Ryan's call), fog added where the zone is not a city
+and ships weat/mist. Cross-check: of all server weathers, only 18 lack art in
+their zone's DAT (the game shows sunshine for those).
+UI: with Zone weather on the list shows all twenty by name and element, native
+ones first and tagged "(native)", others with art selectable, the rest disabled
+("no art in this zone"). Each zone opens in its most typical weather
+(`typicalWeather`), once per zone and on turning Zone weather on; a
+`scene_weatherState` URL param wins. Turning Zone weather off clears the state,
+and the older unplaced weather meshes are hidden while it is on.
+Sky-layer fixes found on the way: subtractive blend (nibble 1/2 — Lufaise's wind
+`clh2`), particle-life alpha curves (the wind streaks `kat1/kat2`), and a rim
+fade measured across all of a generator's pieces (a canopy is an inner 0x0 disc
+plus a 0x8000 ring; drawing the disc opaque per the zone rule made hard slabs
+and overcast sunny skies — reverted). **Known:** a faint seam in Lufaise's wind
+canopy; overview cameras sit far outside retail's short fog, so bad-weather
+zones read as solid fog from above. `?skyonly=gen1,gen2` isolates sky layers.
+**Sun, per Ryan's retail screenshots:** bright core with a starburst, a large
+soft glow (so the sunsphere glow's size is real), and a lens-flare chain of
+rings and discs across the screen — next.
+
+**Emission clocks, lightning and rain, 2026-09-30.** Generators emit on a clock
+in their header (body 0x64: u16 variance, u16 frames−1, 9-bit count, flags 0x04
+continuous / 0x10 auto-run, 0x20 batched — `Emission` in GeneratorParser). The
+sky layers ignored it and looped each particle's life back to back, so Thunder
+strobed: Lufaise's `lig1` flash is 30 frames every 2041–2281 (34–38 s), `lig2`
+every 201–241 (~3.75 s), the bolt `thd1` 20 frames every 400. Measured after the
+fix over 67 s: means 2163 / 225 / 400 frames. A life-0 layer still stands for
+good; a layer with a life gets `ceil(life / every)` copies (Lufaise's wind
+streaks: four, staggered — they used to pulse on and off). Flashes are born on a
+spread (`Spread`: random azimuth, 300 units out, 130 up — xim PositionVariance)
+and pushed out with it; they draw after the canopies (drawn first, the clouds
+hid them) and skip fog (render state 0x0200). They are dim by design: tint
+(60,58,66) — a soft glow in the cloud layer. The bolt has no blend byte, so it
+adds (kuluu's default), and retail's 604-unit storm fog mostly swallows it. Not
+drawn: the bright strikes in `thdr/kmi1`, `kmi2`, which are scheduler (0x07)
+effects, and `lig1`'s child `thd2`, not in the zone DAT.
+Rain is a particle system: generators linking type 0x0E draw a 0x21 sprite quad
+(`SpriteParser.ts`; Jugner's `rain`, `smok`, `hamo` are cut from `rain_b01`).
+`WeatherParticles.tsx` runs them: count × 0.3 for weat/ (kuluu, from
+CYyGenerator), spread, velocity, gravity (section-3 0x03), scale growth, life
+alpha. The curtain `~1ra` is 299 streaks every 20 frames in a 12-unit ball 30
+above the camera, falling 27 units in its 60-frame life — both references put
+it there, so it is overhead: look up to see it. Mipmaps off — the sheet is
+hairline streaks and averaging erased them. Ripples on the ponds are authored
+0.1–0.2 units, too small to see from any distance. Sprite prefabs/spawns are
+excluded from the world draw (`sprite`, `link`), so the default view is
+pixel-identical (100, 107, 24, 104). Diagnostics: `?census=1` exposes
+`__sky`, `__skyEmitters`, `__wxp`; `?skyphi=deg` pins spread azimuths.
+
 ### FFXI's zone transparency rule — found 2026-09-27, behind a toggle
 
 **The answer to §4b, §4f and §5a, from kuluu-ffxi** (`dat_mmb.rs submesh_alpha_mode`,

@@ -1,4 +1,5 @@
 import type { ParsedCollision } from './CollisionParser'
+import type { Emission, Spread } from './GeneratorParser'
 
 export interface ParsedMesh {
   vertices: Float32Array
@@ -111,6 +112,8 @@ export interface ParsedZoneMesh {
    * it must never be drawn unplaced at the origin.
    */
   celestial?: boolean
+  /** A 0x21 sprite quad: placed only by particle generators, like a D3M. */
+  sprite?: boolean
 }
 
 export interface ZoneMeshInstance {
@@ -147,6 +150,19 @@ export interface GeneratorSpawn {
   /** Time-of-day curves (0x60–0x63), resolved like `curves`. */
   todCurves: { r?: number[]; g?: number[]; b?: number[]; alpha?: number[] }
   spin: [number, number, number]           // 0x0B rotation per frame, radians
+  // Particle behaviour — see GeneratorParser's RawModelSpawn for each.
+  link: 'mesh' | 'sprite'
+  billboard: number
+  renderState: number
+  emission: Emission
+  spread: Spread | null
+  velocity: [number, number, number]
+  velocityVariance: [number, number, number]
+  accel: [number, number, number]
+  moves: boolean
+  rotationVariance: [number, number, number]
+  scaleVariance: [number, number, number]
+  scaleVelocity: [number, number, number]
 }
 
 /** One light set from an environment record. Colours are raw byte / 255. */

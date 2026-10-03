@@ -7,6 +7,7 @@ import type {
 import { PRESETS } from '../lib/settings'
 import type { MusicStatus } from '../lib/zoneMusic'
 import type { MapScale } from './ZoneViewer'
+import { WEATHER_TYPES, nativeWeather, weatherDir } from '../lib/weatherTypes'
 
 interface ControlPanelProps {
   lighting: LightingSettings
@@ -17,6 +18,8 @@ interface ControlPanelProps {
   placingLight: boolean
   /** Weather states the loaded zone carries geometry for; varies per zone. */
   weatherStates: string[]
+  /** The loaded zone's id, for its native weather. */
+  zoneId?: number
   /** What map view currently covers, for the scale readout. Null when it is off. */
   mapScale: MapScale | null
   music: MusicSettings
@@ -205,7 +208,7 @@ function formatHour(h: number): string {
 }
 
 export default function ControlPanel({
-  lighting, post, scene, pointLights, selectedLightId, placingLight, weatherStates, mapScale,
+  lighting, post, scene, pointLights, selectedLightId, placingLight, weatherStates, zoneId, mapScale,
   music, musicStatus, onMusic,
   onLighting, onPost, onScene, onPointLights, onUpdateLight, onRemoveLight,
   onSelectLight, onTogglePlacing, onPreset, onReset,
@@ -867,7 +870,32 @@ export default function ControlPanel({
           onChange={v => onScene({ zoneWeather: v })}
           info="Use the weather the zone's own data describes: FFXI stores a sky gradient, the sun, moon and ambient light, and the fog for each weather and hour, and blends between the hours as the clock moves. Follows the weather state and time of day; with no state chosen it shows clear weather. Lighting presets are set aside while this is on. Zones without the data keep the usual sky and lighting."
         />
-        {weatherStates.length === 0 ? (
+        {scene.zoneWeather && weatherStates.length > 0 ? (
+          // Zone weather: all twenty FFXI weathers by name and element. The
+          // zone's own come first, marked native; others it has art for follow;
+          // the rest are listed but disabled, since the game draws them as
+          // sunshine in a zone that ships no art for them.
+          <SelectField
+            label="Weather"
+            value={scene.weatherState}
+            onChange={v => onScene({ weatherState: v })}
+            info="The weather to draw. (native) marks the weather this zone normally gets, most typical first — the zone opens in the first of these. Other weathers the zone has art for can be chosen too. Greyed-out ones have no art in this zone; the game would show sunshine instead."
+          >
+            {(() => {
+              const native = nativeWeather(zoneId)
+              const label = (t: (typeof WEATHER_TYPES)[number]) =>
+                t.name + (t.element && t.element !== t.name ? ` · ${t.element}` : '') + (native.includes(t.id) ? ' (native)' : '')
+              const nativeTypes = native.map(id => WEATHER_TYPES[id]).filter(Boolean)
+              const others = WEATHER_TYPES.filter(t => !native.includes(t.id))
+              return [...nativeTypes, ...others].map(t => {
+                const dir = weatherDir(t, weatherStates)
+                return dir
+                  ? <option key={t.id} value={dir}>{label(t)}</option>
+                  : <option key={t.id} value={`none-${t.id}`} disabled>{label(t)} — no art in this zone</option>
+              })
+            })()}
+          </SelectField>
+        ) : weatherStates.length === 0 ? (
           <p className="note small">This zone carries no weather geometry.</p>
         ) : (
           <>

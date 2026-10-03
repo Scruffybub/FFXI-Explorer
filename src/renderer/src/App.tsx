@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { ZONES, type ZoneEntry } from './lib/zoneList'
 import { expansionFor } from './lib/zoneExpansion'
+import { typicalWeather } from './lib/weatherTypes'
 import { parseZoneFile, parseTexturesFromDat, parseMinimapDat, type ParsedZone } from './lib/ffxi-dat'
 import ZoneViewer, { type MapScale } from './components/ZoneViewer'
 import UpdateNotice from './components/UpdateNotice'
@@ -200,9 +201,30 @@ export default function App() {
     return ZONES.filter(z => z.name.toLowerCase().includes(q))
   }, [search])
 
+  // Zone weather opens each zone in its most typical weather: once per zone,
+  // when its weather list arrives, and again whenever Zone weather is turned
+  // on. Choosing another weather afterwards is left alone.
+  const weatherDefaultFor = useRef<number | null>(null)
+  useEffect(() => {
+    if (!scene.zoneWeather) {
+      // Leaving Zone weather: drop the state it chose, so the older weather
+      // meshes (which the same setting switches) go back to none.
+      if (weatherDefaultFor.current !== null) setScene(s => ({ ...s, weatherState: '' }))
+      weatherDefaultFor.current = null
+      return
+    }
+    if (!selected || weatherStates.length === 0) return
+    if (weatherDefaultFor.current === selected.id) return
+    weatherDefaultFor.current = selected.id
+    const typical = typicalWeather(selected.id, weatherStates)
+    if (typical) setScene(s => ({ ...s, weatherState: typical }))
+  }, [scene.zoneWeather, selected, weatherStates])
+
   const loadZone = useCallback(async (zone: ZoneEntry) => {
     if (!ffxiPath) return
     setSelected(zone)
+    // The previous zone's weather list must not seed this zone's default.
+    setWeatherStates([])
     setLoad({ status: 'loading', message: `Reading ${zone.modelPath}...` })
 
     try {
@@ -403,6 +425,8 @@ export default function App() {
     if (Object.keys(postPatch).length) setPost(p => ({ ...p, ...postPatch }))
     if (Object.keys(lightPatch).length) setLighting(l => ({ ...l, ...lightPatch }))
     if (Object.keys(scenePatch).length) setScene(sc => ({ ...sc, ...scenePatch }))
+    // A weather named in the URL wins over the zone's typical one.
+    if ('weatherState' in scenePatch && selected) weatherDefaultFor.current = selected.id
     // Only run on the first successful load.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [load.status])
@@ -640,6 +664,7 @@ export default function App() {
         selectedLightId={selectedLightId}
         placingLight={placingLight}
         weatherStates={weatherStates}
+        zoneId={selected?.id}
         mapScale={mapScale}
         music={music}
         musicStatus={musicStatus}

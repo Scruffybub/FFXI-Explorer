@@ -2,6 +2,7 @@ import { DatReader } from './DatReader'
 import { parseTextureBlock } from './TextureParser'
 import { parseModelSpawn, parseKeyFrames } from './GeneratorParser'
 import { parseD3m } from './D3mParser'
+import { parseSprite } from './SpriteParser'
 import { parseEnvironmentRecord } from './EnvironmentParser'
 import { decodeMzb, decodeMmb } from './ZoneDecrypt'
 import { parseMzbBlock } from './MzbParser'
@@ -30,6 +31,8 @@ const BLOCK_MMB = 0x2E
 const BLOCK_GENERATOR = 0x05
 /** Effect meshes, spawned by generators — the sea foam is one. */
 const BLOCK_D3M = 0x1F
+/** Sprite quads, spawned by particle generators — the rain is one. */
+const BLOCK_SPRITE = 0x21
 /** Animation curves generators sample over a particle's life. */
 const BLOCK_KEYFRAME = 0x19
 /** Environment records: sky gradient, lighting and fog, per weather and hour. */
@@ -464,6 +467,33 @@ export function parseZoneFile(
     d3mCount++
   }
 
+  // ── Pass 3c: 0x21 sprite quads ──
+  // What particle generators linking type 0x0E draw: the rain and its
+  // splashes. Flagged `sprite`, appended like the D3Ms, and resolved only by
+  // sprite links — Jugner's weat/rain holds both an MMB and a sprite named
+  // `rain`.
+  let spriteCount = 0
+  for (const block of blocks.filter(b => b.type === BLOCK_SPRITE)) {
+    const start = block.dataOffset + BLOCK_PADDING
+    const len = block.dataLength - BLOCK_PADDING
+    if (len <= 0) continue
+    const s = parseSprite(new Uint8Array(buffer, start, len))
+    if (!s) continue
+    const idx = prefabs.length
+    prefabs.push({
+      vertices: s.vertices, normals: new Array(s.vertices.length).fill(0), colors: s.colors, uvs: s.uvs,
+      indices: s.indices,
+      materialIndex: textureNameMap.get(s.textureName) ?? -1,
+      blending: 0,
+      textureName: s.textureName,
+      sprite: true,
+    })
+    prefabChunk[idx] = block.name.trim()
+    prefabDir[idx] = block.dir
+    prefabSource[idx] = block.name.trim()
+    spriteCount++
+  }
+
   // KeyFrame curves, keyed by directory and chunk name, for scoped lookup.
   const keyframes = new Map<string, number[]>()
   for (const block of blocks.filter(b => b.type === BLOCK_KEYFRAME)) {
@@ -503,7 +533,8 @@ export function parseZoneFile(
       const scope = parts.slice(0, depth).join('/')
       prefabIndices = []
       for (let p = 0; p < prefabChunk.length; p++) {
-        if (prefabChunk[p] === raw.model && prefabDir[p] === scope) prefabIndices.push(p)
+        if (prefabChunk[p] === raw.model && prefabDir[p] === scope &&
+          !!prefabs[p].sprite === (raw.link === 'sprite')) prefabIndices.push(p)
       }
     }
     if (prefabIndices.length === 0) { unresolvedSpawns++; continue }
@@ -522,7 +553,7 @@ export function parseZoneFile(
     spawns.push({ generator: block.name.trim(), dir: block.dir, prefabIndices, ...raw, curves, todCurves })
   }
   if (spawns.length || unresolvedSpawns) {
-    console.log(`[GENSPAWN] ${spawns.length} model spawns resolved, ${unresolvedSpawns} unresolved; ${d3mCount} D3M effect meshes loaded`)
+    console.log(`[GENSPAWN] ${spawns.length} model spawns resolved, ${unresolvedSpawns} unresolved; ${d3mCount} D3M effect meshes, ${spriteCount} sprites loaded`)
   }
 
   // ── Pass 5: environment records under <zone>/weat/<state>/ ──
