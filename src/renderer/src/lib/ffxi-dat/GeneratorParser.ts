@@ -62,8 +62,11 @@ export interface RawModelSpawn {
   todTracks: Partial<Record<'r' | 'g' | 'b' | 'alpha', string>>
   /** 0x0B: rotation per frame, radians (West Ronfaure's cld1 turns 1.75e-4 about Y). */
   spin: [number, number, number]
-  /** What the setup links: an MMB or D3M mesh (0x0B), or a 0x21 sprite (0x0E). */
-  link: 'mesh' | 'sprite'
+  /**
+   * What the setup links: an MMB or D3M mesh (0x0B), a 0x21 sprite (0x0E), or
+   * a 0x21 sheet drawn as a screen-space lens flare (0x39).
+   */
+  link: 'mesh' | 'sprite' | 'flare'
   /** Setup flags' billboard bits (0x1 faces the camera; 0x4 is followCamera). */
   billboard: number
   /**
@@ -89,6 +92,14 @@ export interface RawModelSpawn {
   scaleVariance: [number, number, number]
   /** 0x12, per frame, applied while section 3 carries 0x08. */
   scaleVelocity: [number, number, number]
+  /**
+   * Generator updater 0x0A: emits only while the player is within this many
+   * units (xim GeneratorCullUpdater); 0 = always. Uleguerand's placed snow
+   * flurries use 30.
+   */
+  emitRange: number
+  /** Section-3 0x0D: a flipbook steps through its frames over each life. */
+  flipbook: boolean
 }
 
 /**
@@ -150,6 +161,7 @@ const OP_END = 0x00
 const SIZE_WORDS_MASK = 0x1f
 const LINKED_MODEL = 0x0b
 const LINKED_SPRITE = 0x0e
+const LINKED_FLARE = 0x39
 const FLAG_FOLLOW_CAMERA = 0x4
 const EMISSION_AT = 0x64
 
@@ -266,17 +278,25 @@ export function parseModelSpawn(body: Uint8Array): RawModelSpawn | null {
       if (id) tracks[KEYFRAME_CHANNELS[op as keyof typeof KEYFRAME_CHANNELS]] = id
     }
   }
-  if ((linked !== LINKED_MODEL && linked !== LINKED_SPRITE) || !model) return null
+  if ((linked !== LINKED_MODEL && linked !== LINKED_SPRITE && linked !== LINKED_FLARE) || !model) return null
+
+  // Generator updaters (section 0, header 0x70).
+  let emitRange = 0
+  for (const { op, p } of records(view, body, 0x70)) {
+    if (op === 0x0a && p + 4 <= body.length) emitRange = view.getFloat32(p, true)
+  }
 
   const uvScroll: [number, number] = [0, 0]
   let accel: [number, number, number] = [0, 0, 0]
   let moves = false
   let scales = false
+  let flipbook = false
   for (const { op, p } of records(view, body, 0x78)) {
     if (op === 0x27 && p + 4 <= body.length) uvScroll[0] = view.getFloat32(p, true)
     if (op === 0x28 && p + 4 <= body.length) uvScroll[1] = view.getFloat32(p, true)
     if (op === 0x02) moves = true
     if (op === 0x08) scales = true
+    if (op === 0x0d) flipbook = true
     if (op === 0x03 && p + 12 <= body.length) accel = f3(p)
   }
 
@@ -284,11 +304,12 @@ export function parseModelSpawn(body: Uint8Array): RawModelSpawn | null {
     model, position, rotation, scale, tint, uvScroll, life, tracks, blend, todTracks, spin,
     attach: view.getUint16(0, true) & 0xf,
     followCamera: (flags & FLAG_FOLLOW_CAMERA) !== 0,
-    link: linked === LINKED_SPRITE ? 'sprite' : 'mesh',
+    link: linked === LINKED_SPRITE ? 'sprite' : linked === LINKED_FLARE ? 'flare' : 'mesh',
     billboard: flags & 0xffff & ~FLAG_FOLLOW_CAMERA,
     renderState: flags >>> 16,
     emission, spread, velocity, velocityVariance, accel, moves, rotationVariance, scaleVariance,
     scaleVelocity: scales ? scaleVelocity : [0, 0, 0],
+    emitRange, flipbook,
   }
 }
 

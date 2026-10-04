@@ -28,6 +28,13 @@ export const ffxiLight = {
   uFfxiLightOn: { value: 0 },
 }
 
+/**
+ * How far Zone weather's fog start has been moved out from the camera (to the
+ * orbit target; see ZoneWeatherAnimator). Sky layers subtract it, since their
+ * fade stands for retail's distances, not the viewer's camera.
+ */
+export const zoneFogShift = { value: 0 }
+
 /** Uniform declarations for either stage. */
 export const FFXI_LIGHT_PARS = /* glsl */ `
   uniform vec3 uFfxiAmb;

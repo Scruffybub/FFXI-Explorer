@@ -140,8 +140,74 @@ and overcast sunny skies — reverted). **Known:** a faint seam in Lufaise's win
 canopy; overview cameras sit far outside retail's short fog, so bad-weather
 zones read as solid fog from above. `?skyonly=gen1,gen2` isolates sky layers.
 **Sun, per Ryan's retail screenshots:** bright core with a starburst, a large
-soft glow (so the sunsphere glow's size is real), and a lens-flare chain of
-rings and discs across the screen — next.
+soft glow, and a lens-flare chain of rings and discs across the screen.
+**Built 2026-10-03 (`LensFlare.tsx`).** The sun *is* the lens flare: a
+generator linking type 0x39 to a 0x21 sheet (`lf01` sunshine, `lf02` fair,
+`lf03` clouds/fog in West Ronfaure). The sheet layout was misread for the rain
+(xim SpriteSheetSection is the reference): u16 flag, u16 mesh count, u8 lens
+flag, …, then per mesh u16 1, u8 quad count, u8, and for a flare an f32 offset +
+3 floats before the vertices. Mesh 0 (offset 0, ±4 = a quarter of the screen)
+is the white core, starburst and wide soft orange halo — the "large soft
+glow"; the rest lie on the line sun → centre → mirror at their offsets, sized
+in 32nds of the screen per axis (xim ZoneDrawer.drawLensFlare). The sheets'
+alpha is solid; additive SRC_ALPHA/ONE, stage 0 texel × vertex colour, stage 1
+× generator colour. Placed in `onBeforeRender` against the drawing camera, so
+it cannot lag. Strength: retail scales by the share of a screen quad at the sun
+passing the depth test; here 9 rays toward the sun against the collision BVH
+(trees don't count), zero below the horizon, fading over the last tenth of the
+screen beyond the edge. The moon's `molf` flare is its rainbow halo (`kasa`).
+The stand-in sun disc steps aside where a sun flare exists.
+The `sunsphere` bowl (0x8000 ring, 70×) stays undrawn: drawn, it floods the sky
+from 18° out around a clear hole; every face the camera sees is a back face, and
+the screenshots show nothing like it — retail presumably culls it.
+"Game sun and moon" (`scene.gameSunMoon`, default on, shown with Zone weather)
+switches the flare sun and moon halo back to the plain stand-in discs.
+
+**Sky stitches, 2026-10-03 (Ryan's screenshot).** Thin dark zigzag lines across
+the clouds in South Gustaberg and La Theine sunshine. The canopy is an inner
+0x0 disc (rim radius 74) plus a 0x8000 ring (47–126) sharing 40 edges exactly
+— positions, alpha and edges identical; uv differs by exactly 1 at some shared
+vertices, harmless under repeat wrap. The bug was ours: the push-out factor was
+measured per piece, so the disc went out 1.7× as far as the ring and its edge
+cut across it. Now measured over all of a generator's pieces. Ruled out on the
+way: post-processing, mipmaps, the double-sided two-pass draw, D3D-style
+shortest-path uv wrapping. This likely was also Lufaise wind's "faint seam".
+Note West Ronfaure's `fine` canopy is a ring with a real jagged hole inside
+radius 15 — no inner piece ships for it.
+
+**Other weathers' particles, 2026-10-04.** A census of every zone: sprite
+generators under weat/ by state — snow 290 in 17 zones, rain 348, sand, dust,
+wind (`gras`), heat/dry (`hit8`), plus the pole star (`hit6`) and moon phase
+(`moon`), which stand still (life 0) and are not drawn. Most weather sprites
+(`hit1`..`hit9`, `eisy`) are not in the zone at all: they live in the shared
+effects file ROM/0/0.DAT (xim's GlobalDirectory). `parseSystemEffects` reads it
+once per install; sprite and flare links that miss their own directories now
+fall back to anywhere in the zone, then to it (mesh links keep the scoped
+lookup). Also: `hit3` is a 16-frame flipbook (all sixteen were being stacked —
+sixteen times too bright); render state 0x0400 places a particle at birth at a
+base offset turned with the view (xim), so the snow falls in front of you;
+generator updater 0x0A culls emission beyond a range. Light snow is now faint
+specks (8 cm flakes, additive, alpha ≤ 0.44) — ask Ryan for a retail snow shot.
+Not yet read: 0x08/0x41 relative velocity, 0x2C dampening, 0x90/0x91/0x69
+daylight colour (snow dims at night), sec3 0x2E draw distance, sec3 0x60
+screen flash (Thunder — likely the full-screen lightning flash), 0x54/0x34
+point lists (sand). Known: faint polygon outlines in Lufaise wind canopies
+(pre-existing; inner discs read differently from their rings).
+
+**Overview fog, 2026-10-04.** Zone weather's fog now starts at the orbit target
+in orbit view (the camera distance to it is added to fog start and end;
+`zoneFogShift`, which the sky layers subtract), so the point being looked at
+reads as the game would show it. "Fog distance" (`scene.weatherFogScale`, 1–10,
+default 1 = the game's) stretches the fog for storms that end it ~100 out.
+
+**Dynamic lighting with Zone weather, 2026-10-03.** Zone weather used to force
+the Original pipeline. Now `lit` is just `lighting.mode === 'lit'`: Dynamic keeps
+its materials, shadows and point lights; the weather still draws sky, fog,
+canopies, rain and flare, and `SunLight` takes its colours from the records —
+the sun's colour and the game's sun direction by day, the moon's by night,
+hemisphere = ambient × 2 (the records' 2x scale), ground half that. Sliders
+still scale intensity. Sky IBL is off with weather (it samples the viewer's
+own sky). The zone shader's 'ffxi' variant is only used in Original.
 
 **Emission clocks, lightning and rain, 2026-09-30.** Generators emit on a clock
 in their header (body 0x64: u16 variance, u16 frames−1, 9-bit count, flags 0x04

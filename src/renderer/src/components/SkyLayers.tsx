@@ -6,7 +6,7 @@ import type { GeneratorSpawn } from '../lib/ffxi-dat/types'
 import { sampleKeyFrames } from '../lib/ffxi-dat/GeneratorParser'
 import { applySpawnStages } from '../lib/spawnStages'
 import { GAMMA_BLEND_LAYER } from '../lib/GammaBlendPass'
-import { sunDirection } from '../lib/zoneLighting'
+import { sunDirection, zoneFogShift } from '../lib/zoneLighting'
 
 /**
  * The zone's sky layers from <zone>/weat/<state>/: cloud canopies, the star
@@ -16,8 +16,7 @@ import { sunDirection } from '../lib/zoneLighting'
  *                        (0x0B, radians per frame)
  *   stars (star/)        a camera-following dome whose alpha rides the ksta
  *                        curve: 1.34 at midnight, 0 by day
- *   sun (sun1)           attach 0xE: rides the sun's direction, disc and glow
- *                        from the MMB `sunsphere`
+ *   sun (sun1)           attach 0xE: rides the sun's direction (see below)
  *   moon halo (moon/kasa) attach 0xF: the moon's direction, `moonsphere`
  *
  * Colour: the 0x60–0x62 time-of-day curves set R, G, B (on the byte/255 scale
@@ -31,20 +30,21 @@ import { sunDirection } from '../lib/zoneLighting'
  * viewer shows terrain far past that, so the canopies are pushed out to just
  * inside the sky dome, keeping their authored proportions, as kuluu does, and
  * the sun and moon ride at a fixed fraction of it, scaled to keep retail's
- * angular size. Not drawn: the moon's phase sprite (a 0x21 sheet this viewer
- * does not parse) and the screen-space lens flare that is Ronfaure's sun disc.
+ * angular size. Not drawn: the moon's phase sprite (a 0x21 sheet with a
+ * moon-phase updater; no Vana'diel calendar here).
  *
- * The sun mesh is two pieces: a flat disc with render state 0x0 and a glow ring
- * (0x8000) whose alpha falls 128 → 0 outward. Retail draws the sun's own disc
- * with colour writes off, only to measure how much of it is hidden for the lens
- * flare (kuluu sun_moon.rs, from xim ParticleDrawer renderHazeTexture) — so
- * only the 0x8000 glow is visible. That glow, drawn at the size the data gives
- * (70x at 900 units), fades out some 60° from the sun and whitened the whole
- * sky at noon and dusk, 2026-09-28 — something about how retail sizes or
- * blends it is still unknown. Until a reference settles it, the sun and moon
- * are drawn as modest discs (SUN_DEGREES, MOON_DEGREES) at the data's
- * positions, coloured and faded by the generators' own time-of-day curves:
- * ksr1/ksg1/ksb1 for the sun, the moon's k000 alpha. The meshes stay parsed.
+ * The sun you see is the lens flare (LensFlare): the first mesh of the
+ * weather's lf0x sheet is the white core, starburst and wide soft halo. The
+ * generator mesh, `sunsphere`, is a flat 0x0 disc — retail's occlusion quad for
+ * the flare, drawn with colour writes off — and a 0x8000 bowl opening toward
+ * the camera, alpha 128 → 0 outward, at 70x and 900 units. Drawn, that bowl
+ * starts 18° out and floods the sky beyond it at full strength around a clear
+ * hole (2026-09-28, again 2026-10-03); Ryan's retail screenshots show nothing
+ * like it, and every face of it the camera sees is a back face, so retail
+ * presumably culls it. It stays undrawn. Where a weather has no sun flare, and
+ * for the moon, modest stand-in discs (SUN_DEGREES, MOON_DEGREES) sit at the
+ * data's positions, coloured and faded by the generators' own time-of-day
+ * curves: ksr1/ksg1/ksb1 for the sun, the moon's k000 alpha.
  *
  * Fog: retail's canopies sit a few hundred units out, where its fog fades
  * them into the horizon. Pushed out to the dome here, they fade by the fog they
@@ -146,18 +146,24 @@ const SKY_ONLY = typeof window !== 'undefined'
 
 const decode = (c: number) => (c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4))
 
-function buildLayers(zone: ParsedZone, state: string, radius: number): Layer[] {
+function buildLayers(zone: ParsedZone, state: string, radius: number, gameSunMoon: boolean): Layer[] {
   const inState = new RegExp(`(^|/)weat/${state}(/(star|moon))?$`)
   const layers: Layer[] = []
+  const hasSunFlare = gameSunMoon && (zone.spawns ?? []).some(s =>
+    s.link === 'flare' && s.attach === 0xe && new RegExp(`(^|/)weat/${state}(/|$)`).test(s.dir))
   for (const sp of zone.spawns ?? []) {
     if (!inState.test(sp.dir)) continue
-    if (sp.link === 'sprite') continue // WeatherParticles draws these
+    if (sp.link !== 'mesh') continue // WeatherParticles and LensFlare draw these
     if (SKY_ONLY.length && !SKY_ONLY.includes(sp.generator)) continue
     const kind = sp.attach === 0xe ? 'sun' : sp.attach === 0xf ? 'moon' : sp.followCamera ? 'camera' : null
     if (!kind) continue
-    if (kind !== 'camera') {
-      // One stand-in disc per sun or moon generator; see the note above.
-      if (layers.some(l => l.kind === kind)) continue
+    // One stand-in disc per sun or moon; see the note above. Where the weather
+    // has a sun lens flare, its first mesh is the sun's disc and starburst
+    // (LensFlare), so the stand-in steps aside. The moon's flare is only a
+    // halo; its disc is a phase sprite, not drawn yet.
+    const standIn = kind !== 'camera' && !layers.some(l => l.kind === kind && l.map) &&
+      !(kind === 'sun' && hasSunFlare)
+    if (standIn) {
       const deg = kind === 'sun' ? SUN_DEGREES : MOON_DEGREES
       const size = 2 * radius * 0.8 * Math.tan(((deg / 2) * Math.PI) / 180)
       const geo = new THREE.PlaneGeometry(1, 1)
@@ -178,8 +184,8 @@ function buildLayers(zone: ParsedZone, state: string, radius: number): Layer[] {
         scale: new THREE.Vector3(size, size, size),
         base: new THREE.Vector3(), rotation: new THREE.Euler(), spin: [0, 0, 0],
       })
-      continue
     }
+    if (kind !== 'camera') continue
     const slots = slotCount(sp)
     for (let slot = 0; slot < slots; slot++) for (const pi of sp.prefabIndices) {
       const p = zone.prefabs[pi]
@@ -262,11 +268,12 @@ function buildLayers(zone: ParsedZone, state: string, radius: number): Layer[] {
         mat.onBeforeCompile = (shader, renderer) => {
           stages(shader, renderer)
           shader.uniforms.uSkyFogScale = fogScale
+          shader.uniforms.uFogShift = zoneFogShift
           shader.fragmentShader = shader.fragmentShader
-            .replace('void main() {', 'uniform float uSkyFogScale;\nvoid main() {')
+            .replace('void main() {', 'uniform float uSkyFogScale;\nuniform float uFogShift;\nvoid main() {')
             .replace('#include <fog_fragment>', [
               '#ifdef USE_FOG',
-              '  float skyFog = clamp((vFogDepth * uSkyFogScale - fogNear) / max(fogFar - fogNear, 0.0001), 0.0, 1.0);',
+              '  float skyFog = clamp((vFogDepth * uSkyFogScale - (fogNear - uFogShift)) / max(fogFar - fogNear, 0.0001), 0.0, 1.0);',
               '  gl_FragColor.a *= 1.0 - skyFog;',
               '#endif',
             ].join('\n'))
@@ -303,8 +310,16 @@ function buildLayers(zone: ParsedZone, state: string, radius: number): Layer[] {
         fogScale.value = 1 / k
       } else if (kind === 'camera') {
         // Push the rim out to just inside the dome, keeping proportions.
+        // Measured over all of the generator's pieces, so they scale as one:
+        // measured per piece, an inner disc (rim 74) was pushed out 1.7x as far
+        // as the ring it sits in (rim 126), and its edge cut across the ring as
+        // thin lines — the "stitches", South Gustaberg and La Theine, 2026-10-03.
         let half = 0
-        for (let v = 0; v < n; v++) half = Math.max(half, Math.abs(p.vertices[v * 3]), Math.abs(p.vertices[v * 3 + 2]))
+        for (const qi of sp.prefabIndices) {
+          const q = zone.prefabs[qi]
+          if (!q) continue
+          for (let v = 0; v < q.vertices.length; v += 3) half = Math.max(half, Math.abs(q.vertices[v]), Math.abs(q.vertices[v + 2]))
+        }
         const rim = half * Math.max(sp.scale[0], sp.scale[2])
         const target = radius * (isStar ? 0.95 : 0.85)
         if (rim > 1) {
@@ -333,15 +348,17 @@ function buildLayers(zone: ParsedZone, state: string, radius: number): Layer[] {
 const FLIP = new THREE.Matrix4().makeRotationX(Math.PI)
 
 export function SkyLayers({
-  zone, state, timeOfDayRef, radius,
+  zone, state, timeOfDayRef, radius, gameSunMoon = true,
 }: {
   zone: ParsedZone
   state: string
   timeOfDayRef: React.RefObject<number>
   radius: number
+  /** The game's sun (its lens flare draws it) rather than the stand-in disc. */
+  gameSunMoon?: boolean
 }) {
   const layers = useMemo(() => {
-    const l = buildLayers(zone, state, radius)
+    const l = buildLayers(zone, state, radius, gameSunMoon)
     console.log(`[SKY] ${l.length} sky layers for ${state}: ` +
       l.map(x => `${x.spawn.generator}(${x.kind})`).join(' '))
     // Diagnostic (?census=1): the live layers, for probes.
@@ -349,7 +366,7 @@ export function SkyLayers({
       (window as unknown as { __sky?: Layer[] }).__sky = l
     }
     return l
-  }, [zone, state, radius])
+  }, [zone, state, radius, gameSunMoon])
 
   // One clock per generator, shared by its pieces and copies. Rebuilt with the
   // layers, so a weather change starts every generator over, as zoning does.

@@ -76,10 +76,10 @@ here so anyone relying on it can make their own assessment.
 ## File-format research — kuluu-ffxi and xim (GPL-3.0, reference only)
 
 **Files:** `src/renderer/src/lib/ffxi-dat/GeneratorParser.ts`, `D3mParser.ts`,
-`EnvironmentParser.ts`, `CollisionParser.ts` (water height),
+`SpriteParser.ts`, `EnvironmentParser.ts`, `CollisionParser.ts` (water height),
 `src/renderer/src/lib/zoneLighting.ts`, `spawnStages.ts`, `GammaBlendPass.ts`,
-`src/renderer/src/components/SkyLayers.tsx`, and the zone transparency rule in
-`ZoneViewer.tsx`
+`src/renderer/src/components/SkyLayers.tsx`, `WeatherParticles.tsx`,
+`LensFlare.tsx`, and the zone transparency rule in `ZoneViewer.tsx`
 
 The layouts of generator chunks, D3M effect meshes, KeyFrame curves and
 environment (weather) records, FFXI's texture-stage and lighting maths, and its

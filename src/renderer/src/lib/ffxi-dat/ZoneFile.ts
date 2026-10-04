@@ -2,7 +2,7 @@ import { DatReader } from './DatReader'
 import { parseTextureBlock } from './TextureParser'
 import { parseModelSpawn, parseKeyFrames } from './GeneratorParser'
 import { parseD3m } from './D3mParser'
-import { parseSprite } from './SpriteParser'
+import { parseSprite, type ParsedSprite } from './SpriteParser'
 import { parseEnvironmentRecord } from './EnvironmentParser'
 import { decodeMzb, decodeMmb } from './ZoneDecrypt'
 import { parseMzbBlock } from './MzbParser'
@@ -118,10 +118,38 @@ export function parseTexturesFromDat(
   return result
 }
 
+/**
+ * The client's shared effects file, ROM/0/0.DAT (xim loads it as its global
+ * directory, `syst/effe`). Weather generators link sprites from it that no zone
+ * ships: the snow and blizzard flakes, the sandstorm and dust (`hit1`..`hit9`,
+ * `eisy`). Uleguerand Range's 21 snow generators all link `hit3`.
+ */
+export interface SystemEffects {
+  textures: Map<string, ParsedTexture>
+  sprites: { name: string; sprite: ParsedSprite }[]
+}
+
+export function parseSystemEffects(buffer: ArrayBuffer): SystemEffects {
+  const reader = new DatReader(buffer)
+  const blocks = parseBlockChain(reader)
+  const sprites: SystemEffects['sprites'] = []
+  for (const block of blocks.filter(b => b.type === BLOCK_SPRITE)) {
+    const len = block.dataLength - BLOCK_PADDING
+    if (len <= 0) continue
+    const s = parseSprite(new Uint8Array(buffer, block.dataOffset + BLOCK_PADDING, len))
+    if (s) sprites.push({ name: block.name.trim(), sprite: s })
+  }
+  return { textures: parseTexturesFromDat(buffer), sprites }
+}
+
+/** The directory system sprites are filed under, apart from any zone's. */
+const SYSTEM_DIR = '<system>'
+
 export function parseZoneFile(
   buffer: ArrayBuffer,
   onProgress?: (message: string) => void,
   supplementalTextures?: Map<string, ParsedTexture>,
+  system?: SystemEffects,
 ): ParsedZone {
   const reader = new DatReader(buffer)
   const blocks = parseBlockChain(reader)
@@ -473,25 +501,51 @@ export function parseZoneFile(
   // sprite links — Jugner's weat/rain holds both an MMB and a sprite named
   // `rain`.
   let spriteCount = 0
+  const pushSprite = (s: ParsedSprite, name: string, dir: string, materialIndex: number) => {
+    // The prefab's own geometry is every mesh in turn (the rain has one); a
+    // lens flare also keeps them apart, since each has its own place.
+    const vertices = s.meshes.flatMap(m => m.vertices)
+    const idx = prefabs.length
+    prefabs.push({
+      vertices, normals: new Array(vertices.length).fill(0),
+      colors: s.meshes.flatMap(m => m.colors), uvs: s.meshes.flatMap(m => m.uvs),
+      indices: Array.from({ length: vertices.length / 3 }, (_, i) => i),
+      materialIndex,
+      blending: 0,
+      textureName: s.textureName,
+      sprite: true,
+      ...(s.lensFlare && { flare: s.meshes }),
+      ...(!s.lensFlare && s.meshes.length > 1 && { frames: s.meshes }),
+    })
+    prefabChunk[idx] = name
+    prefabDir[idx] = dir
+    prefabSource[idx] = name
+    spriteCount++
+  }
   for (const block of blocks.filter(b => b.type === BLOCK_SPRITE)) {
     const start = block.dataOffset + BLOCK_PADDING
     const len = block.dataLength - BLOCK_PADDING
     if (len <= 0) continue
     const s = parseSprite(new Uint8Array(buffer, start, len))
-    if (!s) continue
-    const idx = prefabs.length
-    prefabs.push({
-      vertices: s.vertices, normals: new Array(s.vertices.length).fill(0), colors: s.colors, uvs: s.uvs,
-      indices: s.indices,
-      materialIndex: textureNameMap.get(s.textureName) ?? -1,
-      blending: 0,
-      textureName: s.textureName,
-      sprite: true,
-    })
-    prefabChunk[idx] = block.name.trim()
-    prefabDir[idx] = block.dir
-    prefabSource[idx] = block.name.trim()
-    spriteCount++
+    if (s) pushSprite(s, block.name.trim(), block.dir, textureNameMap.get(s.textureName) ?? -1)
+  }
+  // The shared effects file's sprites, last, under their own directory. Their
+  // textures join the pool at the end, after every index the zone already
+  // uses, so no zone mesh's texture can change.
+  let systemSprites = 0
+  let systemTextures = 0
+  for (const { name, sprite } of system?.sprites ?? []) {
+    let mi = textureNameMap.get(sprite.textureName)
+    const tex = mi === undefined ? system!.textures.get(sprite.textureName) : undefined
+    if (tex) {
+      mi = textures.length
+      textures.push(tex)
+      textureNames.push(sprite.textureName)
+      textureNameMap.set(sprite.textureName, mi)
+      systemTextures++
+    }
+    pushSprite(sprite, name, SYSTEM_DIR, mi ?? -1)
+    systemSprites++
   }
 
   // KeyFrame curves, keyed by directory and chunk name, for scoped lookup.
@@ -534,8 +588,22 @@ export function parseZoneFile(
       prefabIndices = []
       for (let p = 0; p < prefabChunk.length; p++) {
         if (prefabChunk[p] === raw.model && prefabDir[p] === scope &&
-          !!prefabs[p].sprite === (raw.link === 'sprite')) prefabIndices.push(p)
+          !!prefabs[p].sprite === (raw.link !== 'mesh')) prefabIndices.push(p)
       }
+    }
+    // A sprite or flare the generator's own directories lack is looked for
+    // anywhere in the zone, then in the shared effects file — retail's order
+    // (xim ParticleLinkedDataProviders). Meshes keep the scoped lookup above.
+    if (prefabIndices.length === 0 && raw.link !== 'mesh') {
+      const anywhere = (inSystem: boolean) => {
+        const out: number[] = []
+        for (let p = 0; p < prefabChunk.length; p++) {
+          if (prefabChunk[p] === raw.model && prefabs[p].sprite && (prefabDir[p] === SYSTEM_DIR) === inSystem) out.push(p)
+        }
+        return out.slice(0, 1)
+      }
+      prefabIndices = anywhere(false)
+      if (prefabIndices.length === 0) prefabIndices = anywhere(true)
     }
     if (prefabIndices.length === 0) { unresolvedSpawns++; continue }
     const curves: GeneratorSpawn['curves'] = {}
@@ -553,7 +621,7 @@ export function parseZoneFile(
     spawns.push({ generator: block.name.trim(), dir: block.dir, prefabIndices, ...raw, curves, todCurves })
   }
   if (spawns.length || unresolvedSpawns) {
-    console.log(`[GENSPAWN] ${spawns.length} model spawns resolved, ${unresolvedSpawns} unresolved; ${d3mCount} D3M effect meshes, ${spriteCount} sprites loaded`)
+    console.log(`[GENSPAWN] ${spawns.length} model spawns resolved, ${unresolvedSpawns} unresolved; ${d3mCount} D3M effect meshes, ${spriteCount} sprites loaded (${systemSprites} shared)`)
   }
 
   // ── Pass 5: environment records under <zone>/weat/<state>/ ──
@@ -575,7 +643,10 @@ export function parseZoneFile(
     console.log(`[ENV] ${environment.length} environment records, states ${JSON.stringify(states)}`)
   }
 
-  return { prefabs, instances, textures, textureNames, collision, spawns, environment }
+  return {
+    prefabs, instances, textures, textureNames, collision, spawns, environment,
+    shared: { prefabs: systemSprites, textures: systemTextures },
+  }
 }
 
 /** Concatenate collision from every MZB block in the file, rebasing indices. */

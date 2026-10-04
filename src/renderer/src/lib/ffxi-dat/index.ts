@@ -1,6 +1,6 @@
 export { DatReader } from './DatReader'
 export { parseTextures, parseTextureBlock, decompressDXT1, decompressDXT3 } from './TextureParser'
-export { parseZoneFile, parseTexturesFromDat } from './ZoneFile'
+export { parseZoneFile, parseTexturesFromDat, parseSystemEffects, type SystemEffects } from './ZoneFile'
 export { parseMinimapDat } from './MinimapParser'
 export { parseMzbCollision } from './CollisionParser'
 export { parseDatFile, parseSkeletonDat, hasAnimations } from './DatFile'

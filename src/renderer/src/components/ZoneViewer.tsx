@@ -16,11 +16,12 @@ import {
   GammaBlendPass, GAMMA_BLEND_LAYER, SRGB_GLSL,
 } from '../lib/GammaBlendPass'
 import {
-  ffxiLight, FFXI_LIGHT_PARS, FFXI_LIGHT_VERTEX, sampleTerrainLight, sunDirection,
+  ffxiLight, FFXI_LIGHT_PARS, FFXI_LIGHT_VERTEX, sampleTerrainLight, sunDirection, zoneFogShift,
 } from '../lib/zoneLighting'
 import { applySpawnStages } from '../lib/spawnStages'
 import { SkyLayers } from './SkyLayers'
 import { WeatherParticles } from './WeatherParticles'
+import { LensFlare } from './LensFlare'
 import type {
   LightingSettings, PointLightSettings, PostSettings, SceneSettings, SurfaceInfo, ToneMappingMode,
 } from '../lib/settings'
@@ -444,7 +445,7 @@ function drawsInWorld(sp: {
   if (/(^|\/)weat(\/|$)/.test(sp.dir)) return false
   // Sprite particles (rain, splashes, mist) need a particle system; only the
   // weather's are drawn, by WeatherParticles.
-  if (sp.link === 'sprite') return false
+  if (sp.link && sp.link !== 'mesh') return false
   if (sp.followCamera) return false
   return sp.tint[3] > 0 || !!sp.curves?.alpha
 }
@@ -899,13 +900,21 @@ function sunDirectionFor(lighting: LightingSettings, timeOfDay: number): THREE.V
  * modest shadow map still resolves sharp shadows across a very large zone.
  */
 function SunLight({
-  lighting, timeOfDay, waterMaterials,
+  lighting, timeOfDay, waterMaterials, weather,
 }: {
   lighting: LightingSettings
   timeOfDay: number
   waterMaterials: THREE.ShaderMaterial[]
+  /**
+   * Zone weather's records. With them, Dynamic lighting keeps its materials,
+   * shadows and point lights but takes the light itself from the weather: the
+   * sun's colour and direction by day, the moon's by night, and the ambient,
+   * all from the records for this hour. The intensity sliders still scale them.
+   */
+  weather?: ZoneEnvRecord[]
 }) {
   const lightRef = useRef<THREE.DirectionalLight>(null)
+  const hemiRef = useRef<THREE.HemisphereLight>(null)
   const targetRef = useRef(new THREE.Object3D())
   const { scene, camera } = useThree()
 
@@ -945,7 +954,30 @@ function SunLight({
     const light = lightRef.current
     if (!light) return
 
-    const dir = sunDirectionFor(lighting, timeOfDay)
+    let dir = sunDirectionFor(lighting, timeOfDay)
+    const sample = weather?.length ? sampleTerrainLight(weather, timeOfDay * 60) : null
+    if (sample) {
+      // The game's own sun direction (the flare and sky use it too); after
+      // dark, the moon opposite it.
+      dir = sunDirection(timeOfDay * 60, new THREE.Vector3())
+      const day = dir.y > 0
+      if (!day) dir.negate()
+      dir.y = Math.max(dir.y, 0.05)
+      dir.normalize()
+      const c = day ? sample.sun : sample.moon
+      light.color.setRGB(c[0], c[1], c[2], THREE.SRGBColorSpace)
+      const hemi = hemiRef.current
+      if (hemi) {
+        // The records' ambient tops out at 0.5 on the game's 2x scale.
+        const a = sample.ambient
+        hemi.color.setRGB(Math.min(1, a[0] * 2), Math.min(1, a[1] * 2), Math.min(1, a[2] * 2), THREE.SRGBColorSpace)
+        hemi.groundColor.copy(hemi.color).multiplyScalar(0.5)
+      }
+    } else {
+      light.color.set(lighting.sunColor)
+      hemiRef.current?.color.set(lighting.skyColor)
+      hemiRef.current?.groundColor.set(lighting.groundColor)
+    }
 
     // Anchor the shadow volume a little ahead of the camera so detail lands
     // where the user is actually looking.
@@ -977,6 +1009,7 @@ function SunLight({
         castShadow={lighting.shadows}
       />
       <hemisphereLight
+        ref={hemiRef}
         color={lighting.skyColor}
         groundColor={lighting.groundColor}
         intensity={lighting.ambientIntensity}
@@ -1109,14 +1142,17 @@ function createZoneSkyMaterial(): THREE.ShaderMaterial {
  * The fog is FFXI's plain linear fog; `fog` false (map view) leaves it off.
  */
 function ZoneWeatherAnimator({
-  material, records, timeOfDayRef, fog,
+  material, records, timeOfDayRef, fog, fogScale = 1,
 }: {
   material: THREE.ShaderMaterial
   records: ZoneEnvRecord[]
   timeOfDayRef: React.RefObject<number>
   fog: boolean
+  /** The panel's Fog distance: stretches the records' fog, 1 = the game's. */
+  fogScale?: number
 }) {
   const { scene } = useThree()
+  const controls = useThree(st => st.controls) as unknown as { target?: THREE.Vector3 } | null
   const decode = (c: number) => (c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4))
   useEffect(() => {
     ffxiLight.uFfxiLightOn.value = 1
@@ -1126,7 +1162,7 @@ function ZoneWeatherAnimator({
       if (fog) scene.fog = null
     }
   }, [scene, fog])
-  useFrame(() => {
+  useFrame(({ camera }) => {
     const minutes = (timeOfDayRef.current ?? 12) * 60
     const light = sampleTerrainLight(records, minutes)
     if (light) {
@@ -1138,8 +1174,16 @@ function ZoneWeatherAnimator({
       const f = scene.fog
       if (fog && f instanceof THREE.Fog) {
         f.color.setRGB(light.fogColor[0], light.fogColor[1], light.fogColor[2], THREE.SRGBColorSpace)
-        f.near = light.fogStart
-        f.far = Math.max(light.fogEnd, light.fogStart + 1)
+        // Retail's fog starts at a camera that sits just behind the player.
+        // Orbiting, the camera hangs far off the point being looked at, and
+        // stormy zones read as solid fog from above (2026-09-29). So in orbit
+        // the fog starts at the orbit target: that point looks as the game
+        // would show it, and the fog still thickens past it. Fly and walk
+        // keep the camera as the start, as in game.
+        const shift = controls?.target ? camera.position.distanceTo(controls.target) : 0
+        zoneFogShift.value = shift
+        f.near = light.fogStart * fogScale + shift
+        f.far = Math.max(light.fogEnd, light.fogStart + 1) * fogScale + shift
       }
     }
     const g = sampleSkyGradient(records, minutes)
@@ -2665,7 +2709,9 @@ export default function ZoneViewer({
   // Zone weather lights the zone from its own records, so it sets aside the
   // lighting presets — both lit mode and the Original sun — while it runs.
   const zoneLight = zoneSkyRecords.length > 0
-  const lit = lighting.mode === 'lit' && !zoneLight
+  // Dynamic lighting runs with zone weather too: the weather draws the sky,
+  // fog, clouds, rain and sun, and colours Dynamic's lights (SunLight).
+  const lit = lighting.mode === 'lit'
 
   // A shadow-casting point light needs the shadow map enabled even when the
   // sun's own shadows are switched off.
@@ -2685,7 +2731,7 @@ export default function ZoneViewer({
   // per-vertex normals at all; a purely baked renderer would have no use
   // for them.
   const gameSunActive = !lit && lighting.gameSun && !zoneLight
-  const shaderVariant = zoneLight ? 'ffxi' : gameSunActive ? 'lambert' : 'std'
+  const shaderVariant = zoneLight && !lit ? 'ffxi' : gameSunActive ? 'lambert' : 'std'
 
   // The panel toggle, or ?genspawn=1 for harnesses — the packaged app has no
   // address bar, so a URL switch alone is invisible to anyone using it.
@@ -4274,12 +4320,17 @@ export default function ZoneViewer({
       {zoneLight && (
         <SkyLayers
           zone={zoneData} state={zoneSkyRecords[0].state} timeOfDayRef={timeOfDayRef} radius={farPlane * 0.9}
+          gameSunMoon={scene.gameSunMoon}
         />
       )}
       {zoneLight && <WeatherParticles zone={zoneData} state={zoneSkyRecords[0].state} />}
+      {zoneLight && scene.gameSunMoon && (
+        <LensFlare zone={zoneData} state={zoneSkyRecords[0].state} timeOfDayRef={timeOfDayRef} collision={collisionWorld} />
+      )}
       {zoneLight && (
         <ZoneWeatherAnimator
           material={zoneSkyMaterial} records={zoneSkyRecords} timeOfDayRef={timeOfDayRef} fog={!scene.mapView}
+          fogScale={scene.weatherFogScale}
         />
       )}
       {spawnAnims.length > 0 && <SpawnAnimator anims={spawnAnims} />}
@@ -4290,11 +4341,16 @@ export default function ZoneViewer({
       <SkyEnvironment
         skyMaterial={skyMaterial}
         timeOfDay={scene.timeOfDay}
-        enabled={lit && lighting.skyIBL}
+        // The image light comes from the viewer's own sky, which zone weather
+        // replaces, so it would light a storm like a clear noon.
+        enabled={lit && lighting.skyIBL && !zoneLight}
         intensity={lighting.iblIntensity}
       />
 
-      <SunLight lighting={lighting} timeOfDay={scene.timeOfDay} waterMaterials={waterMaterials} />
+      <SunLight
+        lighting={lighting} timeOfDay={scene.timeOfDay} waterMaterials={waterMaterials}
+        weather={zoneLight ? zoneSkyRecords : undefined}
+      />
 
       {gameSunActive && (
         <GameSun

@@ -1,5 +1,6 @@
 import type { ParsedCollision } from './CollisionParser'
 import type { Emission, Spread } from './GeneratorParser'
+import type { SpriteMesh } from './SpriteParser'
 
 export interface ParsedMesh {
   vertices: Float32Array
@@ -114,6 +115,13 @@ export interface ParsedZoneMesh {
   celestial?: boolean
   /** A 0x21 sprite quad: placed only by particle generators, like a D3M. */
   sprite?: boolean
+  /** A lens-flare sheet's meshes, each with its place along the flare line. */
+  flare?: SpriteMesh[]
+  /**
+   * A flipbook's frames — the shared snowflake `hit3` has sixteen, a 4x4 grid
+   * on one sheet. A particle draws one at a time.
+   */
+  frames?: SpriteMesh[]
 }
 
 export interface ZoneMeshInstance {
@@ -151,7 +159,7 @@ export interface GeneratorSpawn {
   todCurves: { r?: number[]; g?: number[]; b?: number[]; alpha?: number[] }
   spin: [number, number, number]           // 0x0B rotation per frame, radians
   // Particle behaviour — see GeneratorParser's RawModelSpawn for each.
-  link: 'mesh' | 'sprite'
+  link: 'mesh' | 'sprite' | 'flare'
   billboard: number
   renderState: number
   emission: Emission
@@ -163,6 +171,8 @@ export interface GeneratorSpawn {
   rotationVariance: [number, number, number]
   scaleVariance: [number, number, number]
   scaleVelocity: [number, number, number]
+  emitRange: number
+  flipbook: boolean
 }
 
 /** One light set from an environment record. Colours are raw byte / 255. */
@@ -203,6 +213,8 @@ export interface ParsedZone {
   textureNames: string[]
   /** Meshes placed by generator chunks. Empty for zones that have none. */
   spawns: GeneratorSpawn[]
+  /** How many prefabs and textures came from the shared effects file, at the end. */
+  shared?: { prefabs: number; textures: number }
   /**
    * The zone's environment records (block 0x2F under <zone>/weat/<state>/):
    * sky gradient, lighting and fog per weather state and time of day.

@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { ZONES, type ZoneEntry } from './lib/zoneList'
 import { expansionFor } from './lib/zoneExpansion'
 import { typicalWeather } from './lib/weatherTypes'
-import { parseZoneFile, parseTexturesFromDat, parseMinimapDat, type ParsedZone } from './lib/ffxi-dat'
+import { parseZoneFile, parseTexturesFromDat, parseMinimapDat, parseSystemEffects, type ParsedZone, type SystemEffects } from './lib/ffxi-dat'
 import ZoneViewer, { type MapScale } from './components/ZoneViewer'
 import UpdateNotice from './components/UpdateNotice'
 import ControlPanel from './components/ControlPanel'
@@ -205,6 +205,8 @@ export default function App() {
   // when its weather list arrives, and again whenever Zone weather is turned
   // on. Choosing another weather afterwards is left alone.
   const weatherDefaultFor = useRef<number | null>(null)
+  /** ROM/0/0.DAT's sprites: undefined until read, null if unreadable. */
+  const systemEffects = useRef<SystemEffects | null | undefined>(undefined)
   useEffect(() => {
     if (!scene.zoneWeather) {
       // Leaving Zone weather: drop the state it chose, so the older weather
@@ -240,13 +242,20 @@ export default function App() {
         } catch { /* optional */ }
       }
 
+      // The shared effects file (ROM/0/0.DAT): weather sprites no zone ships,
+      // such as the snow. Read once per install.
+      if (systemEffects.current === undefined) {
+        systemEffects.current = null
+        try { systemEffects.current = parseSystemEffects(await window.ffxi.readDat(ffxiPath, 'ROM/0/0.DAT')) } catch { /* optional */ }
+      }
+
       setLoad({ status: 'loading', message: 'Parsing geometry...' })
       // Yield so the loading message paints before the parse blocks the thread.
       await new Promise(r => setTimeout(r, 16))
 
       const parsed = parseZoneFile(buffer, msg => {
         setLoad({ status: 'loading', message: msg })
-      }, supplemental)
+      }, supplemental, systemEffects.current ?? undefined)
 
       if (parsed.prefabs.length === 0 || parsed.instances.length === 0) {
         setLoad({ status: 'error', message: 'This zone file contains no renderable geometry.' })
@@ -649,8 +658,8 @@ export default function App() {
             <strong>{selected.name}</strong>
             <span>
               {load.zone.instances.length.toLocaleString()} objects ·{' '}
-              {load.zone.prefabs.length.toLocaleString()} meshes ·{' '}
-              {load.zone.textures.length.toLocaleString()} textures
+              {(load.zone.prefabs.length - (load.zone.shared?.prefabs ?? 0)).toLocaleString()} meshes ·{' '}
+              {(load.zone.textures.length - (load.zone.shared?.textures ?? 0)).toLocaleString()} textures
             </span>
           </div>
         )}

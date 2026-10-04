@@ -868,7 +868,7 @@ export default function ControlPanel({
           label="Zone weather (beta)"
           checked={scene.zoneWeather}
           onChange={v => onScene({ zoneWeather: v })}
-          info="Use the weather the zone's own data describes: FFXI stores a sky gradient, the sun, moon and ambient light, and the fog for each weather and hour, and blends between the hours as the clock moves. Follows the weather state and time of day; with no state chosen it shows clear weather. Lighting presets are set aside while this is on. Zones without the data keep the usual sky and lighting."
+          info="Use the weather the zone's own data describes: FFXI stores a sky gradient, the sun, moon and ambient light, and the fog for each weather and hour, and blends between the hours as the clock moves. Follows the weather state and time of day; with no state chosen it shows clear weather. In Original lighting the zone is lit the game's way; in Dynamic lighting it keeps its shadows, materials and point lights, with the weather setting the sun, moon and ambient colours. Zones without the data keep the usual sky and lighting."
         />
         {scene.zoneWeather && weatherStates.length > 0 ? (
           // Zone weather: all twenty FFXI weathers by name and element. The
@@ -895,7 +895,23 @@ export default function ControlPanel({
               })
             })()}
           </SelectField>
-        ) : weatherStates.length === 0 ? (
+        ) : null}
+        {scene.zoneWeather && weatherStates.length > 0 && (
+          <Toggle
+            label="Game sun and moon"
+            checked={scene.gameSunMoon}
+            onChange={v => onScene({ gameSunMoon: v })}
+            info="On: the sun and moon as the game draws them — the sun is the weather's lens flare (white core, starburst, soft halo and the chain of rings across the screen, fading when terrain hides it), and the moon gets its rainbow halo. Off: the viewer's plain sun and moon discs."
+          />
+        )}
+        {scene.zoneWeather && weatherStates.length > 0 && (
+          <Slider
+            label="Fog distance" value={scene.weatherFogScale} min={1} max={10} step={0.5}
+            onChange={v => onScene({ weatherFogScale: v })}
+            info="Stretches the weather's fog. 1 is the game's own. Storms, sandstorms and blizzards end their fog about 100 units out, which is right on the ground but hides most of a zone seen from above; raise this to see through. In orbit view the fog is also measured from the point you are orbiting, not from the camera."
+          />
+        )}
+        {scene.zoneWeather && weatherStates.length > 0 ? null : weatherStates.length === 0 ? (
           <p className="note small">This zone carries no weather geometry.</p>
         ) : (
           <>

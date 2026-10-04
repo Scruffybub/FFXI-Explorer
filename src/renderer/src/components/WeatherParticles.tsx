@@ -20,6 +20,11 @@ import { spreadOffset } from './SkyLayers'
  *     ~1h0.. ripples on the ponds, fixed in the world, growing as they fade
  *     rai2.. mist puffs, billboarded
  *
+ *   Uleguerand Range, snow: `snow` links the shared snowflake `hit3` from
+ *     ROM/0/0.DAT (see ZoneFile parseSystemEffects), a 16-frame flipbook; it
+ *     is born 10 ahead of the view and drifts; 19 placed flurries emit only
+ *     within 30 units (generator updater 0x0A)
+ *
  * Retail thins everything under weat/ to 0.3 of the authored count (kuluu
  * particle_sim.rs, from CYyGenerator::Idle), so the rain is ~89 streaks an
  * emission, ~270 at once.
@@ -57,6 +62,9 @@ interface System {
   rot: Float32Array
   born: Float32Array
   cursor: number
+  /** A flipbook's frames, as uv offsets from frame 0; null for one frame. */
+  frameOffsets: Float32Array | null
+  uvOffset: THREE.InstancedBufferAttribute
 }
 
 function buildSystems(zone: ParsedZone, state: string): System[] {
@@ -69,17 +77,35 @@ function buildSystems(zone: ParsedZone, state: string): System[] {
     const tex = zone.textures[p.materialIndex]
     if (!tex) continue
 
-    const n = p.vertices.length / 3
+    // A flipbook draws one frame at a time: frame 0's quad, moved across the
+    // sheet per particle. The shared snowflake `hit3` is sixteen frames of a
+    // 4x4 grid; drawn whole, all sixteen stacked on every flake.
+    const frame0 = p.frames?.[0]
+    const verts = frame0?.vertices ?? p.vertices
+    const uvs = frame0?.uvs ?? p.uvs
+    const colors = frame0?.colors ?? p.colors
+    const n = verts.length / 3
     const geo = new THREE.BufferGeometry()
-    geo.setAttribute('position', new THREE.Float32BufferAttribute(p.vertices, 3))
-    geo.setAttribute('uv', new THREE.Float32BufferAttribute(p.uvs, 2))
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3))
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2))
     const col = new Float32Array(n * 4)
     for (let v = 0; v < n; v++) {
-      for (let c = 0; c < 3; c++) col[v * 4 + c] = decode((p.colors[v * 4 + c] ?? 0.5) * 2)
-      col[v * 4 + 3] = Math.min(1, (p.colors[v * 4 + 3] ?? 0.5) * 2)
+      for (let c = 0; c < 3; c++) col[v * 4 + c] = decode((colors[v * 4 + c] ?? 0.5) * 2)
+      col[v * 4 + 3] = Math.min(1, (colors[v * 4 + 3] ?? 0.5) * 2)
     }
     geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 4))
-    geo.setIndex(p.indices)
+    geo.setIndex(frame0 ? Array.from({ length: n }, (_, i) => i) : p.indices)
+    let frameOffsets: Float32Array | null = null
+    if (p.frames && p.frames.length > 1) {
+      const minUv = (u: number[]) => [Math.min(...u.filter((_, i) => i % 2 === 0)), Math.min(...u.filter((_, i) => i % 2 === 1))]
+      const base = minUv(uvs)
+      frameOffsets = new Float32Array(p.frames.length * 2)
+      p.frames.forEach((f, i) => {
+        const m = minUv(f.uvs)
+        frameOffsets![i * 2] = m[0] - base[0]
+        frameOffsets![i * 2 + 1] = m[1] - base[1]
+      })
+    }
 
     const map = new THREE.DataTexture(new Uint8Array(tex.rgba), tex.width, tex.height, THREE.RGBAFormat)
     map.magFilter = THREE.LinearFilter
@@ -106,7 +132,8 @@ function buildSystems(zone: ParsedZone, state: string): System[] {
     mat.onBeforeCompile = (shader, renderer) => {
       stages(shader, renderer)
       shader.vertexShader = shader.vertexShader
-        .replace('void main() {', 'attribute float aAlpha;\nvarying float vAlpha;\nvoid main() {\n  vAlpha = aAlpha;')
+        .replace('void main() {', 'attribute float aAlpha;\nattribute vec2 aUvOffset;\nvarying float vAlpha;\nvoid main() {\n  vAlpha = aAlpha;')
+        .replace('#include <uv_vertex>', '#include <uv_vertex>\n#ifdef USE_MAP\n  vMapUv += aUvOffset;\n#endif')
       shader.fragmentShader = shader.fragmentShader
         .replace('void main() {', 'varying float vAlpha;\nvoid main() {')
         .replace('uSpawnTint.a * 2.0', 'uSpawnTint.a * vAlpha * 2.0')
@@ -118,6 +145,8 @@ function buildSystems(zone: ParsedZone, state: string): System[] {
       perEmission * Math.ceil((sp.life + 1) / Math.max(1, sp.emission.every)))
     const alpha = new THREE.InstancedBufferAttribute(new Float32Array(capacity), 1)
     geo.setAttribute('aAlpha', alpha)
+    const uvOffset = new THREE.InstancedBufferAttribute(new Float32Array(capacity * 2), 2)
+    geo.setAttribute('aUvOffset', uvOffset)
     const mesh = new THREE.InstancedMesh(geo, mat, capacity)
     mesh.frustumCulled = false
     mesh.layers.set(GAMMA_BLEND_LAYER)
@@ -129,6 +158,7 @@ function buildSystems(zone: ParsedZone, state: string): System[] {
       pos: new Float32Array(capacity * 3), vel: new Float32Array(capacity * 3),
       scl: new Float32Array(capacity * 3), rot: new Float32Array(capacity * 3),
       born: new Float32Array(capacity).fill(-Infinity),
+      frameOffsets, uvOffset,
     })
   }
   return out
@@ -162,6 +192,7 @@ export function WeatherParticles({ zone, state }: { zone: ParsedZone; state: str
   const tmp = useMemo(() => ({
     off: new THREE.Vector3(), p: new THREE.Vector3(), q: new THREE.Quaternion(), e: new THREE.Euler(0, 0, 0, 'ZYX'),
     s: new THREE.Vector3(), m: new THREE.Matrix4(), yaw: new THREE.Quaternion(), up: new THREE.Vector3(0, 1, 0), zero: new THREE.Vector3(),
+    right: new THREE.Vector3(), camUp: new THREE.Vector3(), view: new THREE.Vector3(),
   }), [])
   const last = useMemo(() => ({ frames: -1 }), [systems])
 
@@ -173,26 +204,52 @@ export function WeatherParticles({ zone, state }: { zone: ParsedZone; state: str
 
     for (const s of systems) {
       const sp = s.spawn
-      // Rides the camera: followCamera, or a camera-relative base (render
-      // state 0x0400, the mist puffs). Kept in world axes, as kuluu found.
-      const camRel = sp.followCamera || (sp.renderState & 0x400) !== 0
-      const bake = camRel && (sp.renderState & 0x80) !== 0
-      // Emit.
+      // Where a particle lives (xim Particle.updateAssociatedPosition):
+      //   follow       followCamera: rides the camera, in world axes
+      //   bake         followCamera with render state 0x0080: born at the
+      //                camera, then left in the world
+      //   attached     render state 0x0400: born at a base offset turned with
+      //                the view — right, up, ahead — then left in the world.
+      //                Uleguerand's snow is born 10 ahead, so it always falls
+      //                in front of you; in fixed world axes it fell behind
+      //                whenever the camera faced the other way.
+      const attached = (sp.renderState & 0x400) !== 0
+      const follow = sp.followCamera && !attached && (sp.renderState & 0x80) === 0
+      const bake = sp.followCamera && !attached && !follow
+      const camRel = follow || bake || attached
+      // Emit — for a placed generator with an emit range, only while the
+      // camera (standing in for the player) is within it.
       if (s.next < 0) s.next = frames
       if (frames - s.next > sp.emission.every * 4) s.next = frames
+      const culled = !camRel && sp.emitRange > 0 &&
+        tmp.p.set(sp.position[0], -sp.position[1], -sp.position[2]).distanceTo(camera.position) > sp.emitRange
+      if (culled) s.next = frames + sp.emission.every
       while (s.next <= frames) {
         for (let k = 0; k < s.perEmission; k++) {
           const i = s.cursor
           s.cursor = (s.cursor + 1) % s.capacity
           spreadOffset(sp.spread, tmp.off)
-          s.pos[i * 3] = sp.position[0] + tmp.off.x
-          s.pos[i * 3 + 1] = sp.position[1] + tmp.off.y
-          s.pos[i * 3 + 2] = sp.position[2] + tmp.off.z
-          if (bake) {
-            // Born at the camera, then left there (render state 0x0080).
-            s.pos[i * 3] += camera.position.x
-            s.pos[i * 3 + 1] -= camera.position.y
-            s.pos[i * 3 + 2] -= camera.position.z
+          if (attached) {
+            // World point: camera + base turned with the view + spread, then
+            // stored in DAT axes like every other particle (x, -y, -z).
+            camera.matrixWorld.extractBasis(tmp.right, tmp.camUp, tmp.view)
+            tmp.view.negate()
+            tmp.p.copy(camera.position)
+              .addScaledVector(tmp.right, sp.position[0])
+              .addScaledVector(tmp.camUp, -sp.position[1])
+              .addScaledVector(tmp.view, sp.position[2])
+            s.pos[i * 3] = tmp.p.x + tmp.off.x
+            s.pos[i * 3 + 1] = -tmp.p.y + tmp.off.y
+            s.pos[i * 3 + 2] = -tmp.p.z + tmp.off.z
+          } else {
+            s.pos[i * 3] = sp.position[0] + tmp.off.x
+            s.pos[i * 3 + 1] = sp.position[1] + tmp.off.y
+            s.pos[i * 3 + 2] = sp.position[2] + tmp.off.z
+            if (bake) {
+              s.pos[i * 3] += camera.position.x
+              s.pos[i * 3 + 1] -= camera.position.y
+              s.pos[i * 3 + 2] -= camera.position.z
+            }
           }
           for (let c = 0; c < 3; c++) {
             s.vel[i * 3 + c] = sp.velocity[c] + sp.velocityVariance[c] * rand()
@@ -223,7 +280,7 @@ export function WeatherParticles({ zone, state }: { zone: ParsedZone; state: str
           : sp.tint[3] / 128
         // DAT → world: x, -y, -z; camera followers ride the camera.
         tmp.p.set(s.pos[i * 3], -s.pos[i * 3 + 1], -s.pos[i * 3 + 2])
-        if (camRel && !bake) tmp.p.add(camera.position)
+        if (follow) tmp.p.add(camera.position)
         tmp.s.set(s.scl[i * 3], s.scl[i * 3 + 1], s.scl[i * 3 + 2])
         if (sp.billboard & 1) {
           tmp.m.compose(tmp.p, camera.quaternion, tmp.s).multiply(FLIP)
@@ -239,11 +296,19 @@ export function WeatherParticles({ zone, state }: { zone: ParsedZone; state: str
         }
         s.mesh.setMatrixAt(drawn, tmp.m)
         s.alpha.setX(drawn, a)
+        if (s.frameOffsets) {
+          // xim SpriteSheetFrameUpdater: frame floor((n + 1) x progress),
+          // held on the last; without the updater, frame 0.
+          const nf = s.frameOffsets.length / 2
+          const f = sp.flipbook ? Math.min(nf - 1, Math.floor((nf + 1) * (age / sp.life))) : 0
+          s.uvOffset.setXY(drawn, s.frameOffsets[f * 2], s.frameOffsets[f * 2 + 1])
+        }
         drawn++
       }
       s.mesh.count = drawn
       s.mesh.instanceMatrix.needsUpdate = true
       s.alpha.needsUpdate = true
+      if (s.frameOffsets) s.uvOffset.needsUpdate = true
     }
   })
 

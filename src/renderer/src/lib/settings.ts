@@ -271,9 +271,24 @@ export interface SceneSettings {
    * sky gradient, its terrain and water lighting (ambient, sun and moon, in
    * its own vertex-lighting maths) and its fog, for the chosen weather state
    * and time of day, blended between the hourly records as the game does.
-   * Lighting presets are set aside while it is on. Beta, off by default.
+   * In Dynamic lighting the weather colours Dynamic's own lights instead. Beta,
+   * off by default.
    */
   zoneWeather: boolean
+
+  /**
+   * With Zone weather: draw the sun and moon the game's way — the sun as the
+   * weather's lens-flare sheet (core, starburst, halo and the flare chain),
+   * the moon with its rainbow halo — or, off, as the viewer's plain discs.
+   */
+  gameSunMoon: boolean
+
+  /**
+   * With Zone weather: stretches the weather's fog, 1 = the game's. Storms and
+   * sandstorms end their fog some 100 units out, which buries a whole-zone
+   * view; raising this lets the zone show through.
+   */
+  weatherFogScale: number
 
   /**
    * Decide each zone mesh's transparency the way FFXI does: a mesh whose name
@@ -446,6 +461,8 @@ export const DEFAULT_SCENE: SceneSettings = {
   weatherFollowsCamera: true,
   generatorWater: false,
   zoneWeather: false,
+  gameSunMoon: true,
+  weatherFogScale: 1,
   zoneTransparency: true,
   anisotropy: 16,
   mapView: false,
