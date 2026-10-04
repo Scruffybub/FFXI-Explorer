@@ -4,7 +4,7 @@ import * as THREE from 'three'
 import type { ParsedZone } from '../lib/ffxi-dat'
 import type { GeneratorSpawn } from '../lib/ffxi-dat/types'
 import { sampleKeyFrames } from '../lib/ffxi-dat/GeneratorParser'
-import { applySpawnStages } from '../lib/spawnStages'
+import { applySpawnStages, setSubtractive } from '../lib/spawnStages'
 import { GAMMA_BLEND_LAYER } from '../lib/GammaBlendPass'
 import { sunDirection, zoneFogShift } from '../lib/zoneLighting'
 import { childEvents } from '../lib/weatherEvents'
@@ -272,11 +272,37 @@ function buildLayers(zone: ParsedZone, state: string, radius: number, gameSunMoo
 
       // Blank-named meshes (the sun and moon glows) are untextured: vertex
       // colour and alpha carry the whole gradient.
-      const tex = p.textureName?.trim() ? zone.textures[p.materialIndex] : undefined
+      // A name the zone lacks resolves, in ZoneFile, to the zone's most-used
+      // texture — terrain. Eastern Altepa's heat canopy asks for "heat
+      // fine_a01", which isn't there, and drew a sand dune across the sky
+      // (weather sweep, 2026-10-04). Take the same picture filed under another
+      // folder ("fine    fine_a01") instead.
+      const want = (p.textureName ?? '').trim()
+      let ti = p.materialIndex
+      if (want && zone.textureNames && (zone.textureNames[ti] ?? '').trim() !== want) {
+        const leaf = want.slice(8).trim()
+        ti = leaf ? zone.textureNames.findIndex(n => (n ?? '').slice(8).trim() === leaf) : -1
+      }
+      const tex = want && ti >= 0 ? zone.textures[ti] : undefined
+      // Named but nowhere in the zone: drawn untextured, Nyzul Isle's sunny
+      // sky (kma1..kme1) laid flat teal blocks over the sea. Leave it out.
+      if (want && !tex) { geos.pop(); continue }
       let map: THREE.DataTexture | null = null
       if (tex) {
         map = new THREE.DataTexture(new Uint8Array(tex.rgba), tex.width, tex.height, THREE.RGBAFormat)
-        map.wrapS = map.wrapT = THREE.RepeatWrapping
+        // Wrap only an axis the mesh tiles or scrolls. Where its UVs stay
+        // within one copy, wrapping blends the texture's far edge into its
+        // near one: the fine-weather canopy (cld2, additive, v 0..1) drew its
+        // inner rim as a bright hairline across the sky in every zone that
+        // has it, found by the weather sweep, 2026-10-04.
+        let u0 = Infinity, u1 = -Infinity, v0 = Infinity, v1 = -Infinity
+        for (let k = 0; k < p.uvs.length; k += 2) {
+          u0 = Math.min(u0, p.uvs[k]); u1 = Math.max(u1, p.uvs[k])
+          v0 = Math.min(v0, p.uvs[k + 1]); v1 = Math.max(v1, p.uvs[k + 1])
+        }
+        const within = (a: number, b: number) => a >= -1e-4 && b <= 1 + 1e-4
+        map.wrapS = within(u0, u1) && !sp.uvScroll[0] ? THREE.ClampToEdgeWrapping : THREE.RepeatWrapping
+        map.wrapT = within(v0, v1) && !sp.uvScroll[1] ? THREE.ClampToEdgeWrapping : THREE.RepeatWrapping
         map.magFilter = THREE.LinearFilter
         map.minFilter = THREE.LinearMipmapLinearFilter
         map.generateMipmaps = true
@@ -290,9 +316,7 @@ function buildLayers(zone: ParsedZone, state: string, radius: number, gameSunMoo
       // the standing canopies keep alpha, as they always have here. Thunder's
       // bolt is a particle with a life and no byte.
       const nib = sp.blend >= 0 ? sp.blend & 0x0f : sky && sp.life <= 0 ? 4 : 8
-      const blending = nib === 8 ? THREE.AdditiveBlending
-        : nib === 1 || nib === 2 ? THREE.SubtractiveBlending
-        : THREE.NormalBlending
+      const blending = nib === 8 ? THREE.AdditiveBlending : THREE.NormalBlending
       const mat = new THREE.MeshBasicMaterial({
         ...(map && { map }),
         vertexColors: true,
@@ -306,6 +330,7 @@ function buildLayers(zone: ParsedZone, state: string, radius: number, gameSunMoo
         fog: sky,
         blending,
       })
+      if (nib === 1 || nib === 2) setSubtractive(mat)
       const tint = applySpawnStages(mat, sp.tint, false)
       const fogScale = { value: 1 }
       if (sky) {

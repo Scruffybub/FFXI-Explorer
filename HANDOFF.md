@@ -248,6 +248,55 @@ islands float on, 100 below the camera), tdr4 (world-placed shafts), limg
   on their window — the hidden window runs at ~1 fps and steps over them.
 A01 and B01 carry identical lightning; A01 drew none of its sky before.
 
+**Weather sweep, 2026-10-04.** `scripts/weather-sweep.cjs <outDir> [k/n] [ids]`
+loads every zone with Zone weather on, steps each weather in place
+(`__setScene`, census only), and records per weather: sky layers by kind and
+name, particle systems, sky textures missing or swapped for terrain, generator
+meshes drawn at the zone origin though every generator places them elsewhere,
+renderer errors, look-alike weathers (96px overview diff < 0.6), and straight
+seams in two sky-only captures (zone meshes hidden, camera at the zone centre,
+pitch 45, yaw 0/180). The seam finder is Sobel on a 3x3 blur, a Hough vote
+along each pixel's gradient, then the longest well-filled run, kept only when
+**sharp** (change within ±1px ÷ change within ±7px ≥ 0.5, step ≥ 2 levels):
+Riverne's seams scored 0.8–1.1, cloud edges ~0.2. Rain streaks and flare quads
+still pass; read the saved JPEGs. Two sweeps side by side need `SWEEP_PROFILE`
+(own userData) or the newcomer never draws. Diagnostics: `SWEEP_STATES`,
+`SWEEP_EXTRA` (query, e.g. `&skyonly=cld2`), `SWEEP_SAVEALL`, `SWEEP_EVAL` /
+`SWEEP_EVAL_SKY` (page JS file), `SWEEP_LOG` (console regex). ~40 s a zone with
+weather; two shards take ~1.5 h for 286 zones. Fixed from it:
+- **Subtractive blend did nothing defined.** three's SubtractiveBlending needs
+  premultiplied alpha; without it three logs an error and sets *no* blend
+  function, so the mesh inherited the previous draw's. Now `setSubtractive()`
+  (spawnStages.ts): ReverseSubtract, src·α, screen alpha kept — D3D's. Riverne's
+  Thunder goes from pinkish grey to near-black; Lufaise's wind unchanged.
+  (This also made yesterday's Riverne zigzag order-dependent.)
+- **Fine-weather hairline in most zones** (Bastok, Batallia, Balga's Dais,
+  Gustaberg…): `cld2` (additive ring, v 0..1, texture `fine_a01` 256x128)
+  drew its inner rim as a bright hairline — RepeatWrapping blended the
+  texture's far edge in. Sky textures now wrap only on an axis the mesh tiles
+  or scrolls (UVs outside 0..1, or uvScroll). The ring's soft inner edge still
+  scores ~0.75 sharp, step ~3.5 — real, faint, left.
+- **Generator meshes at the origin**: with Generator water off every generator
+  target was drawn at identity — warp glows, window lights, Al'Taieu's walls,
+  ~1,000 meshes in 60 of the first 112 zones. `misplaced` in ZoneViewer skips
+  one when every generator using it sits away from the origin (position > 1,
+  attached, or following the camera); weather-tagged ones keep their own rule.
+  `?keepgenunref=1` restores the old draw. Visible change is small (bits buried
+  near 0,0,0).
+- **Ceizak Battlegrounds drew as black slabs**: three tree instances parked
+  9.9 million units out made the zone 10M across, the far plane 60M and depth
+  precision useless. The framing box now ignores placements beyond 100,000.
+- **Eastern Altepa's heat sky was a sand dune**: `cld1` asks for `heat
+  fine_a01`, which the zone lacks; ZoneFile resolves unknown names to the
+  zone's most-used texture (terrain). Sky layers now check the resolved name
+  and otherwise take the same leaf from another folder (`fine    fine_a01`),
+  or, when no folder has it, leave the piece out (Nyzul Isle drew flat teal
+  blocks; Chocobo Circuit's storm loses its dust canopy). Inferred, not
+  checked against retail.
+Not fixed: Altepa's `ka01` (heat, blank texture, alpha curve, fast spin) is
+probably a screen-grab shimmer; it draws as a faint colour veil. Altepa's heat
+sky is mint green from its own records — not judged.
+
 **Overview fog, 2026-10-04.** Zone weather's fog now starts at the orbit target
 in orbit view (the camera distance to it is added to fog start and end;
 `zoneFogShift`, which the sky layers subtract), so the point being looked at

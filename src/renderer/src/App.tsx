@@ -291,6 +291,12 @@ export default function App() {
       (buf: ArrayBuffer) => parseTexturesFromDat(buf)
     ;(window as unknown as Record<string, unknown>).__parseMinimap =
       (buf: ArrayBuffer) => parseMinimapDat(buf)
+    // Switches scene settings in place (the weather sweep changes weather
+    // without re-parsing the zone).
+    if (new URLSearchParams(window.location.search).has('census')) {
+      ;(window as unknown as Record<string, unknown>).__setScene =
+        (patch: Partial<SceneSettings>) => setScene(s => ({ ...s, ...patch }))
+    }
     ;(window as unknown as Record<string, unknown>).__probeDat = async (rel: string) => {
       try {
         if (!(await window.ffxi.fileExists(ffxiPath, rel))) return { rel, exists: false }

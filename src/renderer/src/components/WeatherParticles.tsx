@@ -4,7 +4,7 @@ import * as THREE from 'three'
 import type { ParsedZone } from '../lib/ffxi-dat'
 import type { GeneratorSpawn } from '../lib/ffxi-dat/types'
 import { sampleKeyFrames } from '../lib/ffxi-dat/GeneratorParser'
-import { applySpawnStages } from '../lib/spawnStages'
+import { applySpawnStages, setSubtractive } from '../lib/spawnStages'
 import { GAMMA_BLEND_LAYER } from '../lib/GammaBlendPass'
 import { spreadOffset } from './SkyLayers'
 import { childEvents, pruneChildEvents } from '../lib/weatherEvents'
@@ -127,13 +127,13 @@ function buildSystems(zone: ParsedZone, state: string): System[] {
     map.needsUpdate = true
 
     const nib = sp.blend >= 0 ? sp.blend & 0x0f : 8
-    const blending = nib === 8 ? THREE.AdditiveBlending
-      : nib === 1 || nib === 2 ? THREE.SubtractiveBlending
-      : THREE.NormalBlending
+    const subtract = nib === 1 || nib === 2
+    const blending = nib === 8 ? THREE.AdditiveBlending : THREE.NormalBlending
     const mat = new THREE.MeshBasicMaterial({
       map, vertexColors: true, transparent: true, depthWrite: false, side: THREE.DoubleSide,
-      fog: blending === THREE.NormalBlending, blending,
+      fog: blending === THREE.NormalBlending && !subtract, blending,
     })
+    if (subtract) setSubtractive(mat)
     // The tint's alpha is per particle (the life curve), so the stage takes
     // it from an instance attribute instead of the uniform.
     applySpawnStages(mat, [sp.tint[0], sp.tint[1], sp.tint[2], 128], false)

@@ -266,6 +266,10 @@ function patchZoneShader(
 const SKIP_UNREFERENCED =
   typeof window !== 'undefined' &&
   new URLSearchParams(window.location.search).has('nounref')
+/** Diagnostic: draw generator meshes at the zone origin as before (see "misplaced"). */
+const KEEP_GEN_UNREF =
+  typeof window !== 'undefined' &&
+  new URLSearchParams(window.location.search).has('keepgenunref')
 
 /** Diagnostic: render water meshes with the ordinary opaque material. */
 const DISABLE_WATER_SHADER =
@@ -3848,17 +3852,38 @@ export default function ZoneViewer({
           if (drawsInWorld(sp)) for (const i of sp.prefabIndices) spawnTargets.add(i)
         }
       }
+      // Effect meshes are built around their own centre and placed by their
+      // generator. One that every generator puts somewhere other than the zone
+      // origin is in the wrong place when drawn here: Riverne's warp glows,
+      // Bastok's window lights and Al'Taieu's walls sat in a heap at 0,0,0 —
+      // about 1,000 meshes in 60 of the first 112 zones, found by the weather
+      // sweep, 2026-10-04. One whose generator stands at the origin (Dynamis'
+      // entrance pieces) is where it belongs, and stays. ?keepgenunref=1 draws
+      // them all, as before.
+      const misplaced = new Set<number>()
+      if (!KEEP_GEN_UNREF) {
+        const users = new Map<number, boolean>()
+        for (const sp of zoneData.spawns ?? []) {
+          const away = Math.hypot(...sp.position) > 1 || sp.attach !== 0 || sp.followCamera
+          for (const i of sp.prefabIndices) users.set(i, (users.get(i) ?? true) && away)
+        }
+        // Weather meshes keep their own rule (tagged and hidden until picked).
+        for (const [i, away] of users) if (away && !prefabWeatherState.has(i)) misplaced.add(i)
+      }
       let added = 0
       for (const [prefabIdx, geo] of geoMap) {
         if (SKIP_UNREFERENCED) continue
         if (referenced.has(prefabIdx)) continue
         if (spawnTargets.has(prefabIdx)) continue
+        if (misplaced.has(prefabIdx)) continue
         if (zoneData.prefabs[prefabIdx]?.d3m || zoneData.prefabs[prefabIdx]?.celestial || zoneData.prefabs[prefabIdx]?.sprite) continue
         const mat = matMap.get(prefabIdx)
         if (!mat) continue
         const mesh = new THREE.InstancedMesh(geo, mat, 1)
         mesh.userData.textureName = zoneData.prefabs[prefabIdx]?.textureName ?? ''
         mesh.userData.matIdx = zoneData.prefabs[prefabIdx]?.materialIndex ?? -1
+        // Drawn at the zone origin; the weather sweep checks these.
+        mesh.userData.unrefPrefab = prefabIdx
         // Weather meshes start hidden. Nothing draws until a state is picked,
         // which keeps the default view exactly as it was.
         const state = prefabWeatherState.get(prefabIdx)
@@ -4203,6 +4228,12 @@ export default function ZoneViewer({
       for (const inst of zoneData.instances) {
         const prefab = zoneData.prefabs[inst.meshIndex]
         if (!prefab) continue
+        // Placements parked far outside the zone, which the game never shows:
+        // Ceizak Battlegrounds keeps three trees 9.9 million units out, which
+        // made its far plane 60 million, wrecked depth precision and drew the
+        // zone as black slabs. Zones span a few thousand units. Found by the
+        // weather sweep, 2026-10-04.
+        if (Math.max(Math.abs(inst.transform[12]), Math.abs(inst.transform[13]), Math.abs(inst.transform[14])) > 100000) continue
         bbox.expandByPoint(new THREE.Vector3(inst.transform[12], -inst.transform[13], -inst.transform[14]))
       }
     }
@@ -4250,6 +4281,10 @@ export default function ZoneViewer({
       : []
     if (forcedPos.length === 3 && forcedPos.every(Number.isFinite)) {
       camPos = forcedPos as [number, number, number]
+    }
+    // Diagnostic (?census=1): the default framing, for the weather sweep.
+    if (CENSUS) {
+      (window as unknown as { __view?: unknown }).__view = { center: center.toArray(), size: diagonalSize, camPos }
     }
 
     return { center, size: diagonalSize, camPos, farPlane: Math.max(10000, diagonalSize * 3) }

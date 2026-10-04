@@ -23,6 +23,23 @@ import { ffxiLight, FFXI_LIGHT_PARS, FFXI_LIGHT_VERTEX } from './zoneLighting'
  * `lit` false leaves Zone weather's terrain light out: the sky layers (clouds,
  * sun, stars) carry their own time-of-day colour instead.
  */
+/**
+ * D3D's subtractive blend (blend byte low nibble 1 or 2): screen − source x
+ * alpha, screen alpha kept. three's SubtractiveBlending needs premultiplied
+ * alpha; without it three sets no blend function at all, so the mesh drew with
+ * whatever the previous draw had left — Riverne's map3 and Lufaise's wind
+ * darkening changed with draw order, 2026-10-04.
+ */
+export function setSubtractive(mat: THREE.Material): void {
+  mat.blending = THREE.CustomBlending
+  mat.blendEquation = THREE.ReverseSubtractEquation
+  mat.blendSrc = THREE.SrcAlphaFactor
+  mat.blendDst = THREE.OneFactor
+  mat.blendEquationAlpha = THREE.AddEquation
+  mat.blendSrcAlpha = THREE.ZeroFactor
+  mat.blendDstAlpha = THREE.OneFactor
+}
+
 export function applySpawnStages(mat: THREE.MeshBasicMaterial, tint: number[], lit = true): THREE.Vector4 {
   const decode = (c: number) => (c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4))
   // Colour is gamma-authored; alpha is a weight and is not.
