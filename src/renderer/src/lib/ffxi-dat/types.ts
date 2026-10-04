@@ -113,6 +113,8 @@ export interface ParsedZoneMesh {
    * it must never be drawn unplaced at the origin.
    */
   celestial?: boolean
+  /** The weather state whose folder (weat/<state>/…) holds this mesh, if any. */
+  weatherState?: string
   /** A 0x21 sprite quad: placed only by particle generators, like a D3M. */
   sprite?: boolean
   /** A lens-flare sheet's meshes, each with its place along the flare line. */
@@ -152,7 +154,7 @@ export interface GeneratorSpawn {
    * progress. Only the channels the renderer uses are resolved. `alpha` is the
    * tint alpha on the 0..1 = byte/255 scale; `u`/`v` add to the texture offset.
    */
-  curves: { alpha?: number[]; u?: number[]; v?: number[] }
+  curves: { alpha?: number[]; u?: number[]; v?: number[]; r?: number[]; g?: number[]; b?: number[] }
   attach: number                          // 0xE sun, 0xF moon, 0 none (body[0] low nibble)
   blend: number                           // 0x1E blend byte, -1 when absent
   /** Time-of-day curves (0x60–0x63), resolved like `curves`. */
@@ -173,6 +175,9 @@ export interface GeneratorSpawn {
   scaleVelocity: [number, number, number]
   emitRange: number
   flipbook: boolean
+  screenFlash: { near: number; far: number; nearAngle: number; farAngle: number } | null
+  children: { birth: string[]; expire: string[] }
+  drawDistance: { near: number; far: number } | null
 }
 
 /** One light set from an environment record. Colours are raw byte / 255. */

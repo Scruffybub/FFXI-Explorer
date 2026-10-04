@@ -607,7 +607,7 @@ export function parseZoneFile(
     }
     if (prefabIndices.length === 0) { unresolvedSpawns++; continue }
     const curves: GeneratorSpawn['curves'] = {}
-    for (const ch of ['alpha', 'u', 'v'] as const) {
+    for (const ch of ['alpha', 'u', 'v', 'r', 'g', 'b'] as const) {
       const id = raw.tracks[ch]
       const curve = id ? findCurve(block.dir, id) : undefined
       if (curve) curves[ch] = curve
@@ -641,6 +641,14 @@ export function parseZoneFile(
   if (environment.length) {
     const states = [...new Set(environment.map(r => r.state))]
     console.log(`[ENV] ${environment.length} environment records, states ${JSON.stringify(states)}`)
+  }
+
+  // Meshes filed under a weather folder are weather geometry, whatever their
+  // texture is called. Riverne's sky meshes have blank texture names, slipped
+  // past the name-based test and sat as a bundle at the zone origin.
+  for (let p = 0; p < prefabs.length; p++) {
+    const m = /(?:^|\/)weat\/([^/]+)/.exec(prefabDir[p] ?? '')
+    if (m && prefabDir[p] !== SYSTEM_DIR) prefabs[p].weatherState = m[1]
   }
 
   return {

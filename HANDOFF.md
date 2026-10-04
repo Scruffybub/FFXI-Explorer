@@ -194,6 +194,60 @@ screen flash (Thunder — likely the full-screen lightning flash), 0x54/0x34
 point lists (sand). Known: faint polygon outlines in Lufaise wind canopies
 (pre-existing; inner discs read differently from their rings).
 
+**Thunder screen flash, 2026-10-04.** Section-3 opcode 0x60 (xim
+ScreenFlashApplier): while a particle lives it adds its colour, doubled, over
+the whole screen (SRC_ALPHA + ONE), falling off from `near` to `far` units and
+as it leaves the centre of view (xim's measure: (fov°·10/z · x)² + (… · y)²,
+falloff `nearAngle`..`farAngle`). Only four zones ship it, all under a
+sub-folder of thdr: Riverne #B01/#A01 and Monarch Linn (`limg/nul1`, every
+145–1015 frames, born at the camera, 360 up and 600–700 out; near/far 1000,
+angle 4096–65536 ≈ full within 7°, gone past 27°) and Tavnazian Safehold
+(`wez4/frsh`, every 2800–3800 frames, at the town centre, near 50 far 150).
+Colour from life curves `frs0..2`: white (0x80) fading through a cold blue to
+nothing by 40% of a 25-frame life. Its alpha is 0 with no curve in every case,
+so taken literally it never shows; the viewer applies the colour without it.
+The overlay is a camera-space quad in WeatherParticles. Weather sub-folders'
+auto-run generators (emission flag 0x10) are now included; spawned-only ones
+(Lufaise's scheduled strikes `kmi1/kmi2`, flag clear) are not. Lufaise has no
+screen flash in its data. Not drawn: Tavnazian Safehold's thunder sky domes
+(`wez1..3`, world-placed meshes in the same folder).
+
+**Riverne, 2026-10-04 (Ryan: no lightning in Site #A01, a bundle of weather
+textures mid-zone).** Riverne #A01/#B01 keep nearly their whole sky one or two
+folders down: weat/thdr/tdr0/tdr1..3 (camera canopies, incl. the cloud sea the
+islands float on, 100 below the camera), tdr4 (world-placed shafts), limg
+(lightning). Fixes:
+- **The bundle**: unplaced MMBs under weat/ with blank texture names escaped
+  the name-based weather test and sat at the origin. ZoneFile now tags every
+  prefab with the weather folder it lives in (`weatherState`); the viewer hides
+  those like any weather mesh.
+- **Sub-folders**: SkyLayers and WeatherParticles take generators in deeper
+  weather folders when they auto-run (emission flag 0x10).
+- **World-placed weather meshes** (kind 'world': not camera, no sun/moon):
+  drawn where the generator stands, single-sided (three's back face — the
+  side D3D keeps) unless render state 0x2000, only while the camera is below
+  them (sky seen from beneath; Tavnazian Safehold's cloud lids read as a pale
+  sheet from an overview above), and faded by section-3 0x2E draw distance.
+- **Canopy groups**: generators sharing a mesh in one folder push out by one
+  factor (the widest): Riverne's four map1..3/mapf layers, pushed separately,
+  crossed as a pale band.
+- **One sort centre per generator**: th05 is a cap patch (render state 0x0)
+  plus the dome around it (0x8000), sharing their border exactly. three sorts
+  transparent meshes by each geometry's bounding-sphere centre, so map2 (normal)
+  and map3 (subtractive) — different sizes, so their seams don't line up —
+  swapped order between patch and dome, and the strip between the two seams
+  drew as pale zigzag lines (Ryan's screenshot, Thunder). Every piece of a
+  generator now carries the union's sphere. Lufaise thunder and wind unchanged.
+- **Lightning bolts are child generators**: the timekeepers start them at birth
+  (section-1 0x3C) and on expiry (section-4 0x01, xim EmitChildHandler).
+  `weatherEvents.ts` carries the start (name, folder, frame, world position)
+  from WeatherParticles to SkyLayers, whose kind 'child' layers play once there
+  with their own life, alpha curve, spin and growth (0x12 + section-3 0x08).
+  `thd1`/`thd2` are the bolt meshes, `fit1..3` the glow; `fit3` (`ei30`) does not
+  resolve. Bolts live 18 frames: probes must set `backgroundThrottling: false`
+  on their window — the hidden window runs at ~1 fps and steps over them.
+A01 and B01 carry identical lightning; A01 drew none of its sky before.
+
 **Overview fog, 2026-10-04.** Zone weather's fog now starts at the orbit target
 in orbit view (the camera distance to it is added to fog start and end;
 `zoneFogShift`, which the sky layers subtract), so the point being looked at

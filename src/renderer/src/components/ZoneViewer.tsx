@@ -2822,6 +2822,12 @@ export default function ZoneViewer({
         prefabWeather = weatherStateOf(prefab) || '(unnamed)'
         weatherStates.add(prefabWeather)
         prefabWeatherState.set(prefabIdx, prefabWeather)
+      } else if (prefab.weatherState) {
+        // Filed under a weather folder (ZoneFile): weather geometry even when
+        // its texture name says nothing, as Riverne's sky meshes don't.
+        prefabWeather = prefab.weatherState
+        weatherStates.add(prefabWeather)
+        prefabWeatherState.set(prefabIdx, prefabWeather)
       }
 
       const isWater = isWaterPrefab(prefab, prefabIdx) && !DISABLE_WATER_SHADER

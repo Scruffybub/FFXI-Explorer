@@ -100,6 +100,30 @@ export interface RawModelSpawn {
   emitRange: number
   /** Section-3 0x0D: a flipbook steps through its frames over each life. */
   flipbook: boolean
+  /**
+   * Section-3 0x60 (xim ScreenFlashApplier): each frame a live particle adds
+   * its colour, doubled, over the whole screen, fading out between 
+ear and
+   * ar units away and as it leaves the centre of view (
+earAngle,
+   * arAngle, on xim's zoomed squared measure). Thunder's lightning flash in
+   * Riverne and Tavnazian Safehold.
+   */
+  screenFlash: { near: number; far: number; nearAngle: number; farAngle: number } | null
+  /**
+   * Generators this one starts: at each particle's birth (section-1 0x3C,
+   * xim OnceChildGeneratorSetup) and when it expires (section-4 0x01, xim
+   * EmitChildHandler). Riverne's thunder parents start the lightning bolt
+   * and its glow this way; the children carry no auto-run flag.
+   */
+  children: { birth: string[]; expire: string[] }
+  /**
+   * Section-3 0x2E (xim DrawDistanceUpdater): alpha fades from 
+ear to
+   * ar units from the camera and the particle is not drawn beyond.
+   * Tavnazian Safehold's thunder sky domes show only within 250 of the town.
+   */
+  drawDistance: { near: number; far: number } | null
 }
 
 /**
@@ -119,6 +143,8 @@ export interface Emission {
   count: number
   continuous: boolean
   batched: boolean
+  /** Flag 0x10: runs by itself; without it a generator waits to be spawned. */
+  autoRun: boolean
 }
 
 /**
@@ -211,9 +237,11 @@ export function parseModelSpawn(body: Uint8Array): RawModelSpawn | null {
     variance: view.getUint16(EMISSION_AT, true),
     count: body[EMISSION_AT + 4] | ((flags1 & 1) << 8),
     continuous: (flags1 & 0x04) !== 0,
+    autoRun: (flags1 & 0x10) !== 0,
     batched: (body[EMISSION_AT + 7] & 0x20) !== 0,
   }
   let spread: Spread | null = null
+  const children: RawModelSpawn['children'] = { birth: [], expire: [] }
   let velocity: [number, number, number] = [0, 0, 0]
   let velocityVariance: [number, number, number] = [0, 0, 0]
   let rotationVariance: [number, number, number] = [0, 0, 0]
@@ -266,6 +294,9 @@ export function parseModelSpawn(body: Uint8Array): RawModelSpawn | null {
       for (let k = 0; k < 3; k++) scaleVariance[k] += v[k]
     } else if (op === 0x12 && p + 12 <= body.length) {
       scaleVelocity = f3(p)
+    } else if (op === 0x3c && p + 8 <= body.length) {
+      const id = readId(p)
+      if (id) children.birth.push(id)
     } else if (op === 0x1e && p + 1 <= body.length) {
       blend = body[p]
     } else if (op in TOD_CHANNELS && p + 8 <= body.length) {
@@ -280,6 +311,14 @@ export function parseModelSpawn(body: Uint8Array): RawModelSpawn | null {
   }
   if ((linked !== LINKED_MODEL && linked !== LINKED_SPRITE && linked !== LINKED_FLARE) || !model) return null
 
+  // Expiration handlers (section 4, header 0x7C).
+  for (const { op, p } of records(view, body, 0x7c)) {
+    if (op === 0x01 && p + 8 <= body.length) {
+      const id = readId(p)
+      if (id) children.expire.push(id)
+    }
+  }
+
   // Generator updaters (section 0, header 0x70).
   let emitRange = 0
   for (const { op, p } of records(view, body, 0x70)) {
@@ -291,12 +330,18 @@ export function parseModelSpawn(body: Uint8Array): RawModelSpawn | null {
   let moves = false
   let scales = false
   let flipbook = false
+  let screenFlash: RawModelSpawn['screenFlash'] = null
+  let drawDistance: RawModelSpawn['drawDistance'] = null
   for (const { op, p } of records(view, body, 0x78)) {
     if (op === 0x27 && p + 4 <= body.length) uvScroll[0] = view.getFloat32(p, true)
     if (op === 0x28 && p + 4 <= body.length) uvScroll[1] = view.getFloat32(p, true)
     if (op === 0x02) moves = true
     if (op === 0x08) scales = true
     if (op === 0x0d) flipbook = true
+    if (op === 0x2e && p + 8 <= body.length) drawDistance = { near: f(p), far: f(p + 4) }
+    if (op === 0x60 && p + 16 <= body.length) {
+      screenFlash = { near: f(p), far: f(p + 4), nearAngle: f(p + 8), farAngle: f(p + 12) }
+    }
     if (op === 0x03 && p + 12 <= body.length) accel = f3(p)
   }
 
@@ -309,7 +354,7 @@ export function parseModelSpawn(body: Uint8Array): RawModelSpawn | null {
     renderState: flags >>> 16,
     emission, spread, velocity, velocityVariance, accel, moves, rotationVariance, scaleVariance,
     scaleVelocity: scales ? scaleVelocity : [0, 0, 0],
-    emitRange, flipbook,
+    emitRange, flipbook, screenFlash, children, drawDistance,
   }
 }
 

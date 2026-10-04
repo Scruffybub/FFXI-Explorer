@@ -7,6 +7,7 @@ import { sampleKeyFrames } from '../lib/ffxi-dat/GeneratorParser'
 import { applySpawnStages } from '../lib/spawnStages'
 import { GAMMA_BLEND_LAYER } from '../lib/GammaBlendPass'
 import { spreadOffset } from './SkyLayers'
+import { childEvents, pruneChildEvents } from '../lib/weatherEvents'
 
 /**
  * The weather's sprite particles: rain, and the splashes and ripples that go
@@ -61,6 +62,8 @@ interface System {
   scl: Float32Array
   rot: Float32Array
   born: Float32Array
+  /** 1 once a particle's expiry has been handled (its children started). */
+  expired: Uint8Array
   cursor: number
   /** A flipbook's frames, as uv offsets from frame 0; null for one frame. */
   frameOffsets: Float32Array | null
@@ -68,10 +71,16 @@ interface System {
 }
 
 function buildSystems(zone: ParsedZone, state: string): System[] {
-  const inState = new RegExp(`(^|/)weat/${state}$`)
+  // The weather's own folder, and its sub-folders' generators that run by
+  // themselves (emission flag 0x10). Tavnazian Safehold keeps its thunder in
+  // weat/thdr/wez4; the ones without the flag wait to be spawned by something
+  // (Lufaise's scheduled strikes in kmi1, kmi2) and are left out.
+  const top = new RegExp(`(^|/)weat/${state}$`)
+  const sub = new RegExp(`(^|/)weat/${state}/`)
   const out: System[] = []
   for (const sp of zone.spawns ?? []) {
-    if (sp.link !== 'sprite' || !inState.test(sp.dir) || sp.life <= 0) continue
+    if (sp.link !== 'sprite' || sp.life <= 0) continue
+    if (!top.test(sp.dir) && !(sub.test(sp.dir) && sp.emission.autoRun)) continue
     const p = zone.prefabs[sp.prefabIndices[0]]
     if (!p) continue
     const tex = zone.textures[p.materialIndex]
@@ -158,6 +167,7 @@ function buildSystems(zone: ParsedZone, state: string): System[] {
       pos: new Float32Array(capacity * 3), vel: new Float32Array(capacity * 3),
       scl: new Float32Array(capacity * 3), rot: new Float32Array(capacity * 3),
       born: new Float32Array(capacity).fill(-Infinity),
+      expired: new Uint8Array(capacity),
       frameOffsets, uvOffset,
     })
   }
@@ -166,7 +176,37 @@ function buildSystems(zone: ParsedZone, state: string): System[] {
 
 const rand = () => Math.random() * 2 - 1
 
+/** xim's fallOff: 1 inside `near`, linear to 0 at `far`. */
+const fallOff = (x: number, near: number, far: number) =>
+  x < near ? 1 : x < far ? 1 - (x - near) / (far - near) : 0
+
+/**
+ * The full-screen quad the screen flash adds (xim ScreenFlasher: the colour,
+ * doubled, SRC_ALPHA + ONE). Sits in front of the camera, drawn last.
+ */
+function buildFlashQuad(): { mesh: THREE.Mesh; tint: THREE.Vector4 } {
+  const mat = new THREE.MeshBasicMaterial({
+    transparent: true, depthTest: false, depthWrite: false, fog: false, blending: THREE.AdditiveBlending,
+  })
+  const tint = applySpawnStages(mat, [0, 0, 0, 64], false)
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mat)
+  mesh.frustumCulled = false
+  mesh.matrixAutoUpdate = false
+  mesh.layers.set(GAMMA_BLEND_LAYER)
+  mesh.renderOrder = 2000
+  mesh.visible = false
+  mesh.onBeforeRender = (_r, _s, camera) => {
+    const cam = camera as THREE.PerspectiveCamera
+    const d = 1
+    const h = d * Math.tan(THREE.MathUtils.degToRad(cam.fov) / 2) * 1.05
+    mesh.matrixWorld.copy(cam.matrixWorld).multiply(new THREE.Matrix4().makeScale(h * cam.aspect, h, 1).setPosition(0, 0, -d))
+  }
+  return { mesh, tint }
+}
+
 export function WeatherParticles({ zone, state }: { zone: ParsedZone; state: string }) {
+  const flash = useMemo(() => buildFlashQuad(), [])
+  useEffect(() => () => { flash.mesh.geometry.dispose(); (flash.mesh.material as THREE.Material).dispose() }, [flash])
   const systems = useMemo(() => {
     const s = buildSystems(zone, state)
     if (s.length) {
@@ -193,6 +233,7 @@ export function WeatherParticles({ zone, state }: { zone: ParsedZone; state: str
     off: new THREE.Vector3(), p: new THREE.Vector3(), q: new THREE.Quaternion(), e: new THREE.Euler(0, 0, 0, 'ZYX'),
     s: new THREE.Vector3(), m: new THREE.Matrix4(), yaw: new THREE.Quaternion(), up: new THREE.Vector3(0, 1, 0), zero: new THREE.Vector3(),
     right: new THREE.Vector3(), camUp: new THREE.Vector3(), view: new THREE.Vector3(),
+    flash: new THREE.Vector3(), cs: new THREE.Vector3(),
   }), [])
   const last = useMemo(() => ({ frames: -1 }), [systems])
 
@@ -201,6 +242,8 @@ export function WeatherParticles({ zone, state }: { zone: ParsedZone; state: str
     // Step size in effect frames, capped so a stall does not fling the rain.
     const dt = last.frames < 0 ? 0 : Math.min(10, frames - last.frames)
     last.frames = frames
+    tmp.flash.set(0, 0, 0)
+    pruneChildEvents(frames)
 
     for (const s of systems) {
       const sp = s.spawn
@@ -217,6 +260,12 @@ export function WeatherParticles({ zone, state }: { zone: ParsedZone; state: str
       const follow = sp.followCamera && !attached && (sp.renderState & 0x80) === 0
       const bake = sp.followCamera && !attached && !follow
       const camRel = follow || bake || attached
+      // Where particle i is now, in world space, for the children it starts.
+      const post = (names: string[], dir: string, frame: number, i: number) => {
+        const at = new THREE.Vector3(s.pos[i * 3], -s.pos[i * 3 + 1], -s.pos[i * 3 + 2])
+        if (follow) at.add(camera.position)
+        for (const name of names) childEvents.push({ name, dir, frame, at })
+      }
       // Emit — for a placed generator with an emit range, only while the
       // camera (standing in for the player) is within it.
       if (s.next < 0) s.next = frames
@@ -258,6 +307,8 @@ export function WeatherParticles({ zone, state }: { zone: ParsedZone; state: str
           }
           // Spread births across the frame they share, so a batch is not a sheet.
           s.born[i] = s.next - Math.random()
+          s.expired[i] = 0
+          if (sp.children.birth.length) post(sp.children.birth, sp.dir, s.born[i], i)
         }
         s.next += sp.emission.every + Math.random() * sp.emission.variance
       }
@@ -266,6 +317,10 @@ export function WeatherParticles({ zone, state }: { zone: ParsedZone; state: str
       let drawn = 0
       for (let i = 0; i < s.capacity; i++) {
         const age = frames - s.born[i]
+        if (age >= sp.life && !s.expired[i]) {
+          s.expired[i] = 1
+          if (sp.children.expire.length) post(sp.children.expire, sp.dir, s.born[i] + sp.life, i)
+        }
         if (!(age >= 0 && age < sp.life)) continue
         if (sp.moves) {
           for (let c = 0; c < 3; c++) {
@@ -281,6 +336,10 @@ export function WeatherParticles({ zone, state }: { zone: ParsedZone; state: str
         // DAT → world: x, -y, -z; camera followers ride the camera.
         tmp.p.set(s.pos[i * 3], -s.pos[i * 3 + 1], -s.pos[i * 3 + 2])
         if (follow) tmp.p.add(camera.position)
+        // Section-3 0x2E draw distance: fades out, then is not drawn.
+        const dd = sp.drawDistance
+        const ddk = dd ? fallOff(tmp.p.distanceTo(camera.position), dd.near, dd.far) : 1
+        if (ddk <= 0) continue
         tmp.s.set(s.scl[i * 3], s.scl[i * 3 + 1], s.scl[i * 3 + 2])
         if (sp.billboard & 1) {
           tmp.m.compose(tmp.p, camera.quaternion, tmp.s).multiply(FLIP)
@@ -295,7 +354,27 @@ export function WeatherParticles({ zone, state }: { zone: ParsedZone; state: str
           tmp.m.compose(tmp.zero, tmp.q, tmp.s).premultiply(FLIP).setPosition(tmp.p)
         }
         s.mesh.setMatrixAt(drawn, tmp.m)
-        s.alpha.setX(drawn, a)
+        const sf = sp.screenFlash
+        if (sf) {
+          // xim ScreenFlashApplier: distance falloff, then how far off the
+          // centre of view on its zoomed, squared measure.
+          let k = fallOff(tmp.p.distanceTo(camera.position), sf.near, sf.far)
+          tmp.cs.copy(tmp.p).applyMatrix4(camera.matrixWorldInverse)
+          if (k > 0 && tmp.cs.z < 0) {
+            const zoom = ((camera as THREE.PerspectiveCamera).fov * 10) / tmp.cs.z
+            k *= fallOff((zoom * tmp.cs.x) ** 2 + (zoom * tmp.cs.y) ** 2, sf.nearAngle, sf.farAngle)
+            // Colour from the life curves (white at 0x80, fading through a
+            // cold blue), on the byte/255 scale, doubled. Its alpha is 0 in
+            // every shipped flash and has no curve, so it is not applied —
+            // taken literally the flash would never show.
+            const t = age / sp.life
+            const ch = (curve: number[] | undefined, byte: number) => (curve ? sampleKeyFrames(curve, t) : byte / 255) * 2 * k
+            tmp.flash.x += ch(sp.curves.r, sp.tint[0])
+            tmp.flash.y += ch(sp.curves.g, sp.tint[1])
+            tmp.flash.z += ch(sp.curves.b, sp.tint[2])
+          }
+        }
+        s.alpha.setX(drawn, a * ddk)
         if (s.frameOffsets) {
           // xim SpriteSheetFrameUpdater: frame floor((n + 1) x progress),
           // held on the last; without the updater, frame 0.
@@ -310,11 +389,18 @@ export function WeatherParticles({ zone, state }: { zone: ParsedZone; state: str
       s.alpha.needsUpdate = true
       if (s.frameOffsets) s.uvOffset.needsUpdate = true
     }
+    // The flash, added in gamma like the game, at most a white screen.
+    const fl = Math.max(tmp.flash.x, tmp.flash.y, tmp.flash.z)
+    flash.mesh.visible = fl > 0.002
+    if (flash.mesh.visible) {
+      flash.tint.set(decode(Math.min(1, tmp.flash.x)), decode(Math.min(1, tmp.flash.y)), decode(Math.min(1, tmp.flash.z)), 0.5)
+    }
   })
 
   return (
     <group>
       {systems.map((s, i) => <primitive key={i} object={s.mesh} />)}
+      <primitive object={flash.mesh} />
     </group>
   )
 }

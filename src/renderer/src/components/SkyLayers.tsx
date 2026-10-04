@@ -7,6 +7,7 @@ import { sampleKeyFrames } from '../lib/ffxi-dat/GeneratorParser'
 import { applySpawnStages } from '../lib/spawnStages'
 import { GAMMA_BLEND_LAYER } from '../lib/GammaBlendPass'
 import { sunDirection, zoneFogShift } from '../lib/zoneLighting'
+import { childEvents } from '../lib/weatherEvents'
 
 /**
  * The zone's sky layers from <zone>/weat/<state>/: cloud canopies, the star
@@ -53,6 +54,9 @@ import { sunDirection, zoneFogShift } from '../lib/zoneLighting'
  * additive layer.
  */
 
+/** Copies of a child generator that can be live at once. */
+const CHILD_SLOTS = 3
+
 /** Retail's sun and moon distance (xim EnvironmentManager sunMoonDistance). */
 const CELESTIAL_DISTANCE = 900
 /** Stand-in disc sizes, across. The moon's is retail's: 3.94 × 20 at 900 (kuluu). */
@@ -82,7 +86,11 @@ const EFFECT_FPS = 60
 
 interface Layer {
   mesh: THREE.Mesh
-  kind: 'camera' | 'sun' | 'moon'
+  /**
+   * camera: rides the camera. world: placed where the generator stands.
+   * child: started by a parent particle (weatherEvents), played where it was.
+   */
+  kind: 'camera' | 'world' | 'child' | 'sun' | 'moon'
   base: THREE.Vector3
   rotation: THREE.Euler
   spin: [number, number, number]
@@ -105,6 +113,8 @@ interface Layer {
  * stand for good: one particle, born at once.
  */
 interface Emitter {
+  /** Started by posts, not by its own clock. */
+  child: boolean
   slots: number
   next: number
   emitted: number
@@ -147,21 +157,55 @@ const SKY_ONLY = typeof window !== 'undefined'
 const decode = (c: number) => (c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4))
 
 function buildLayers(zone: ParsedZone, state: string, radius: number, gameSunMoon: boolean): Layer[] {
+  // The weather's folder (and its star and moon folders), plus generators in
+  // deeper folders that run by themselves (emission flag 0x10). Riverne keeps
+  // almost its whole sky a level or two down — the cloud sea the islands
+  // float on is weat/thdr/tdr0/tdr1/cld1 — and drew none of it, 2026-10-04.
   const inState = new RegExp(`(^|/)weat/${state}(/(star|moon))?$`)
+  const inSub = new RegExp(`(^|/)weat/${state}/`)
+  // Children some generator in this weather starts (by name, in its folder).
+  const childNames = new Set<string>()
+  for (const g of zone.spawns ?? []) {
+    if (!inState.test(g.dir) && !inSub.test(g.dir)) continue
+    for (const n of [...g.children.birth, ...g.children.expire]) childNames.add(g.dir + '|' + n)
+  }
   const layers: Layer[] = []
+  // The rim a camera canopy reaches at its authored size: over all of its
+  // pieces, and the widest of every generator sharing its mesh and folder.
+  const rimOf = (g: GeneratorSpawn) => {
+    let half = 0
+    for (const qi of g.prefabIndices) {
+      const q = zone.prefabs[qi]
+      if (!q) continue
+      for (let v = 0; v < q.vertices.length; v += 3) half = Math.max(half, Math.abs(q.vertices[v]), Math.abs(q.vertices[v + 2]))
+    }
+    return half * Math.max(Math.abs(g.scale[0]), Math.abs(g.scale[2]))
+  }
+  const groupRims = new Map<string, number>()
+  for (const g of zone.spawns ?? []) {
+    if (!g.followCamera || g.spread || g.link !== 'mesh') continue
+    const key = g.dir + '|' + g.model
+    groupRims.set(key, Math.max(groupRims.get(key) ?? 0, rimOf(g)))
+  }
+  const groupRim = (g: GeneratorSpawn) => groupRims.get(g.dir + '|' + g.model) ?? rimOf(g)
   const hasSunFlare = gameSunMoon && (zone.spawns ?? []).some(s =>
     s.link === 'flare' && s.attach === 0xe && new RegExp(`(^|/)weat/${state}(/|$)`).test(s.dir))
   for (const sp of zone.spawns ?? []) {
-    if (!inState.test(sp.dir)) continue
+    const isChild = childNames.has(sp.dir + '|' + sp.generator) && !sp.emission.autoRun
+    if (!isChild && !inState.test(sp.dir) && !(inSub.test(sp.dir) && sp.emission.autoRun)) continue
     if (sp.link !== 'mesh') continue // WeatherParticles and LensFlare draw these
     if (SKY_ONLY.length && !SKY_ONLY.includes(sp.generator)) continue
-    const kind = sp.attach === 0xe ? 'sun' : sp.attach === 0xf ? 'moon' : sp.followCamera ? 'camera' : null
+    // A weather generator that neither rides the camera nor the sun or moon
+    // stands in the world: Riverne's light shafts (weat/thdr/tdr4).
+    const kind = isChild ? 'child' : sp.attach === 0xe ? 'sun' : sp.attach === 0xf ? 'moon' : sp.followCamera ? 'camera'
+      : sp.attach === 0 ? 'world' : null
     if (!kind) continue
+    const sky = kind === 'camera' || kind === 'world' || kind === 'child'
     // One stand-in disc per sun or moon; see the note above. Where the weather
     // has a sun lens flare, its first mesh is the sun's disc and starburst
     // (LensFlare), so the stand-in steps aside. The moon's flare is only a
     // halo; its disc is a phase sprite, not drawn yet.
-    const standIn = kind !== 'camera' && !layers.some(l => l.kind === kind && l.map) &&
+    const standIn = !sky && !layers.some(l => l.kind === kind && l.map) &&
       !(kind === 'sun' && hasSunFlare)
     if (standIn) {
       const deg = kind === 'sun' ? SUN_DEGREES : MOON_DEGREES
@@ -185,12 +229,14 @@ function buildLayers(zone: ParsedZone, state: string, radius: number, gameSunMoo
         base: new THREE.Vector3(), rotation: new THREE.Euler(), spin: [0, 0, 0],
       })
     }
-    if (kind !== 'camera') continue
-    const slots = slotCount(sp)
+    if (!sky) continue
+    const slots = kind === 'child' ? CHILD_SLOTS : slotCount(sp)
+    const geos: THREE.BufferGeometry[] = []
     for (let slot = 0; slot < slots; slot++) for (const pi of sp.prefabIndices) {
       const p = zone.prefabs[pi]
       if (!p || !p.indices.length) continue
       const geo = new THREE.BufferGeometry()
+      geos.push(geo)
       geo.setAttribute('position', new THREE.Float32BufferAttribute(p.vertices, 3))
       geo.setAttribute('uv', new THREE.Float32BufferAttribute(p.uvs, 2))
       // Stage 0's MODULATE2X folded in, as for generator water: vertex colour
@@ -243,7 +289,7 @@ function buildLayers(zone: ParsedZone, state: string, radius: number, gameSunMoo
       // Without a blend byte retail's particles add (kuluu particle_gen.rs);
       // the standing canopies keep alpha, as they always have here. Thunder's
       // bolt is a particle with a life and no byte.
-      const nib = sp.blend >= 0 ? sp.blend & 0x0f : kind === 'camera' && sp.life <= 0 ? 4 : 8
+      const nib = sp.blend >= 0 ? sp.blend & 0x0f : sky && sp.life <= 0 ? 4 : 8
       const blending = nib === 8 ? THREE.AdditiveBlending
         : nib === 1 || nib === 2 ? THREE.SubtractiveBlending
         : THREE.NormalBlending
@@ -252,13 +298,17 @@ function buildLayers(zone: ParsedZone, state: string, radius: number, gameSunMoo
         vertexColors: true,
         transparent: true,
         depthWrite: false,
-        side: THREE.DoubleSide,
-        fog: kind === 'camera',
+        // World-placed weather meshes are seen from inside (Tavnazian Safehold's
+        // thunder domes): one-sided, the side Direct3D keeps — three's back face,
+        // as the sun bowl showed — unless render state 0x2000 makes it two-sided.
+        // From a camera outside, the dome then disappears as it does in game.
+        side: kind === 'world' && !(p.blending & 0x2000) ? THREE.BackSide : THREE.DoubleSide,
+        fog: sky,
         blending,
       })
       const tint = applySpawnStages(mat, sp.tint, false)
       const fogScale = { value: 1 }
-      if (kind === 'camera') {
+      if (sky) {
         // Every canopy piece blends, whatever its render state, as kuluu does.
         // A canopy is an inner disc (render state 0x0) plus a 0x8000 ring;
         // drawing the 0x0 disc opaque, as the zone rule would, turned it into a
@@ -288,7 +338,7 @@ function buildLayers(zone: ParsedZone, state: string, radius: number, gameSunMoo
       // Back to front: stars, then the sun and moon, then clouds, then the world.
       // Flashes and bolts born on a spread go after the canopies: they sit in
       // the cloud layer and light it, and drawn first the clouds hid them.
-      mesh.renderOrder = isStar ? -40 : kind === 'camera' ? (sp.spread ? -19 : -20) : -30
+      mesh.renderOrder = isStar ? -40 : kind === 'world' || kind === 'child' ? -10 : kind === 'camera' ? (sp.spread ? -19 : -20) : -30
 
       const scale = new THREE.Vector3(...sp.scale)
       let posScale = 1
@@ -314,20 +364,18 @@ function buildLayers(zone: ParsedZone, state: string, radius: number, gameSunMoo
         // measured per piece, an inner disc (rim 74) was pushed out 1.7x as far
         // as the ring it sits in (rim 126), and its edge cut across the ring as
         // thin lines — the "stitches", South Gustaberg and La Theine, 2026-10-03.
-        let half = 0
-        for (const qi of sp.prefabIndices) {
-          const q = zone.prefabs[qi]
-          if (!q) continue
-          for (let v = 0; v < q.vertices.length; v += 3) half = Math.max(half, Math.abs(q.vertices[v]), Math.abs(q.vertices[v + 2]))
-        }
-        const rim = half * Math.max(sp.scale[0], sp.scale[2])
+        // And generators that share a mesh in one folder push out together,
+        // by the largest of them: Riverne's thunder sky is four layers of one
+        // mesh (map1..3, mapf, 18-20x), and pushed out one by one their rims
+        // all landed together and crossed as a pale band, 2026-10-04.
+        const rim = groupRim(sp)
         const target = radius * (isStar ? 0.95 : 0.85)
         if (rim > 1) {
           const k = Math.max(1, target / rim)
           scale.multiplyScalar(k)
           fogScale.value = 1 / k
         }
-      } else {
+      } else if (kind !== 'world' && kind !== 'child') {
         scale.multiplyScalar((radius * 0.8) / CELESTIAL_DISTANCE)
       }
       // Render state 0x0200: no fog. Thunder's flashes light the storm
@@ -340,6 +388,19 @@ function buildLayers(zone: ParsedZone, state: string, radius: number, gameSunMoo
         spin: sp.spin ?? [0, 0, 0],
         order: mesh.renderOrder,
       })
+    }
+    // three sorts see-through meshes by each one's own bounding-sphere centre.
+    // A canopy's pieces (Riverne's th05: a cap patch and the dome around it)
+    // have different centres, so two canopies of one mesh — one normal, one
+    // subtractive — could swap order between the patch and the dome, and the
+    // strip between their seams came out pale, 2026-10-04. One sphere for all
+    // of a generator's pieces keeps them in a single place in the order.
+    if (geos.length > 1) {
+      const box = new THREE.Box3()
+      for (const g of geos) { g.computeBoundingBox(); box.union(g.boundingBox!) }
+      const sphere = new THREE.Sphere()
+      box.getBoundingSphere(sphere)
+      for (const g of geos) g.boundingSphere = sphere.clone()
     }
   }
   return layers
@@ -374,9 +435,10 @@ export function SkyLayers({
     const m = new Map<GeneratorSpawn, Emitter>()
     for (const l of layers) {
       if (m.has(l.spawn)) continue
-      const slots = l.kind === 'camera' ? slotCount(l.spawn) : 1
+      const child = l.kind === 'child'
+      const slots = child ? CHILD_SLOTS : l.kind === 'camera' || l.kind === 'world' ? slotCount(l.spawn) : 1
       m.set(l.spawn, {
-        slots, next: -1, emitted: 0, births: new Array(slots).fill(NaN),
+        child, slots, next: -1, emitted: 0, births: new Array(slots).fill(NaN),
         offsets: Array.from({ length: slots }, () => new THREE.Vector3()),
       })
     }
@@ -404,8 +466,20 @@ export function SkyLayers({
     const minutes = (timeOfDayRef.current ?? 12) * 60
     const day = (((minutes % 1440) + 1440) % 1440) / 1440
     const frames = clock.getElapsedTime() * EFFECT_FPS
+    // Children: take the posts meant for them (same name, parent's folder).
+    for (let k = childEvents.length - 1; k >= 0; k--) {
+      const e = childEvents[k]
+      for (const [sp, em] of emitters) {
+        if (!em.child || sp.generator !== e.name || sp.dir !== e.dir) continue
+        const slot = em.emitted++ % em.slots
+        em.births[slot] = e.frame
+        em.offsets[slot].copy(e.at)
+        childEvents.splice(k, 1)
+        break
+      }
+    }
     for (const [sp, em] of emitters) {
-      if (sp.life <= 0) continue
+      if (sp.life <= 0 || em.child) continue
       if (em.next < 0) em.next = frames
       // Catch up at most one round of slots, after a stall or a hidden tab.
       if (frames - em.next > em.slots * sp.emission.every) em.next = frames
@@ -443,7 +517,33 @@ export function SkyLayers({
         l.map.offset.set((sp.uvScroll[0] * frames) % 1, (sp.uvScroll[1] * frames) % 1)
       }
 
-      if (l.kind === 'camera') {
+      if (l.kind === 'child') {
+        // At the parent's spot: there · flip · base · rotation (+ spin over its
+        // life) · scale (+ growth, section-3 0x08). Riverne's bolt lengthens
+        // as it strikes; its glow shrinks.
+        const age = Math.max(0, frames - em.births[l.slot])
+        tmp.spinE.set(
+          l.rotation.x + l.spin[0] * age, l.rotation.y + l.spin[1] * age, l.rotation.z + l.spin[2] * age, 'ZYX')
+        tmp.q.setFromEuler(tmp.spinE)
+        tmp.p.set(
+          l.scale.x + sp.scaleVelocity[0] * age, l.scale.y + sp.scaleVelocity[1] * age, l.scale.z + sp.scaleVelocity[2] * age)
+        if (sp.billboard & 1) {
+          l.mesh.matrix.compose(em.offsets[l.slot], camera.quaternion, tmp.p).multiply(FLIP)
+        } else {
+          tmp.m.compose(l.base, tmp.q, tmp.p)
+          l.mesh.matrix.makeTranslation(em.offsets[l.slot].x, em.offsets[l.slot].y, em.offsets[l.slot].z)
+            .multiply(FLIP).multiply(tmp.m)
+        }
+      } else if (l.kind === 'world') {
+        // flip(DAT → world) · base · rotation (+ spin) · scale, where it stands.
+        tmp.spinE.set(
+          l.rotation.x + l.spin[0] * frames, l.rotation.y + l.spin[1] * frames, l.rotation.z + l.spin[2] * frames, 'ZYX')
+        tmp.q.setFromEuler(tmp.spinE)
+        tmp.at.copy(l.base)
+        if (sp.spread) tmp.at.add(em.offsets[l.slot])
+        tmp.m.compose(tmp.at, tmp.q, l.scale)
+        l.mesh.matrix.copy(FLIP).multiply(tmp.m)
+      } else if (l.kind === 'camera') {
         // camera · flip(DAT → world) · base · rotation (+ spin) · scale
         tmp.spinE.set(
           l.rotation.x + l.spin[0] * frames, l.rotation.y + l.spin[1] * frames, l.rotation.z + l.spin[2] * frames, 'ZYX')
@@ -473,6 +573,22 @@ export function SkyLayers({
         l.mesh.matrix.copy(tmp.look).setPosition(tmp.p)
         l.mesh.matrix.scale(l.scale)
       }
+      // Section-3 0x2E draw distance (see GeneratorSpawn): Tavnazian Safehold's
+      // thunder domes are seen only from inside the town, not from a camera
+      // hanging over the zone.
+      const dd = sp.drawDistance
+      if (dd && (l.kind === 'world' || l.kind === 'child')) {
+        const d = tmp.p.setFromMatrixPosition(l.mesh.matrix).distanceTo(camera.position)
+        const k = d < dd.near ? 1 : d < dd.far ? 1 - (d - dd.near) / (dd.far - dd.near) : 0
+        l.tint.w *= k
+        l.mesh.visible = (sp.life > 0 ? l.mesh.visible : true) && k > 0
+      }
+      // World-placed weather meshes are sky seen from below: Tavnazian
+      // Safehold's cloud lids over the town, Riverne's shafts. The game never
+      // looks down on them, and from an overview above, a lid is a pale sheet
+      // laid over the zone, 2026-10-04 — so they are drawn only from beneath.
+      if (l.kind === 'world' && camera.position.y > tmp.p.setFromMatrixPosition(l.mesh.matrix).y) l.mesh.visible = false
+      else if (l.kind === 'world' && sp.life <= 0 && !dd) l.mesh.visible = true
       l.mesh.matrixWorldNeedsUpdate = true
     }
   })
