@@ -44,6 +44,18 @@ const EFFECT_FPS = 60
 /** Retail's weather emission thinning; see above. */
 const WEATHER_EMIT_SCALE = 0.3
 const MAX_PARTICLES = 2000
+/**
+ * Strength of the rain mist: large billboarded puffs (Jugner's rai2, the
+ * placed rai3-5 / ~1r*). Additive, 30 at a time in front of the camera, they
+ * read too strong at the data's own alpha; Ryan chose 35%, then 20% after trying it, from 100/60/35/20%
+ * renders of Jugner, 2026-10-09 — by eye, no retail reference. ?wxmist=<k>
+ * overrides it.
+ */
+const MIST_STRENGTH = (() => {
+  const v = typeof window !== 'undefined' ? Number(new URLSearchParams(window.location.search).get('wxmist')) : NaN
+  return Number.isFinite(v) && v > 0 ? v : 0.2
+})()
+const isMist = (sp: GeneratorSpawn) => (sp.billboard & 1) !== 0 && Math.max(...sp.scale.map(Math.abs)) >= 2
 const FLIP = new THREE.Matrix4().makeRotationX(Math.PI)
 
 const decode = (c: number) => (c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4))
@@ -281,8 +293,17 @@ export function WeatherParticles({ zone, state }: { zone: ParsedZone; state: str
           if (attached) {
             // World point: camera + base turned with the view + spread, then
             // stored in DAT axes like every other particle (x, -y, -z).
-            camera.matrixWorld.extractBasis(tmp.right, tmp.camUp, tmp.view)
-            tmp.view.negate()
+            // Turned with the heading only: up is the world's, ahead is level.
+            // With the camera's own tilt, an overview looking down put "10 up,
+            // 10 ahead" in the middle of the picture, and Jugner's rain mist
+            // (rai2: 30 additive puffs) whited out the view (2026-10-09).
+            camera.getWorldDirection(tmp.view)
+            tmp.view.y = 0
+            // Straight down: the top of the screen is the heading.
+            if (tmp.view.lengthSq() < 1e-6) tmp.view.set(0, 1, 0).applyQuaternion(camera.quaternion).setY(0)
+            tmp.view.normalize()
+            tmp.camUp.set(0, 1, 0)
+            tmp.right.crossVectors(tmp.view, tmp.camUp).normalize()
             tmp.p.copy(camera.position)
               .addScaledVector(tmp.right, sp.position[0])
               .addScaledVector(tmp.camUp, -sp.position[1])
@@ -374,7 +395,7 @@ export function WeatherParticles({ zone, state }: { zone: ParsedZone; state: str
             tmp.flash.z += ch(sp.curves.b, sp.tint[2])
           }
         }
-        s.alpha.setX(drawn, a * ddk)
+        s.alpha.setX(drawn, a * ddk * (isMist(sp) ? MIST_STRENGTH : 1))
         if (s.frameOffsets) {
           // xim SpriteSheetFrameUpdater: frame floor((n + 1) x progress),
           // held on the last; without the updater, frame 0.

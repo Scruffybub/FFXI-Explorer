@@ -300,6 +300,17 @@ weather; two shards take ~1.5 h for 286 zones. Fixed from it:
   layers now take a fractional renderOrder in file order (`si / (n+1) * 0.5`
   within their tier); world and child layers still sort by distance. Order
   logged at seven pitches: constant. Six zones' overviews unchanged.
+- **Jugner's rain whited out the overview** (2026-10-09). `rai2` is the rain
+  mist: render state 0x400, born "10 up, 10 ahead" of the camera, sprite
+  `rain_b01` bottom-left quadrant (a soft white puff — the sheet is read the
+  right way up: `~1ra` uses the streaks in the top half, `~1h*` the rings),
+  scale 5, additive, alpha curve peak 0.1, ~30 alive. The 0x400 base was turned
+  with the camera's full basis, so an overview looking down put the puffs
+  mid-picture; it now uses the heading only (world up, level ahead). Same
+  data in La Theine looked fine only because of its camera angle. The mist
+  (billboarded, scale >= 2: `rai*`, `~1r*`) then read too strong at the
+  data's alpha; Ryan chose **20%** (35% first, too strong in the app) (`MIST_STRENGTH`, `?wxmist=` overrides)
+  from 100/60/35/20% renders — by eye, no retail reference. Snow unaffected.
 Not fixed: Altepa's `ka01` (heat, blank texture, alpha curve, fast spin) is
 probably a screen-grab shimmer; it draws as a faint colour veil. Altepa's heat
 sky is mint green from its own records — not judged.
