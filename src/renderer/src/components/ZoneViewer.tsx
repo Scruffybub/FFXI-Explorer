@@ -138,11 +138,16 @@ function patchZoneShader(
   lit: boolean,
   variant: string,
   keepAlpha = false,
+  gameFog = false,
 ) {
   // 'ffxi': Zone weather drives the lighting — FFXI's own vertex lighting and
-  // MODULATE2X stage in place of the baked-colour curve, and its plain linear
-  // fog with no height falloff. See lib/zoneLighting.ts.
+  // MODULATE2X stage in place of the baked-colour curve. See lib/zoneLighting.ts.
   const ffxi = variant === 'ffxi'
+  // Zone weather's fog is the game's: plain linear, no height falloff — in
+  // Dynamic lighting too. Dynamic kept the viewer's own height fog, which
+  // leaves anything above its base height at 6% fog, so hills and cliffs stood
+  // clear of a storm that Original buried in haze (Ryan, 2026-10-04).
+  const linearFog = ffxi || gameFog
   material.onBeforeCompile = (shader) => {
     if (ffxi) Object.assign(shader.uniforms, ffxiLight)
     shader.uniforms.fogHeightBase = uniforms.fogHeightBase
@@ -247,9 +252,9 @@ function patchZoneShader(
         #ifdef FOG_EXP2
           float fogFactor = 1.0 - exp(-fogDensity * fogDensity * vFogDepth * vFogDepth);
         #else
-          float fogFactor = ${ffxi ? '(vFogDepth - fogNear) / max(fogFar - fogNear, 0.0001)' : 'smoothstep(fogNear, fogFar, vFogDepth)'};
+          float fogFactor = ${linearFog ? '(vFogDepth - fogNear) / max(fogFar - fogNear, 0.0001)' : 'smoothstep(fogNear, fogFar, vFogDepth)'};
         #endif
-        ${ffxi ? '' : 'float heightAtten = 1.0 - smoothstep(fogHeightBase, fogHeightBase + fogHeightRange, vWorldY); fogFactor *= max(heightAtten, 0.06);'}
+        ${linearFog ? '' : 'float heightAtten = 1.0 - smoothstep(fogHeightBase, fogHeightBase + fogHeightRange, vWorldY); fogFactor *= max(heightAtten, 0.06);'}
         gl_FragColor.rgb = mix(gl_FragColor.rgb, fogColor, clamp(fogFactor, 0.0, 1.0));
       #endif`
     )
@@ -258,7 +263,7 @@ function patchZoneShader(
   // wrong compiled program. This has to cover anything that rewrites the
   // shader, including PCSS, which swaps the global shadow chunk: with a fixed
   // key three would keep the stale program and the meshes vanish entirely.
-  const cacheKey = `zone-shader-${lit ? 'lit' : 'basic'}-${variant}${keepAlpha ? '-va' : ''}`
+  const cacheKey = `zone-shader-${lit ? 'lit' : 'basic'}-${variant}${keepAlpha ? '-va' : ''}${gameFog ? '-gf' : ''}`
   material.customProgramCacheKey = () => cacheKey
 }
 
@@ -3454,7 +3459,7 @@ export default function ZoneViewer({
         // drew as solid hard-edged squares under every setting, 2026-09-27.
         const zoneRuleAlpha = zoneRule && !isWater &&
           (((prefab.meshName ?? '').startsWith('_')) || ((prefab.blending >>> 0) & 0x8000) !== 0)
-        patchZoneShader(mat, zoneUniforms.current, lit, shaderVariant, zoneRuleAlpha)
+        patchZoneShader(mat, zoneUniforms.current, lit, shaderVariant, zoneRuleAlpha, zoneLight)
         materials.push(mat)
         matMap.set(prefabIdx, mat)
       }
@@ -4033,7 +4038,7 @@ export default function ZoneViewer({
     }
     // Rebuild materials when PCSS is toggled so they compile against the
     // shadow chunk that is actually installed.
-  }, [zoneData, lit, scene.wireframe, shaderVariant, scene.zoneTransparency, genSpawn])
+  }, [zoneData, lit, scene.wireframe, shaderVariant, scene.zoneTransparency, genSpawn, zoneLight])
 
   /**
    * Anisotropy, applied to the zone's textures in place.

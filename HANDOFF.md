@@ -310,7 +310,12 @@ canopies, rain and flare, and `SunLight` takes its colours from the records —
 the sun's colour and the game's sun direction by day, the moon's by night,
 hemisphere = ambient × 2 (the records' 2x scale), ground half that. Sliders
 still scale intensity. Sky IBL is off with weather (it samples the viewer's
-own sky). The zone shader's 'ffxi' variant is only used in Original.
+own sky). The zone shader's 'ffxi' variant is only used in Original. 2026-10-09:
+Dynamic with weather kept the viewer's own height fog (smoothstep, ×0.06 above
+its base), so hills stood clear of a storm Original buried; `patchZoneShader`
+now takes `gameFog` (= zoneLight) and uses the game's plain linear fog in any
+variant. Measured: Dynamic+weather now matches Original+weather's fog, and its
+shading matches Dynamic without weather. Ryan: "It looks like it works."
 
 **Emission clocks, lightning and rain, 2026-09-30.** Generators emit on a clock
 in their header (body 0x64: u16 variance, u16 frames−1, 9-bit count, flags 0x04
