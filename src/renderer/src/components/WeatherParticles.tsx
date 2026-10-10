@@ -82,17 +82,32 @@ interface System {
   uvOffset: THREE.InstancedBufferAttribute
 }
 
-function buildSystems(zone: ParsedZone, state: string): System[] {
-  // The weather's own folder, and its sub-folders' generators that run by
-  // themselves (emission flag 0x10). Tavnazian Safehold keeps its thunder in
-  // weat/thdr/wez4; the ones without the flag wait to be spawned by something
-  // (Lufaise's scheduled strikes in kmi1, kmi2) and are left out.
+/**
+ * The weather's own folder, and its sub-folders' generators that run by
+ * themselves (emission flag 0x10). Tavnazian Safehold keeps its thunder in
+ * weat/thdr/wez4; the ones without the flag wait to be spawned by something
+ * (Lufaise's scheduled strikes in kmi1, kmi2) and are left out.
+ */
+function weatherPick(state: string): (sp: GeneratorSpawn) => boolean {
   const top = new RegExp(`(^|/)weat/${state}$`)
   const sub = new RegExp(`(^|/)weat/${state}/`)
+  return sp => top.test(sp.dir) || (sub.test(sp.dir) && sp.emission.autoRun)
+}
+
+/**
+ * The zone's own ambient effects: every generator outside the weather that
+ * runs by itself and stands in the world — lamp and torch flames, fires,
+ * sparkles, smoke, waterfall spray. Hit sparks, footsteps (fser, fses) and
+ * door effects never set the auto-run flag; they wait to be triggered.
+ */
+const zonePick = (sp: GeneratorSpawn) =>
+  sp.emission.autoRun && sp.attach === 0 && !sp.followCamera && !/(^|\/)weat(\/|$)/.test(sp.dir)
+
+function buildSystems(zone: ParsedZone, pick: (sp: GeneratorSpawn) => boolean, emitScale: number): System[] {
   const out: System[] = []
   for (const sp of zone.spawns ?? []) {
     if (sp.link !== 'sprite' || sp.life <= 0) continue
-    if (!top.test(sp.dir) && !(sub.test(sp.dir) && sp.emission.autoRun)) continue
+    if (!pick(sp)) continue
     const p = zone.prefabs[sp.prefabIndices[0]]
     if (!p) continue
     const tex = zone.textures[p.materialIndex]
@@ -161,7 +176,7 @@ function buildSystems(zone: ParsedZone, state: string): System[] {
     }
     mat.customProgramCacheKey = () => 'weather-particles'
 
-    const perEmission = Math.max(1, Math.floor(Math.max(1, sp.emission.count) * WEATHER_EMIT_SCALE))
+    const perEmission = Math.max(1, Math.floor(Math.max(1, sp.emission.count) * emitScale))
     const capacity = Math.min(MAX_PARTICLES,
       perEmission * Math.ceil((sp.life + 1) / Math.max(1, sp.emission.every)))
     const alpha = new THREE.InstancedBufferAttribute(new Float32Array(capacity), 1)
@@ -217,10 +232,8 @@ function buildFlashQuad(): { mesh: THREE.Mesh; tint: THREE.Vector4 } {
 }
 
 export function WeatherParticles({ zone, state }: { zone: ParsedZone; state: string }) {
-  const flash = useMemo(() => buildFlashQuad(), [])
-  useEffect(() => () => { flash.mesh.geometry.dispose(); (flash.mesh.material as THREE.Material).dispose() }, [flash])
   const systems = useMemo(() => {
-    const s = buildSystems(zone, state)
+    const s = buildSystems(zone, weatherPick(state), WEATHER_EMIT_SCALE)
     if (s.length) {
       console.log(`[WXP] ${s.length} weather particle systems for ${state}: ` +
         s.map(x => `${x.spawn.generator}(${x.perEmission}/${x.spawn.emission.every}f, ${x.capacity} max)`).join(' '))
@@ -231,6 +244,36 @@ export function WeatherParticles({ zone, state }: { zone: ParsedZone; state: str
     }
     return s
   }, [zone, state])
+  return <ParticleField systems={systems} weather />
+}
+
+/** The zone's own ambient sprite effects (Scene → Zone effects). */
+export function ZoneEffects({ zone, range }: {
+  zone: ParsedZone
+  /**
+   * Scene → Effect distance: the emit range and draw distance x this;
+   * 0 = everywhere. The game's
+   * own ranges (mostly 20-75) suit a camera behind the player, but orbiting
+   * they lit only the point being circled. Everything at once cost ~15% of the
+   * frame in the worst zone (Castle Oztroja [S], 543 systems: 56 -> 48 fps).
+   */
+  range: number
+}) {
+  const systems = useMemo(() => {
+    const s = buildSystems(zone, zonePick, 1)
+    console.log(`[ZFX] ${s.length} zone effect particle systems`)
+    if (new URLSearchParams(window.location.search).has('census')) {
+      (window as unknown as { __zfx?: System[] }).__zfx = s
+    }
+    return s
+  }, [zone])
+  return <ParticleField systems={systems} weather={false} range={range} />
+}
+
+/** Runs and draws a set of particle systems, and the screen flash they raise. */
+function ParticleField({ systems, weather, range = 1 }: { systems: System[]; weather: boolean; range?: number }) {
+  const flash = useMemo(() => buildFlashQuad(), [])
+  useEffect(() => () => { flash.mesh.geometry.dispose(); (flash.mesh.material as THREE.Material).dispose() }, [flash])
 
   useEffect(() => () => {
     for (const s of systems) {
@@ -249,8 +292,13 @@ export function WeatherParticles({ zone, state }: { zone: ParsedZone; state: str
   }), [])
   const last = useMemo(() => ({ frames: -1 }), [systems])
 
-  useFrame(({ camera, clock }) => {
+  useFrame(({ camera, clock, controls }) => {
     const frames = clock.getElapsedTime() * EFFECT_FPS
+    // Retail culls placed emitters by distance from the player. Orbiting, the
+    // point being looked at stands in for the player; flying and walking, the
+    // camera does.
+    const target = (controls as unknown as { target?: THREE.Vector3 } | null)?.target
+    const player = target ?? camera.position
     // Step size in effect frames, capped so a stall does not fling the rain.
     const dt = last.frames < 0 ? 0 : Math.min(10, frames - last.frames)
     last.frames = frames
@@ -282,8 +330,9 @@ export function WeatherParticles({ zone, state }: { zone: ParsedZone; state: str
       // camera (standing in for the player) is within it.
       if (s.next < 0) s.next = frames
       if (frames - s.next > sp.emission.every * 4) s.next = frames
-      const culled = !camRel && sp.emitRange > 0 &&
-        tmp.p.set(sp.position[0], -sp.position[1], -sp.position[2]).distanceTo(camera.position) > sp.emitRange
+      const reach = sp.emitRange * range
+      const culled = !camRel && reach > 0 &&
+        tmp.p.set(sp.position[0], -sp.position[1], -sp.position[2]).distanceTo(player) > reach
       if (culled) s.next = frames + sp.emission.every
       while (s.next <= frames) {
         for (let k = 0; k < s.perEmission; k++) {
@@ -359,7 +408,10 @@ export function WeatherParticles({ zone, state }: { zone: ParsedZone; state: str
         if (follow) tmp.p.add(camera.position)
         // Section-3 0x2E draw distance: fades out, then is not drawn.
         const dd = sp.drawDistance
-        const ddk = dd ? fallOff(tmp.p.distanceTo(camera.position), dd.near, dd.far) : 1
+        // Effect distance stretches it with the emit range: nearly every zone
+        // effect fades out 20-50 units from the camera, about its emit range,
+        // so stretching the range alone lit nothing new (Ryan, 2026-10-10).
+        const ddk = !dd || range === 0 ? 1 : fallOff(tmp.p.distanceTo(camera.position), dd.near * range, dd.far * range)
         if (ddk <= 0) continue
         tmp.s.set(s.scl[i * 3], s.scl[i * 3 + 1], s.scl[i * 3 + 2])
         if (sp.billboard & 1) {
@@ -395,7 +447,7 @@ export function WeatherParticles({ zone, state }: { zone: ParsedZone; state: str
             tmp.flash.z += ch(sp.curves.b, sp.tint[2])
           }
         }
-        s.alpha.setX(drawn, a * ddk * (isMist(sp) ? MIST_STRENGTH : 1))
+        s.alpha.setX(drawn, a * ddk * (weather && isMist(sp) ? MIST_STRENGTH : 1))
         if (s.frameOffsets) {
           // xim SpriteSheetFrameUpdater: frame floor((n + 1) x progress),
           // held on the last; without the updater, frame 0.
@@ -406,6 +458,8 @@ export function WeatherParticles({ zone, state }: { zone: ParsedZone; state: str
         drawn++
       }
       s.mesh.count = drawn
+      // Nothing alive: skip the draw call (hundreds of idle lamps in a castle).
+      s.mesh.visible = drawn > 0
       s.mesh.instanceMatrix.needsUpdate = true
       s.alpha.needsUpdate = true
       if (s.frameOffsets) s.uvOffset.needsUpdate = true

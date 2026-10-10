@@ -20,7 +20,7 @@ import {
 } from '../lib/zoneLighting'
 import { applySpawnStages } from '../lib/spawnStages'
 import { SkyLayers } from './SkyLayers'
-import { WeatherParticles } from './WeatherParticles'
+import { WeatherParticles, ZoneEffects } from './WeatherParticles'
 import { LensFlare } from './LensFlare'
 import type {
   LightingSettings, PointLightSettings, PostSettings, SceneSettings, SurfaceInfo, ToneMappingMode,
@@ -4370,6 +4370,7 @@ export default function ZoneViewer({
         />
       )}
       {zoneLight && <WeatherParticles zone={zoneData} state={zoneSkyRecords[0].state} />}
+      {scene.zoneEffects && !scene.mapView && <ZoneEffects zone={zoneData} range={scene.effectRange} />}
       {zoneLight && scene.gameSunMoon && (
         <LensFlare zone={zoneData} state={zoneSkyRecords[0].state} timeOfDayRef={timeOfDayRef} collision={collisionWorld} />
       )}
@@ -4483,7 +4484,9 @@ export default function ZoneViewer({
       {/* Already world space — deliberately outside the rotated group. */}
       {scene.showCollision && <CollisionOverlay world={collisionWorld} />}
 
-      <PostStack post={post} generatorLayer={genSpawn || zoneLight} />
+      {/* Zone effects draw on the gamma layer too: without them here, they showed
+          only when Generator water or Zone weather happened to switch it on. */}
+      <PostStack post={post} generatorLayer={genSpawn || zoneLight || (scene.zoneEffects && !scene.mapView)} />
     </Canvas>
   )
 }

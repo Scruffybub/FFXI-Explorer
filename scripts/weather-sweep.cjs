@@ -287,7 +287,11 @@ app.whenReady().then(async () => {
         if (!view || view.error) rec.skipped = 'did not load'
         else {
           // Diagnostic: SWEEP_EVAL (a file of page-side JS) is run once loaded; its result is printed.
-          if (process.env.SWEEP_EVAL) console.log('EVAL ' + JSON.stringify(await js(readFileSync(process.env.SWEEP_EVAL, 'utf8'))))
+          if (process.env.SWEEP_EVAL) {
+            rec.eval = await js(readFileSync(process.env.SWEEP_EVAL, 'utf8'))
+            const text = JSON.stringify(rec.eval)
+            console.log('EVAL ' + (text.length > 2000 ? text.length + ' chars (in results.jsonl)' : text))
+          }
           const want = (process.env.SWEEP_STATES || '').split(',').filter(Boolean)
           const states = (await js(`[...new Set((window.__zoneData.environment || []).map(r => r.state))].sort()`))
             .filter(st => !want.length || want.includes(st))

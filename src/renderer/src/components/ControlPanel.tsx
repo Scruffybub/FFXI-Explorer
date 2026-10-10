@@ -121,6 +121,10 @@ function Section({
   )
 }
 
+/** Effect distance steps: emit range multipliers, 0 = everywhere. */
+const EFFECT_RANGES = [1, 2, 5, 10, 0]
+const EFFECT_RANGE_NAMES = ['Game', '2×', '5×', '10×', 'Everywhere']
+
 function Slider({
   label, value, min, max, step, onChange, format, info,
 }: {
@@ -991,6 +995,22 @@ export default function ControlPanel({
           onChange={v => onScene({ zoneTransparency: v })}
           info="Decide transparency the way FFXI does: meshes named with a leading underscore (foliage, flags) are cut out, meshes flagged for blending (terrain overlays, water) blend softly, and everything else is solid. This is what fades the ground layers together and gives trees their fine needles. Turn it off to see the older render, where overlays draw at full strength as hard-edged squares."
         />
+        <Toggle
+          label="Zone effects (beta)"
+          checked={scene.zoneEffects}
+          onChange={v => onScene({ zoneEffects: v })}
+          info="Bring the zone's own effects to life: lamp and torch flames, fires, sparkles, smoke and spray, run from the effect generators FFXI places in each zone. Like the game, an effect only plays near you — orbiting, near the point the camera circles. Beta: this first stage draws the particle effects; glows, rings and other shaped effects come next."
+        />
+        {scene.zoneEffects && (
+          <Slider
+            label="Effect distance"
+            value={Math.max(0, EFFECT_RANGES.indexOf(scene.effectRange))}
+            min={0} max={EFFECT_RANGES.length - 1} step={1}
+            format={i => EFFECT_RANGE_NAMES[i] ?? ''}
+            onChange={i => onScene({ effectRange: EFFECT_RANGES[i] ?? 0 })}
+            info="How far away effects play. Game uses each effect's own distances from the zone files: most start near your character (in orbit view, near the point the camera circles) and fade out 20 to 50 units from the camera. Everywhere runs every effect in the zone, so towns stay lit from the overview; it costs a little frame rate in the busiest zones."
+          />
+        )}
         <Toggle
           label="Generator water (beta)"
           checked={scene.generatorWater}

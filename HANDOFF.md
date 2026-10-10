@@ -248,6 +248,52 @@ islands float on, 100 below the camera), tdr4 (world-placed shafts), limg
   on their window — the hidden window runs at ~1 fps and steps over them.
 A01 and B01 carry identical lightning; A01 drew none of its sky before.
 
+**Zone effects, stage 1 of 3, 2026-10-10.** Scene → Zone effects (beta, off
+by default, `scene.zoneEffects`) runs the zone's own ambient effect
+generators. An inventory over all 285 zones (sweep + `fxinv` eval, scratch):
+~80,000 generator pieces have no placement of their own; ~19,000 are not
+auto-run and only fire when triggered (fser/fses hit sparks and footsteps in
+every zone, door/*, some effe/*) — those stay hidden; ~61,000 in 281 zones are
+auto-run: lamps/torches (effe/ligh, ligt, ramp, hi), fire, smoke, crystals,
+water spray and foam, fog, rings and spheres. Mostly additive, mostly
+billboarded, most with a life and alpha curve; ~14,000 are 0x21 sprites, the
+rest MMB/D3M meshes. Busiest: Newton Movalpolos and Outer Ra'Kaznar ~1,150.
+Stage 1 = the sprites: WeatherParticles.tsx is now a shared `ParticleField`
+with two pickers — `weatherPick(state)` (×0.3 emission, mist 20%) and
+`zonePick` (auto-run, attach 0, not followCamera, not under weat/; ×1
+emission). Placed emitters cull by section-0 0x0A emit range from the
+"player": the orbit target when orbiting (R3F `controls.target`), else the
+camera. Idle systems are hidden (`visible = drawn > 0`): Castle Zvahl Keep,
+380 systems, 145 fps off / 154 on. **Effect distance** (`scene.effectRange`:
+1/2/5/10, 0 = Everywhere, the default) multiplies the emit range *and* the
+section-3 0x2E draw distance — 98-100% of town effects carry one, far 20-50
+from the camera, so stretching the emit range alone changed nothing (Ryan).
+From the overview, Everywhere draws ~1,520 particles in Castle Zvahl Keep
+(158 -> 72 fps) and ~300 in Bastok Markets (68 -> 59): stage 3 should batch. Seen working: Bastok Markets' fountain lamp
+posts, Castle Zvahl Keep's wall torches. Census: `window.__zfx`. Stage 2 =
+the mesh effects (glows, cones, rings, foam — today hidden by `misplaced`);
+stage 3 = speed and a sweep.
+Fixed: Zone effects drew only when Generator water or Zone weather was on —
+they sit on the gamma-blend layer and PostStack enabled that pass only for
+those; `generatorLayer` now includes `scene.zoneEffects`.
+
+**Lamp light on terrain is in the game data** (Ryan asked, 2026-10-10; read
+from xim as format reference only — ParticleGeneratorParser, ParticleInitializers,
+Particle.getPointLightParams, ZoneDefParser, ZoneDrawer, ShaderConstants):
+- A generator whose linked data type (setup +29) is **0x47** is a point light.
+- Section-1 opcode **0x58**: f32 range, f32 theta, f32 rangeMul, f32 thetaMul;
+  each multiplier maps x >= 0 -> 2^x, -1 <= x < 0 -> 1 + x, else 0. Range =
+  range x rangeMul; quadratic attenuation = 1 / (theta x thetaMul); colour =
+  the particle's colour (tint and life curves) x 2.
+- Section-1 opcode **0x88**: a DatId, then a zero u32 — attaches a light to
+  a particle (particles lit by it).
+- The zone definition (MZB) header carries a point-light table offset (after
+  the culling-tables offset) listing light generator DatIds, and each placed
+  object has **four** 1-based point-light indices (0 = none) after its
+  environment link and file id: the game says which lights touch which mesh.
+- Shading per light: 0 beyond range, else colour x vertex colour x N.L /
+  (quad x d^2), clamped — added to the terrain lighting.
+
 **Weather sweep, 2026-10-04.** `scripts/weather-sweep.cjs <outDir> [k/n] [ids]`
 loads every zone with Zone weather on, steps each weather in place
 (`__setScene`, census only), and records per weather: sky layers by kind and

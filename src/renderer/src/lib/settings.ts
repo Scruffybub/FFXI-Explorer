@@ -277,6 +277,20 @@ export interface SceneSettings {
   zoneWeather: boolean
 
   /**
+   * The zone's own ambient effects — lamp and torch flames, fires, sparkles,
+   * smoke, spray — run from its effect generators. Stage 1 draws the sprite
+   * particles; beta, off by default.
+   */
+  zoneEffects: boolean
+
+  /**
+   * How far away zone effects play: the game's own emit range (from the
+   * player — in orbit, the point circled) and draw distance (from the camera)
+   * times 1, 2, 5 or 10, or 0 = everywhere.
+   */
+  effectRange: number
+
+  /**
    * With Zone weather: draw the sun and moon the game's way — the sun as the
    * weather's lens-flare sheet (core, starburst, halo and the flare chain),
    * the moon with its rainbow halo — or, off, as the viewer's plain discs.
@@ -461,6 +475,8 @@ export const DEFAULT_SCENE: SceneSettings = {
   weatherFollowsCamera: true,
   generatorWater: false,
   zoneWeather: false,
+  zoneEffects: false,
+  effectRange: 0,
   gameSunMoon: true,
   weatherFogScale: 1,
   zoneTransparency: true,
