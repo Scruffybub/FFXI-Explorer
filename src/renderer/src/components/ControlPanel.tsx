@@ -124,6 +124,8 @@ function Section({
 /** Effect distance steps: emit range multipliers, 0 = everywhere. */
 const EFFECT_RANGES = [1, 2, 5, 10, 0]
 const EFFECT_RANGE_NAMES = ['Game', '2×', '5×', '10×', 'Everywhere']
+/** Dynamic lamp light counts. */
+const LAMP_COUNTS = [4, 8, 12, 16, 24, 32]
 
 function Slider({
   label, value, min, max, step, onChange, format, info,
@@ -1009,6 +1011,23 @@ export default function ControlPanel({
             format={i => EFFECT_RANGE_NAMES[i] ?? ''}
             onChange={i => onScene({ effectRange: EFFECT_RANGES[i] ?? 0 })}
             info="How far away effects play. Game uses each effect's own distances from the zone files: most start near your character (in orbit view, near the point the camera circles) and fade out 20 to 50 units from the camera. Everywhere runs every effect in the zone, so towns stay lit from the overview; it costs a little frame rate in the busiest zones."
+          />
+        )}
+        {scene.zoneEffects && lit && (
+          <Slider
+            label="Lamp brightness" value={scene.lampBrightness} min={0} max={3} step={0.1}
+            onChange={v => onScene({ lampBrightness: v })}
+            info="Dynamic lighting turns the zone's own lamps and torches into real lights, the nearest to where you are looking, so they light walls, floors and models around them. This sets how bright they are; 0 turns them off. Original lighting uses the game's own softer lamp light instead."
+          />
+        )}
+        {scene.zoneEffects && lit && (
+          <Slider
+            label="Lamp lights"
+            value={Math.max(0, LAMP_COUNTS.indexOf(scene.lampCount))}
+            min={0} max={LAMP_COUNTS.length - 1} step={1}
+            format={i => String(LAMP_COUNTS[i] ?? '')}
+            onChange={i => onScene({ lampCount: LAMP_COUNTS[i] ?? 12 })}
+            info="How many of the nearest lamps Dynamic lighting turns into real lights. More lights the room further out, but each one costs frame rate: in Castle Zvahl, 12 lights cost about a quarter of it. The scene pauses briefly when this changes while the lighting is rebuilt."
           />
         )}
         <Toggle

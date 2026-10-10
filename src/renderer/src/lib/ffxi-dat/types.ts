@@ -129,6 +129,8 @@ export interface ParsedZoneMesh {
 export interface ZoneMeshInstance {
   meshIndex: number       // which MMB prefab (sequential MMB block order)
   transform: number[]     // 4x4 matrix (16 floats, row-major)
+  /** Point-light generators lighting this placement (MZB, up to four). */
+  lights?: string[]
 }
 
 /**
@@ -161,7 +163,7 @@ export interface GeneratorSpawn {
   todCurves: { r?: number[]; g?: number[]; b?: number[]; alpha?: number[] }
   spin: [number, number, number]           // 0x0B rotation per frame, radians
   // Particle behaviour — see GeneratorParser's RawModelSpawn for each.
-  link: 'mesh' | 'sprite' | 'flare'
+  link: 'mesh' | 'sprite' | 'flare' | 'light'
   billboard: number
   renderState: number
   emission: Emission
@@ -178,6 +180,8 @@ export interface GeneratorSpawn {
   screenFlash: { near: number; far: number; nearAngle: number; farAngle: number } | null
   children: { birth: string[]; expire: string[] }
   drawDistance: { near: number; far: number } | null
+  /** A point light's reach and quadratic fall-off (link 'light'); see GeneratorParser. */
+  pointLight: { range: number; quad: number } | null
 }
 
 /** One light set from an environment record. Colours are raw byte / 255. */

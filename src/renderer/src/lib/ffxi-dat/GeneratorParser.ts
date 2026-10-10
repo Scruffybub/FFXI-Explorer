@@ -66,7 +66,7 @@ export interface RawModelSpawn {
    * What the setup links: an MMB or D3M mesh (0x0B), a 0x21 sprite (0x0E), or
    * a 0x21 sheet drawn as a screen-space lens flare (0x39).
    */
-  link: 'mesh' | 'sprite' | 'flare'
+  link: 'mesh' | 'sprite' | 'flare' | 'light'
   /** Setup flags' billboard bits (0x1 faces the camera; 0x4 is followCamera). */
   billboard: number
   /**
@@ -118,12 +118,18 @@ earAngle,
    */
   children: { birth: string[]; expire: string[] }
   /**
-   * Section-3 0x2E (xim DrawDistanceUpdater): alpha fades from 
-ear to
-   * ar units from the camera and the particle is not drawn beyond.
+   * Section-3 0x2E (xim DrawDistanceUpdater): alpha fades from `near` to
+   * `far` units from the camera and the particle is not drawn beyond.
    * Tavnazian Safehold's thunder sky domes show only within 250 of the town.
    */
   drawDistance: { near: number; far: number } | null
+  /**
+   * A point light (linked type 0x47): section-1 opcode 0x58 gives its reach
+   * and fall-off. Light = colour (tint, life curves) x 2 x N.L / (quad x d^2),
+   * nothing beyond range. Zone objects name up to four in the MZB. From xim
+   * (PointLightParamsInitializer, Particle.getPointLightParams), format only.
+   */
+  pointLight: { range: number; quad: number } | null
 }
 
 /**
@@ -188,6 +194,9 @@ const SIZE_WORDS_MASK = 0x1f
 const LINKED_MODEL = 0x0b
 const LINKED_SPRITE = 0x0e
 const LINKED_FLARE = 0x39
+const LINKED_LIGHT = 0x47
+/** xim's mapping for 0x58's multipliers: 2^x from 0 up, 1 + x down to -1, else 0. */
+const lightMultiplier = (x: number) => (x >= 0 ? Math.pow(2, x) : x >= -1 ? 1 + x : 0)
 const FLAG_FOLLOW_CAMERA = 0x4
 const EMISSION_AT = 0x64
 
@@ -231,6 +240,7 @@ export function parseModelSpawn(body: Uint8Array): RawModelSpawn | null {
   const todTracks: RawModelSpawn['todTracks'] = {}
   let blend = -1
   let spin: [number, number, number] = [0, 0, 0]
+  let pointLight: RawModelSpawn['pointLight'] = null
   const flags1 = body[EMISSION_AT + 5]
   const emission: Emission = {
     every: view.getUint16(EMISSION_AT + 2, true) + 1,
@@ -297,6 +307,10 @@ export function parseModelSpawn(body: Uint8Array): RawModelSpawn | null {
     } else if (op === 0x3c && p + 8 <= body.length) {
       const id = readId(p)
       if (id) children.birth.push(id)
+    } else if (op === 0x58 && p + 16 <= body.length) {
+      const range = f(p) * lightMultiplier(f(p + 8))
+      const theta = f(p + 4) * lightMultiplier(f(p + 12))
+      pointLight = { range, quad: theta > 0 ? 1 / theta : 0 }
     } else if (op === 0x1e && p + 1 <= body.length) {
       blend = body[p]
     } else if (op in TOD_CHANNELS && p + 8 <= body.length) {
@@ -309,7 +323,8 @@ export function parseModelSpawn(body: Uint8Array): RawModelSpawn | null {
       if (id) tracks[KEYFRAME_CHANNELS[op as keyof typeof KEYFRAME_CHANNELS]] = id
     }
   }
-  if ((linked !== LINKED_MODEL && linked !== LINKED_SPRITE && linked !== LINKED_FLARE) || !model) return null
+  const isLight = linked === LINKED_LIGHT
+  if (!isLight && ((linked !== LINKED_MODEL && linked !== LINKED_SPRITE && linked !== LINKED_FLARE) || !model)) return null
 
   // Expiration handlers (section 4, header 0x7C).
   for (const { op, p } of records(view, body, 0x7c)) {
@@ -349,12 +364,12 @@ export function parseModelSpawn(body: Uint8Array): RawModelSpawn | null {
     model, position, rotation, scale, tint, uvScroll, life, tracks, blend, todTracks, spin,
     attach: view.getUint16(0, true) & 0xf,
     followCamera: (flags & FLAG_FOLLOW_CAMERA) !== 0,
-    link: linked === LINKED_SPRITE ? 'sprite' : linked === LINKED_FLARE ? 'flare' : 'mesh',
+    link: isLight ? 'light' : linked === LINKED_SPRITE ? 'sprite' : linked === LINKED_FLARE ? 'flare' : 'mesh',
     billboard: flags & 0xffff & ~FLAG_FOLLOW_CAMERA,
     renderState: flags >>> 16,
     emission, spread, velocity, velocityVariance, accel, moves, rotationVariance, scaleVariance,
     scaleVelocity: scales ? scaleVelocity : [0, 0, 0],
-    emitRange, flipbook, screenFlash, children, drawDistance,
+    emitRange, flipbook, screenFlash, children, drawDistance, pointLight,
   }
 }
 

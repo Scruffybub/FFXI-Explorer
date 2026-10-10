@@ -291,6 +291,15 @@ export interface SceneSettings {
   effectRange: number
 
   /**
+   * Dynamic lighting: brightness of the zone's lamps, which Dynamic lights as
+   * real point lights (the nearest lampCount). 1 = the default, 0 = off.
+   */
+  lampBrightness: number
+
+  /** Dynamic lighting: how many of the nearest lamps are real lights. */
+  lampCount: number
+
+  /**
    * With Zone weather: draw the sun and moon the game's way — the sun as the
    * weather's lens-flare sheet (core, starburst, halo and the flare chain),
    * the moon with its rainbow halo — or, off, as the viewer's plain discs.
@@ -477,6 +486,8 @@ export const DEFAULT_SCENE: SceneSettings = {
   zoneWeather: false,
   zoneEffects: false,
   effectRange: 0,
+  lampBrightness: 1,
+  lampCount: 12,
   gameSunMoon: true,
   weatherFogScale: 1,
   zoneTransparency: true,

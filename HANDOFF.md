@@ -294,6 +294,41 @@ Particle.getPointLightParams, ZoneDefParser, ZoneDrawer, ShaderConstants):
 - Shading per light: 0 beyond range, else colour x vertex colour x N.L /
   (quad x d^2), clamped — added to the terrain lighting.
 
+**Lamp light, built 2026-10-10** (with Zone effects; `lib/zoneLamps.ts`).
+GeneratorParser reads link 0x47 as `'light'` with `pointLight {range, quad}`;
+ZoneFile keeps light spawns though they have no model; MzbParser reads each
+block's light table and every record's four slots into `instance.lights`
+(names). ZoneViewer builds a float texture (two texels per light: world
+position + range, colour (tint/255 x 2) + quad) and an instanced `aLamps`
+(four 1-based indices) on every zone geometry — zeros by default, since a
+missing attribute reads (0,0,0,1) and would name light 0. LAMP_VERTEX
+(per vertex, world space, outward normal = the negated attribute as for
+FFXI_LIGHT_VERTEX) sums clamp(N.L x colour / (quad d^2)). It joins: the
+game's own light in the 'ffxi' variant (vColor x (vFfxiL + vLampL));
+emissive in Dynamic and the game-sun Lambert (so it lights at night); and in
+plain Original it is added as texel x vColor x 2 x lamp, using
+`sampledDiffuseColor` — the material colour is darkened for night first, and
+both a multiply and the darkened texel left the lamps invisible. Measured:
+Castle Zvahl Keep 156 lights, 2,610 placements naming them; Bastok Markets'
+fountain has **no** lights (its lamps glow by sprite only — the first test
+spot showed nothing for that reason). Diagnostics: `?lampdebug=1` paints the
+lamp light alone, `?nolamps=1` keeps the effects without their light.
+**Dynamic gets real lamp lights** (Ryan: in Dynamic the per-vertex lamp light
+"looks the same as Original"). `components/LampLights.tsx`: a fixed pool of
+12 three.js PointLights (fixed so lit shaders never recompile) re-aimed every
+6 frames at the lamps nearest the player (orbit target, else camera), within
+160 units, fading over the last third; colour = tint/255 x 2 split into hue
+and strength; distance = game range x 2.5, decay 2; intensity 40 cd per unit
+x Scene -> Lamp brightness (0-3, Dynamic only). The per-vertex lamp term is
+skipped for MeshStandardMaterial (`lit`) so lamps are not counted twice; the
+game-sun Lambert and Original keep it. Cost, Castle Zvahl Keep, Moonlit Night,
+effects at Game range: 110 -> 84 fps with the 12 lights (`?nolamplights=1`
+times without them; `?lampint=<k>` overrides the intensity). No lamp shadows.
+Scene -> Lamp lights (4/8/12/16/24/32, setting `lampCount`, default 12) sets
+the pool size; a change rebuilds the pool and recompiles the lit shaders (a
+brief pause). Measured 2026-10-10, same view: off 99, 4 = 92, 12 = 75,
+24 = 60, 32 = 52 fps.
+
 **Weather sweep, 2026-10-04.** `scripts/weather-sweep.cjs <outDir> [k/n] [ids]`
 loads every zone with Zone weather on, steps each weather in place
 (`__setScene`, census only), and records per weather: sky layers by kind and

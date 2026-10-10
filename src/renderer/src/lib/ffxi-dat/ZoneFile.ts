@@ -362,6 +362,7 @@ export function parseZoneFile(
             instances.push({
               meshIndex: mapping.startIdx + m,
               transform: inst.transform,
+              ...(inst.lights.length && { lights: inst.lights }),
             })
           }
         }
@@ -572,6 +573,15 @@ export function parseZoneFile(
   // measured (South Gustaberg, Lufaise, Misareaux).
   const spawns: GeneratorSpawn[] = []
   let unresolvedSpawns = 0
+  const lightCurves = (dir: string, raw: { tracks: Partial<Record<string, string>> }) => {
+    const out: GeneratorSpawn['curves'] = {}
+    for (const ch of ['alpha', 'r', 'g', 'b'] as const) {
+      const id = raw.tracks[ch]
+      const curve = id ? findCurve(dir, id) : undefined
+      if (curve) out[ch] = curve
+    }
+    return out
+  }
   for (const block of blocks.filter(b => b.type === BLOCK_GENERATOR)) {
     const start = block.dataOffset + BLOCK_PADDING
     const len = block.dataLength - BLOCK_PADDING
@@ -581,6 +591,13 @@ export function parseZoneFile(
     // Look the model up in the generator's own directory first, then each
     // parent in turn, and take the nearest match. Matching by name alone
     // stamped a coastline terrain piece across the Gustaberg sea.
+    // A point light has no model: it lights the zone objects naming it.
+    if (raw.link === 'light') {
+      if (raw.pointLight) {
+        spawns.push({ generator: block.name.trim(), dir: block.dir, prefabIndices: [], ...raw, curves: lightCurves(block.dir, raw), todCurves: {} })
+      }
+      continue
+    }
     let prefabIndices: number[] = []
     const parts = block.dir ? block.dir.split('/') : []
     for (let depth = parts.length; depth >= 0 && prefabIndices.length === 0; depth--) {

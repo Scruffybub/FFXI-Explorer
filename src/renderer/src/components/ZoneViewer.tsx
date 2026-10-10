@@ -21,6 +21,8 @@ import {
 import { applySpawnStages } from '../lib/spawnStages'
 import { SkyLayers } from './SkyLayers'
 import { WeatherParticles, ZoneEffects } from './WeatherParticles'
+import { LampLights } from './LampLights'
+import { zoneLamps, LAMP_VERTEX_PARS, LAMP_FRAGMENT_PARS, LAMP_VERTEX, buildLampTexture, lampSlots } from '../lib/zoneLamps'
 import { LensFlare } from './LensFlare'
 import type {
   LightingSettings, PointLightSettings, PostSettings, SceneSettings, SurfaceInfo, ToneMappingMode,
@@ -148,8 +150,17 @@ function patchZoneShader(
   // leaves anything above its base height at 6% fog, so hills and cliffs stood
   // clear of a storm that Original buried in haze (Ryan, 2026-10-04).
   const linearFog = ffxi || gameFog
+  // Lamp light: in the game's own light (ffxi); as extra emitted light where
+  // three lights the material (Dynamic, game-sun Lambert), so lamps still
+  // light the ground at night; else added to the baked colour as the game
+  // adds it to its terrain light (texel x vertex colour x 2 x lamp) — a
+  // multiply could not lift a surface the night had made black.
+  // Dynamic (lit) gets real point lights instead (LampLights).
+  const lampEmissive = !ffxi && !lit && 'emissive' in material
+  const lampAdd = !ffxi && !lit && !lampEmissive
   material.onBeforeCompile = (shader) => {
     if (ffxi) Object.assign(shader.uniforms, ffxiLight)
+    Object.assign(shader.uniforms, zoneLamps)
     shader.uniforms.fogHeightBase = uniforms.fogHeightBase
     shader.uniforms.fogHeightRange = uniforms.fogHeightRange
     shader.uniforms.bakedInfluence = uniforms.bakedInfluence
@@ -158,6 +169,7 @@ function patchZoneShader(
       '#include <fog_pars_vertex>',
       `#include <fog_pars_vertex>
       varying float vWorldY;
+      ${LAMP_VERTEX_PARS}
       ${ffxi ? FFXI_LIGHT_PARS : ''}`
     )
     shader.vertexShader = shader.vertexShader.replace(
@@ -169,6 +181,7 @@ function patchZoneShader(
         vec4 hfWorldPos = modelMatrix * vec4(position, 1.0);
       #endif
       vWorldY = hfWorldPos.y;
+      ${LAMP_VERTEX}
       ${ffxi ? FFXI_LIGHT_VERTEX : ''}`
     )
     shader.fragmentShader = shader.fragmentShader.replace(
@@ -177,6 +190,7 @@ function patchZoneShader(
       varying float vWorldY;
       uniform float fogHeightBase;
       uniform float fogHeightRange;
+      ${LAMP_FRAGMENT_PARS}
       ${ffxi ? FFXI_LIGHT_PARS + SRGB_GLSL : ''}`
     )
 
@@ -210,21 +224,41 @@ function patchZoneShader(
         // texel, saturated — in gamma, as the game multiplies, so the texel is
         // encoded for the multiply and the result decoded back.
         ? `#if defined( USE_COLOR_ALPHA ) || defined( USE_COLOR )
-            vec3 ffLit = clamp( vColor.rgb * vFfxiL, 0.0, 1.0 );
+            vec3 ffLit = clamp( vColor.rgb * ( vFfxiL + vLampL ), 0.0, 1.0 );
           #else
-            vec3 ffLit = clamp( 0.5 * vFfxiL, 0.0, 1.0 );
+            vec3 ffLit = clamp( 0.5 * ( vFfxiL + vLampL ), 0.0, 1.0 );
           #endif
           diffuseColor.rgb = gbDecode( clamp( 2.0 * gbEncode( diffuseColor.rgb ) * ffLit, 0.0, 1.0 ) );
           #if defined( USE_COLOR_ALPHA )
             ${keepAlpha ? 'diffuseColor.a *= vColor.a;' : ''}
           #endif`
-        : `#if defined( USE_COLOR_ALPHA )
+        : `// The texel itself, before the night's darkening of the material colour:
+      // lamps light it at full strength, as the game adds them to its terrain light.
+      #ifdef USE_MAP
+        vec3 lampTexel = sampledDiffuseColor.rgb;
+      #else
+        vec3 lampTexel = vec3( 1.0 );
+      #endif
+      #if defined( USE_COLOR_ALPHA )
         diffuseColor.rgb *= pow( max( vColor.rgb, vec3( 0.0 ) ), vec3( bakedInfluence ) );
         ${keepAlpha ? 'diffuseColor.a *= vColor.a;' : ''}
       #elif defined( USE_COLOR )
         diffuseColor.rgb *= pow( max( vColor.rgb, vec3( 0.0 ) ), vec3( bakedInfluence ) );
-      #endif`
+      #endif
+      ${lampAdd ? `#if defined( USE_COLOR_ALPHA ) || defined( USE_COLOR )
+        diffuseColor.rgb += lampTexel * vColor.rgb * 2.0 * vLampL;
+      #else
+        diffuseColor.rgb += lampTexel * vLampL;
+      #endif` : ''}`
     )
+
+    if (lampEmissive) {
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <emissivemap_fragment>',
+        `#include <emissivemap_fragment>
+        totalEmissiveRadiance += diffuseColor.rgb * vLampL;`
+      )
+    }
 
     // DXT3 alpha fix: boost alpha for any pixel that still has visible colour,
     // so only near-black transparent pixels get discarded. This works on
@@ -244,6 +278,12 @@ function patchZoneShader(
         '#include <premultiplied_alpha_fragment>',
         `#include <premultiplied_alpha_fragment>
         gl_FragColor.a = 1.0;`
+      )
+    }
+    if (LAMP_DEBUG) {
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <dithering_fragment>',
+        '#include <dithering_fragment>\n  gl_FragColor = vec4(vLampL, 1.0);'
       )
     }
     shader.fragmentShader = shader.fragmentShader.replace(
@@ -271,6 +311,14 @@ function patchZoneShader(
 const SKIP_UNREFERENCED =
   typeof window !== 'undefined' &&
   new URLSearchParams(window.location.search).has('nounref')
+/** Diagnostic ?nolamplights=1: Dynamic without its lamp point lights (for timing). */
+const NO_LAMP_LIGHTS =
+  typeof window !== 'undefined' &&
+  new URLSearchParams(window.location.search).has('nolamplights')
+/** Diagnostic ?lampdebug=1: zone meshes show only their lamp light. */
+const LAMP_DEBUG =
+  typeof window !== 'undefined' &&
+  new URLSearchParams(window.location.search).has('lampdebug')
 /** Diagnostic: draw generator meshes at the zone origin as before (see "misplaced"). */
 const KEEP_GEN_UNREF =
   typeof window !== 'undefined' &&
@@ -3465,16 +3513,29 @@ export default function ZoneViewer({
       }
     }
 
+    // The zone's point lights, and which of them each placement names.
+    const lamps = buildLampTexture(zoneData)
+    zoneLamps.uLampTex.value = lamps.tex
+    if (lamps.count) console.log(`[LAMPS] ${lamps.count} point lights`)
     const normalGroups = new Map<number, THREE.Matrix4[]>()
     const mirroredGroups = new Map<number, THREE.Matrix4[]>()
+    const groupLamps = new Map<THREE.Matrix4[], number[]>()
     for (const inst of zoneData.instances) {
       if (!geoMap.has(inst.meshIndex)) continue
       const matrix = new THREE.Matrix4().fromArray(inst.transform)
       const target = matrix.determinant() < 0 ? mirroredGroups : normalGroups
       let arr = target.get(inst.meshIndex)
-      if (!arr) { arr = []; target.set(inst.meshIndex, arr) }
+      if (!arr) { arr = []; target.set(inst.meshIndex, arr); groupLamps.set(arr, []) }
       arr.push(matrix)
+      groupLamps.get(arr)!.push(...lampSlots(inst.lights, lamps.index))
     }
+    // Every zone geometry carries aLamps, zeros unless a group sets its own:
+    // a missing attribute reads (0, 0, 0, 1), which would name light 0.
+    for (const g of geoMap.values()) {
+      g.setAttribute('aLamps', new THREE.InstancedBufferAttribute(new Float32Array(4), 4))
+    }
+    const lampAttr = (matrices: THREE.Matrix4[]) =>
+      new THREE.InstancedBufferAttribute(new Float32Array(groupLamps.get(matrices) ?? new Array(matrices.length * 4).fill(0)), 4)
 
     function cloneWithFlippedWinding(src: THREE.BufferGeometry): THREE.BufferGeometry {
       const clone = src.clone()
@@ -3494,6 +3555,7 @@ export default function ZoneViewer({
     for (const [meshIdx, matrices] of normalGroups) {
       const geo = geoMap.get(meshIdx); const mat = matMap.get(meshIdx)
       if (!geo || !mat) continue
+      geo.setAttribute('aLamps', lampAttr(matrices))
       const mesh = new THREE.InstancedMesh(geo, mat, matrices.length)
       mesh.userData.prefabIdx = meshIdx
       mesh.frustumCulled = false
@@ -3506,6 +3568,7 @@ export default function ZoneViewer({
       const geo = geoMap.get(meshIdx); const mat = matMap.get(meshIdx)
       if (!geo || !mat) continue
       const flippedGeo = cloneWithFlippedWinding(geo)
+      flippedGeo.setAttribute('aLamps', lampAttr(matrices))
       geometries.push(flippedGeo)
       const mesh = new THREE.InstancedMesh(flippedGeo, mat, matrices.length)
       mesh.userData.prefabIdx = meshIdx
@@ -4069,6 +4132,13 @@ export default function ZoneViewer({
     }
   }, [litMaterials, lighting.roughness, lighting.metalness])
 
+  // Lamp light follows Scene -> Zone effects: a uniform, so no rebuild.
+  useEffect(() => {
+    // Diagnostic ?nolamps=1: the effects without their light.
+    const off = new URLSearchParams(window.location.search).has('nolamps')
+    zoneLamps.uLampOn.value = scene.zoneEffects && !scene.mapView && !off ? 1 : 0
+  }, [scene.zoneEffects, scene.mapView])
+
   // Exactly one weather state is visible at a time, switched by a per-mesh flag
   // so changing it costs nothing. Meshes with no weatherState tag are ordinary
   // zone geometry and are left alone.
@@ -4409,6 +4479,7 @@ export default function ZoneViewer({
 
       {/* Point lights only affect lit materials — the unlit ones ignore them. */}
       {lit && <PointLights settings={pointLights} selectedId={selectedLightId} />}
+      {lit && scene.zoneEffects && !scene.mapView && !NO_LAMP_LIGHTS && <LampLights zone={zoneData} brightness={scene.lampBrightness} count={scene.lampCount} />}
       <WeatherFollow meshes={instancedMeshes} enabled={scene.weatherFollowsCamera} cameraMode={scene.cameraMode} />
       {lit && onPlaceLight && (
         <LightPlacer meshes={instancedMeshes} active={placingLight} onPlace={onPlaceLight} />

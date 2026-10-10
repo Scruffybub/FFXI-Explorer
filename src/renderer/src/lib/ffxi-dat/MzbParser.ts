@@ -26,6 +26,29 @@
 export interface MzbInstance {
   name: string          // id[16] — MMB prefab name for matching
   transform: number[]   // 4x4 matrix (16 floats, column-major for Three.js)
+  /**
+   * Point-light generators that light this object: four 1-based indices at
+   * record +0x54 (0 = none) into the block's light table, whose offset is in
+   * header +0x18 — 4-character names, each followed by 0x48 bytes the game
+   * fills at run time; a zero name ends it (xim ZoneDefParser, format only).
+   */
+  lights: string[]
+}
+
+/** The block's point-light table: generator names, in index order. */
+function readLightTable(view: DataView, data: Uint8Array): string[] {
+  const at = view.getUint32(0x18, true)
+  const out: string[] = []
+  if (at <= 0 || at >= data.length) return out
+  for (let i = 0; i < 256; i++) {
+    const p = at + i * 0x4c
+    if (p + 4 > data.length) break
+    if (view.getUint32(p, true) === 0) break
+    let end = p
+    while (end < p + 4 && data[end] !== 0) end++
+    out.push(String.fromCharCode(...data.subarray(p, end)).trim())
+  }
+  return out
 }
 
 const SMZB_HEADER_SIZE = 32
@@ -47,6 +70,7 @@ export function parseMzbBlock(data: Uint8Array): MzbInstance[] {
 
   const instances: MzbInstance[] = []
   const recordsStart = SMZB_HEADER_SIZE
+  const lightTable = readLightTable(view, data)
 
   for (let i = 0; i < totalRecord100; i++) {
     const offset = recordsStart + i * SMZB_BLOCK100_SIZE
@@ -87,7 +111,13 @@ export function parseMzbBlock(data: Uint8Array): MzbInstance[] {
       fTransX,       fTransY,       fTransZ,        1,
     ]
 
-    instances.push({ name, transform })
+    const lights: string[] = []
+    for (let k = 0; k < 4; k++) {
+      const idx = view.getUint32(offset + 0x54 + k * 4, true)
+      if (idx > 0 && idx <= lightTable.length) lights.push(lightTable[idx - 1])
+    }
+
+    instances.push({ name, transform, lights })
   }
 
   return instances
