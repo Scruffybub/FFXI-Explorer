@@ -7,8 +7,8 @@ Written 2026-08-03; substantially revised 2026-08-08, 2026-08-15 and 2026-08-17.
 
 ## 0. Start here — state of play
 
-Last worked **2026-08-17**. Everything is committed and pushed, and
-**v0.1.4 is published** at
+Last worked **2026-10-09**. Everything is committed and pushed to main, and
+**v0.1.5 is published** (zone weather, generator water, the transparency rule) at
 <https://github.com/Scruffybub/FFXI-Explorer/releases>. The repository is
 **public** as of 2026-08-16.
 
