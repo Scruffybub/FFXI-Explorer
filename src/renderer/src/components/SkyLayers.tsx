@@ -190,7 +190,8 @@ function buildLayers(zone: ParsedZone, state: string, radius: number, gameSunMoo
   const groupRim = (g: GeneratorSpawn) => groupRims.get(g.dir + '|' + g.model) ?? rimOf(g)
   const hasSunFlare = gameSunMoon && (zone.spawns ?? []).some(s =>
     s.link === 'flare' && s.attach === 0xe && new RegExp(`(^|/)weat/${state}(/|$)`).test(s.dir))
-  for (const sp of zone.spawns ?? []) {
+  const spawnCount = (zone.spawns ?? []).length
+  for (const [si, sp] of (zone.spawns ?? []).entries()) {
     const isChild = childNames.has(sp.dir + '|' + sp.generator) && !sp.emission.autoRun
     if (!isChild && !inState.test(sp.dir) && !(inSub.test(sp.dir) && sp.emission.autoRun)) continue
     if (sp.link !== 'mesh') continue // WeatherParticles and LensFlare draw these
@@ -364,6 +365,12 @@ function buildLayers(zone: ParsedZone, state: string, radius: number, gameSunMoo
       // Flashes and bolts born on a spread go after the canopies: they sit in
       // the cloud layer and light it, and drawn first the clouds hid them.
       mesh.renderOrder = isStar ? -40 : kind === 'world' || kind === 'child' ? -10 : kind === 'camera' ? (sp.spread ? -19 : -20) : -30
+      // Within a tier, layers that ride the camera draw in file order. three
+      // otherwise sorts them by distance, which means nothing for a sky that
+      // follows the camera, and flips with the view: Riverne's Thunder drew its
+      // subtractive map3 last when level and first when tilted 10 degrees up,
+      // so the storm went light whenever you looked up (Ryan, 2026-10-09).
+      if (kind !== 'world' && kind !== 'child') mesh.renderOrder += (si / (spawnCount + 1)) * 0.5
 
       const scale = new THREE.Vector3(...sp.scale)
       let posScale = 1

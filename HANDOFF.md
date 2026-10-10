@@ -293,6 +293,13 @@ weather; two shards take ~1.5 h for 286 zones. Fixed from it:
   or, when no folder has it, leave the piece out (Nyzul Isle drew flat teal
   blocks; Chocobo Circuit's storm loses its dust canopy). Inferred, not
   checked against retail.
+- **Sky draw order flipped with the camera** (Ryan, 2026-10-09: Riverne's
+  Thunder dark when level, light when looking up). three sorts transparent
+  meshes by distance; for camera-riding layers that is meaningless and it
+  reversed map1..map3 between pitch 0 and 10. Camera, star, sun and moon
+  layers now take a fractional renderOrder in file order (`si / (n+1) * 0.5`
+  within their tier); world and child layers still sort by distance. Order
+  logged at seven pitches: constant. Six zones' overviews unchanged.
 Not fixed: Altepa's `ka01` (heat, blank texture, alpha curve, fast spin) is
 probably a screen-grab shimmer; it draws as a faint colour veil. Altepa's heat
 sky is mint green from its own records — not judged.
