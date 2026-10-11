@@ -599,6 +599,11 @@ export function parseZoneFile(
       }
       continue
     }
+    // A distortion has no model either: it bends the screen behind it.
+    if (raw.link === 'distortion') {
+      spawns.push({ generator: block.name.trim(), dir: block.dir, prefabIndices: [], ...raw, curves: lightCurves(block.dir, raw), todCurves: {} })
+      continue
+    }
     let prefabIndices: number[] = []
     const parts = block.dir ? block.dir.split('/') : []
     for (let depth = parts.length; depth >= 0 && prefabIndices.length === 0; depth--) {

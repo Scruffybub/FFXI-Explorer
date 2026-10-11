@@ -6,6 +6,7 @@ import type { GeneratorSpawn } from '../lib/ffxi-dat/types'
 import { sampleKeyFrames } from '../lib/ffxi-dat/GeneratorParser'
 import { applySpawnStages, setSubtractive, untexturedTexel } from '../lib/spawnStages'
 import { GAMMA_BLEND_LAYER } from '../lib/GammaBlendPass'
+import { HAZE_LAYER, HAZE_FRAGMENT, HAZE_PARS, hazeUniforms } from '../lib/HazePass'
 import { spreadOffset } from './SkyLayers'
 import { childEvents, pruneChildEvents } from '../lib/weatherEvents'
 
@@ -55,7 +56,8 @@ const MIST_STRENGTH = (() => {
   const v = typeof window !== 'undefined' ? Number(new URLSearchParams(window.location.search).get('wxmist')) : NaN
   return Number.isFinite(v) && v > 0 ? v : 0.2
 })()
-const isMist = (sp: GeneratorSpawn) => (sp.billboard & 1) !== 0 && Math.max(...sp.scale.map(Math.abs)) >= 2
+const isMist = (sp: GeneratorSpawn) =>
+  sp.link === 'sprite' && (sp.billboard & 1) !== 0 && Math.max(...sp.scale.map(Math.abs)) >= 2
 const FLIP = new THREE.Matrix4().makeRotationX(Math.PI)
 
 const decode = (c: number) => (c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4))
@@ -231,6 +233,49 @@ function particleMaterial(sp: GeneratorSpawn, map: THREE.Texture | null, isMesh:
 }
 
 /**
+ * A distortion generator (linked type 0x22) carries no mesh: Altepa's heat
+ * dis1 throws one off near the camera every few frames, each about 12 x 7.
+ * Each is drawn as a soft round patch, a unit across, full strength in the
+ * middle and none at the rim (vertex alpha on the 0x80 = identity scale).
+ */
+function hazePatch(pos: number[], uv: number[], col: number[], idx: number[]): void {
+  const N = 8, base = pos.length / 3
+  for (let j = 0; j <= N; j++) for (let i = 0; i <= N; i++) {
+    const x = i / N - 0.5, y = j / N - 0.5
+    const r = Math.min(1, Math.hypot(x, y) * 2)
+    pos.push(x, y, 0)
+    uv.push(i / N, j / N)
+    col.push(1, 1, 1, (1 - r * r) * (1 - r * r))
+  }
+  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+    const a = base + j * (N + 1) + i, b = a + 1, c = a + N + 1, d = c + 1
+    idx.push(a, c, b, b, c, d)
+  }
+}
+
+/**
+ * Render state 0x10 (xim hazeEffect): the screen behind, bent — heat shimmer
+ * over Lufaise's fires (fd01..03). The particle works out its alpha as usual;
+ * HazePass turns it into a shift of the picture behind (HAZE_FRAGMENT). Drawn
+ * plain it was an additive grey blob.
+ */
+function hazeMaterial(mat: THREE.MeshBasicMaterial): THREE.MeshBasicMaterial {
+  mat.blending = THREE.NoBlending
+  mat.depthWrite = false
+  mat.fog = false
+  const base = mat.onBeforeCompile
+  mat.onBeforeCompile = (shader, renderer) => {
+    base(shader, renderer)
+    Object.assign(shader.uniforms, hazeUniforms)
+    shader.fragmentShader = shader.fragmentShader
+      .replace('void main() {', `${HAZE_PARS}\nvoid main() {`)
+      .replace('#include <dithering_fragment>', `#include <dithering_fragment>\n${HAZE_FRAGMENT}`)
+  }
+  mat.customProgramCacheKey = () => 'haze-particles'
+  return mat
+}
+
+/**
  * `meshPick` also takes the generators that link a mesh (lamp glows, light
  * cones, fountain streams): every submesh of the MMB, one material each,
  * sharing the particles. A mesh with no life lives forever — the game emits
@@ -246,12 +291,9 @@ function buildSystems(
   const groups = new Map<string, GeneratorSpawn[]>()
   for (const sp of zone.spawns ?? []) {
     const isMesh = sp.link === 'mesh' && !!meshPick?.(sp)
-    if (!isMesh && (sp.link !== 'sprite' || sp.life <= 0)) continue
+    const isDistortion = sp.link === 'distortion' && sp.life > 0
+    if (!isMesh && !isDistortion && (sp.link !== 'sprite' || sp.life <= 0)) continue
     if (!pick(sp)) continue
-    // Render state 0x10 (xim hazeEffect): the screen behind, bent — heat
-    // shimmer over Lufaise's fires (fd03). Not reproduced; drawn plain it is
-    // an additive grey blob, so it is left out.
-    if (sp.renderState & 0x10) continue
     // No alpha and no curve to raise it: never seen.
     if (isMesh && sp.tint[3] === 0 && !sp.curves.alpha) continue
     const key = batch
@@ -268,6 +310,7 @@ function buildSystems(
   for (const group of groups.values()) {
     const sp = group[0]
     const isMesh = sp.link === 'mesh'
+    const haze = sp.link === 'distortion' || (sp.renderState & 0x10) !== 0
     const pos: number[] = [], uv: number[] = [], col: number[] = [], idx: number[] = []
     const geo = new THREE.BufferGeometry()
     const maps: THREE.Texture[] = []
@@ -277,8 +320,9 @@ function buildSystems(
     for (const pi of isMesh ? sp.prefabIndices : sp.prefabIndices.slice(0, 1)) {
       const p = zone.prefabs[pi]
       if (!p) continue
+      // Haze needs only its strength, so a haze mesh may lack a texture (Altepa's ka01).
       const tex = isMesh && p.untextured ? undefined : zone.textures[p.materialIndex]
-      if (!tex && !(isMesh && p.untextured)) continue
+      if (!tex && !(isMesh && (p.untextured || haze))) continue
 
       // A flipbook draws one frame at a time: frame 0's quad, moved across the
       // sheet per particle. The shared snowflake `hit3` is sixteen frames of a
@@ -313,12 +357,17 @@ function buildSystems(
       if (map) maps.push(map)
       mats.push(particleMaterial(sp, map, isMesh))
     }
+    if (sp.link === 'distortion') {
+      hazePatch(pos, uv, col, idx)
+      mats.push(particleMaterial(sp, null, false))
+    }
     if (!mats.length) continue
     geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
     geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2))
     geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 4))
     geo.setIndex(idx)
     if (mats.length === 1) geo.clearGroups()
+    if (haze) mats.forEach(hazeMaterial)
 
     const emitters: Emitter[] = []
     let capacity = 0
@@ -337,7 +386,7 @@ function buildSystems(
     geo.setAttribute('aUvOffset', uvOffset)
     const mesh = new THREE.InstancedMesh(geo, mats.length === 1 ? mats[0] : mats, capacity)
     mesh.frustumCulled = false
-    mesh.layers.set(GAMMA_BLEND_LAYER)
+    mesh.layers.set(haze ? HAZE_LAYER : GAMMA_BLEND_LAYER)
     mesh.renderOrder = 5
     mesh.count = 0
 
@@ -385,7 +434,8 @@ function buildFlashQuad(): { mesh: THREE.Mesh; tint: THREE.Vector4 } {
 
 export function WeatherParticles({ zone, state }: { zone: ParsedZone; state: string }) {
   const systems = useMemo(() => {
-    const s = buildSystems(zone, weatherPick(state), WEATHER_EMIT_SCALE)
+    // Haze meshes too (Altepa's heat ka01): the sky leaves them to HazePass.
+    const s = buildSystems(zone, weatherPick(state), WEATHER_EMIT_SCALE, sp => (sp.renderState & 0x10) !== 0)
     if (s.length) {
       console.log(`[WXP] ${s.length} weather particle systems for ${state}: ` +
         s.map(x => `${x.spawn.generator}(${x.emitters[0].perEmission}/${x.spawn.emission.every}f, ${x.capacity} max)`).join(' '))

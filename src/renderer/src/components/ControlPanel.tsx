@@ -1001,7 +1001,7 @@ export default function ControlPanel({
           label="Zone effects (beta)"
           checked={scene.zoneEffects}
           onChange={v => onScene({ zoneEffects: v })}
-          info="Bring the zone's own effects to life: lamp and torch flames, fires, sparkles, smoke and spray, run from the effect generators FFXI places in each zone. Like the game, an effect only plays near you — orbiting, near the point the camera circles. Beta: this first stage draws the particle effects; glows, rings and other shaped effects come next."
+          info="Bring the zone's own effects to life: lamp and torch flames, fires, sparkles, smoke and spray, lamp glows and light pools, lit windows and heat shimmer, run from the effect generators FFXI places in each zone. With it, the game's lamps light the walls and floors around them. Beta: effects the game triggers (footsteps, doors, hits) are not shown."
         />
         {scene.zoneEffects && (
           <Slider
@@ -1028,6 +1028,14 @@ export default function ControlPanel({
             format={i => String(LAMP_COUNTS[i] ?? '')}
             onChange={i => onScene({ lampCount: LAMP_COUNTS[i] ?? 12 })}
             info="How many of the nearest lamps Dynamic lighting turns into real lights. More lights the room further out, but each one costs frame rate: in Castle Zvahl, 12 lights cost about a quarter of it. The scene pauses briefly when this changes while the lighting is rebuilt."
+          />
+        )}
+        {(scene.zoneEffects || scene.zoneWeather) && (
+          <Slider
+            label="Heat shimmer" value={scene.hazeStrength} min={0} max={10} step={0.5}
+            format={v => (v === 0 ? 'Off' : v.toFixed(1))}
+            onChange={v => onScene({ hazeStrength: v })}
+            info="How strongly heat bends the view: the desert heat in Zone weather's heat and dry weathers, and the shimmer over fires, warps and magic circles with Zone effects. The number is how far, in pixels, the picture shifts where the heat is strongest; 0 turns it off. Needs post-processing on."
           />
         )}
         <Toggle

@@ -345,6 +345,31 @@ curves — flicker is the surf), the Feretory / Abdhaljs Isle shore waves.
 Left: Beaucedine Glacier's entrance draws a flat grey slab with Generator
 water on (with or without Zone effects) — Generator water's own.
 
+**Heat shimmer (2026-10-11).** Two things bend the picture in FFXI (xim, format
+and behaviour reference only): render state **0x10** (hazeEffect) on any
+effect, and generators linked to type **0x22** (Distortion), which the parser
+used to drop — now `link: 'distortion'`, no model, kept like lights. A census
+of 285 zones: 0x22 is in nearly every zone as fser/fses (footsteps and hits,
+not auto-run — ignored); weather heat in ~25 zones (both Altepas, Rabao,
+Valley of Sorrows, Yhoator, Yuhtunga, Selbina, Valkurm, Rolanberry, Ifrit's
+Cauldron, Chocobo Circuit…: `ka01`, a D3M dome on the camera with haze, and
+`dis1`, a distortion thrown off every 3-7 frames 15 units round the camera);
+zone haze in Dynamis (magic circles), Chamber of Oracles (warps), Carpenters'
+Landing, Empyreal Paradox, Lufaise's fires. `lib/HazePass.ts`: after
+GammaBlendPass the frame is copied aside and the haze layer (HAZE_LAYER 6)
+drawn into it, each pixel showing the copy shifted by two crossing waves times
+the effect's alpha (HAZE_FRAGMENT; our own maths — xim's shader is not in the
+local reference files). Drawn into the frame, it keeps the depth buffer.
+Distortions have no mesh: each is a soft round patch (`hazePatch`), full in the
+middle, none at the rim. `ka01` lacks a texture; haze meshes are let through
+without one. SkyLayers no longer draws ka01 (it was a faint colour veil); the
+weather's ParticleField takes haze meshes. The rain-mist rule (big billboards
+at 20%) is sprites only, or the heat would be cut to a fifth. Strength:
+Scene -> Heat shimmer (`scene.hazeStrength`, pixels at full alpha, 0-10, default 2 — Ryan's pick from the slider after 8 and 4 read too strong) (`?hazepx=` overrides; `?hazedebug=1` paints the
+strength red; `?nohaze=1` skips the pass). Altepa's live values: dis1 alpha
+0.1-0.46, ka01 0.1-0.23, before the x2 stage. Needs post-processing on, like
+Generator water's blend; without it haze is not drawn.
+
 **Batching**: Zone effects draws every generator sharing link, model, blend,
 flags and tint as one InstancedMesh, with an emitter per generator (own clock,
 own run of slots, `owner` per slot). Everywhere, fps off / unbatched / batched:

@@ -66,7 +66,7 @@ export interface RawModelSpawn {
    * What the setup links: an MMB or D3M mesh (0x0B), a 0x21 sprite (0x0E), or
    * a 0x21 sheet drawn as a screen-space lens flare (0x39).
    */
-  link: 'mesh' | 'sprite' | 'flare' | 'light'
+  link: 'mesh' | 'sprite' | 'flare' | 'light' | 'distortion'
   /** Setup flags' billboard bits (0x1 faces the camera; 0x4 is followCamera). */
   billboard: number
   /**
@@ -193,6 +193,8 @@ const LINKED_MODEL = 0x0b
 const LINKED_SPRITE = 0x0e
 const LINKED_FLARE = 0x39
 const LINKED_LIGHT = 0x47
+/** A screen distortion (xim LinkedDataType.Distortion): bends what is behind it. */
+const LINKED_DISTORTION = 0x22
 /** xim's mapping for 0x58's multipliers: 2^x from 0 up, 1 + x down to -1, else 0. */
 const lightMultiplier = (x: number) => (x >= 0 ? Math.pow(2, x) : x >= -1 ? 1 + x : 0)
 const FLAG_FOLLOW_CAMERA = 0x4
@@ -322,7 +324,8 @@ export function parseModelSpawn(body: Uint8Array): RawModelSpawn | null {
     }
   }
   const isLight = linked === LINKED_LIGHT
-  if (!isLight && ((linked !== LINKED_MODEL && linked !== LINKED_SPRITE && linked !== LINKED_FLARE) || !model)) return null
+  const isDistortion = linked === LINKED_DISTORTION
+  if (!isLight && !isDistortion && ((linked !== LINKED_MODEL && linked !== LINKED_SPRITE && linked !== LINKED_FLARE) || !model)) return null
 
   // Expiration handlers (section 4, header 0x7C).
   for (const { op, p } of records(view, body, 0x7c)) {
@@ -362,7 +365,7 @@ export function parseModelSpawn(body: Uint8Array): RawModelSpawn | null {
     model, position, rotation, scale, tint, uvScroll, life, tracks, blend, todTracks, spin,
     attach: view.getUint16(0, true) & 0xf,
     followCamera: (flags & FLAG_FOLLOW_CAMERA) !== 0,
-    link: isLight ? 'light' : linked === LINKED_SPRITE ? 'sprite' : linked === LINKED_FLARE ? 'flare' : 'mesh',
+    link: isLight ? 'light' : isDistortion ? 'distortion' : linked === LINKED_SPRITE ? 'sprite' : linked === LINKED_FLARE ? 'flare' : 'mesh',
     billboard: flags & 0xffff & ~FLAG_FOLLOW_CAMERA,
     renderState: flags >>> 16,
     emission, spread, velocity, velocityVariance, accel, moves, rotationVariance, scaleVariance,

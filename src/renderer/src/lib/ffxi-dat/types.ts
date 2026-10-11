@@ -169,7 +169,7 @@ export interface GeneratorSpawn {
   todCurves: { r?: number[]; g?: number[]; b?: number[]; alpha?: number[] }
   spin: [number, number, number]           // 0x0B rotation per frame, radians
   // Particle behaviour — see GeneratorParser's RawModelSpawn for each.
-  link: 'mesh' | 'sprite' | 'flare' | 'light'
+  link: 'mesh' | 'sprite' | 'flare' | 'light' | 'distortion'
   billboard: number
   renderState: number
   emission: Emission

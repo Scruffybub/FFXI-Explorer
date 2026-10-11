@@ -15,6 +15,7 @@ import { CollisionWorld } from '../lib/CollisionWorld'
 import {
   GammaBlendPass, GAMMA_BLEND_LAYER, SRGB_GLSL,
 } from '../lib/GammaBlendPass'
+import { HazePass, hazeUniforms, HAZE_PX_OVERRIDE } from '../lib/HazePass'
 import {
   ffxiLight, FFXI_LIGHT_PARS, FFXI_LIGHT_VERTEX, sampleTerrainLight, sunDirection, zoneFogShift,
 } from '../lib/zoneLighting'
@@ -497,12 +498,14 @@ const GEN_SPAWN =
  *    whitecap patches start at 0 and breathe in and out on `naa1`-style bells
  */
 function drawsInWorld(sp: {
-  dir: string; followCamera: boolean; tint: number[]; curves?: { alpha?: number[] }; link?: string
+  dir: string; followCamera: boolean; tint: number[]; curves?: { alpha?: number[] }; link?: string; renderState?: number
 }): boolean {
   if (/(^|\/)weat(\/|$)/.test(sp.dir)) return false
   // Sprite particles (rain, splashes, mist) need a particle system; only the
   // weather's are drawn, by WeatherParticles.
   if (sp.link && sp.link !== 'mesh') return false
+  // Haze bends the picture behind it (HazePass); drawn as a mesh, a grey blob.
+  if ((sp.renderState ?? 0) & 0x10) return false
   if (sp.followCamera) return false
   return sp.tint[3] > 0 || !!sp.curves?.alpha
 }
@@ -2599,10 +2602,20 @@ function PostStack({ post, generatorLayer }: { post: PostSettings; generatorLaye
     [world, camera, composerActive, effectSet],
   )
   useEffect(() => () => gammaPass?.dispose(), [gammaPass])
+  // Heat shimmer, after the generator layer (HazePass). Without the composer
+  // there is no frame to bend, and haze is not drawn.
+  const hazePass = useMemo(
+    () => (composerActive ? new HazePass(world, camera) : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [world, camera, composerActive, effectSet],
+  )
+  useEffect(() => () => hazePass?.dispose(), [hazePass])
   // Nothing on the layer, nothing to blend: skip the pass's three blits.
   useEffect(() => {
     if (gammaPass) gammaPass.enabled = generatorLayer
-  }, [gammaPass, generatorLayer])
+    // Diagnostic ?nohaze=1: the frame unbent, for comparison.
+    if (hazePass) hazePass.enabled = generatorLayer && !new URLSearchParams(window.location.search).has('nohaze')
+  }, [gammaPass, hazePass, generatorLayer])
 
   if (!composerActive) return null
 
@@ -2615,7 +2628,9 @@ function PostStack({ post, generatorLayer }: { post: PostSettings; generatorLaye
 
   return (
     <EffectComposer key={composerKey} multisampling={0}>
-      {gammaPass ? [<primitive key="gamma" object={gammaPass} />, ...effects] : effects}
+      {gammaPass && hazePass
+        ? [<primitive key="gamma" object={gammaPass} />, <primitive key="haze" object={hazePass} />, ...effects]
+        : effects}
     </EffectComposer>
   )
 }
@@ -4161,6 +4176,12 @@ export default function ZoneViewer({
       mat.needsUpdate = true
     }
   }, [litMaterials, lighting.roughness, lighting.metalness])
+
+  // Scene -> Heat shimmer: a uniform, so no rebuild.
+  useEffect(() => {
+    hazeUniforms.uHazePx.value = HAZE_PX_OVERRIDE ?? scene.hazeStrength
+    if (CENSUS) (window as unknown as { __haze?: typeof hazeUniforms }).__haze = hazeUniforms
+  }, [scene.hazeStrength])
 
   // Lamp light follows Scene -> Zone effects: a uniform, so no rebuild.
   useEffect(() => {

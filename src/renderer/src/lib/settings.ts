@@ -300,6 +300,13 @@ export interface SceneSettings {
   lampCount: number
 
   /**
+   * Heat shimmer: how far, in pixels, the picture behind a haze effect shifts
+   * at full strength (lib/HazePass). 0 = off; 2 is Ryan's pick (8, then 4,
+   * were too strong in the app, 2026-10-11).
+   */
+  hazeStrength: number
+
+  /**
    * With Zone weather: draw the sun and moon the game's way — the sun as the
    * weather's lens-flare sheet (core, starburst, halo and the flare chain),
    * the moon with its rainbow halo — or, off, as the viewer's plain discs.
@@ -488,6 +495,7 @@ export const DEFAULT_SCENE: SceneSettings = {
   effectRange: 0,
   lampBrightness: 1,
   lampCount: 12,
+  hazeStrength: 2,
   gameSunMoon: true,
   weatherFogScale: 1,
   zoneTransparency: true,

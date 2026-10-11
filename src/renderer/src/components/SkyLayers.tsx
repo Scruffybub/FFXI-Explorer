@@ -195,6 +195,9 @@ function buildLayers(zone: ParsedZone, state: string, radius: number, gameSunMoo
     const isChild = childNames.has(sp.dir + '|' + sp.generator) && !sp.emission.autoRun
     if (!isChild && !inState.test(sp.dir) && !(inSub.test(sp.dir) && sp.emission.autoRun)) continue
     if (sp.link !== 'mesh') continue // WeatherParticles and LensFlare draw these
+    // Haze (render state 0x10): Altepa's heat ka01 — WeatherParticles draws it
+    // through HazePass; as a sky layer it was a faint colour veil.
+    if (sp.renderState & 0x10) continue
     if (SKY_ONLY.length && !SKY_ONLY.includes(sp.generator)) continue
     // A weather generator that neither rides the camera nor the sun or moon
     // stands in the world: Riverne's light shafts (weat/thdr/tdr4).
