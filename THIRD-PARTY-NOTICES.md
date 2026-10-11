@@ -77,13 +77,17 @@ here so anyone relying on it can make their own assessment.
 
 **Files:** `src/renderer/src/lib/ffxi-dat/GeneratorParser.ts`, `D3mParser.ts`,
 `SpriteParser.ts`, `EnvironmentParser.ts`, `CollisionParser.ts` (water height),
-`src/renderer/src/lib/zoneLighting.ts`, `spawnStages.ts`, `GammaBlendPass.ts`,
+`MzbParser.ts` (point-light table), `src/renderer/src/lib/zoneLighting.ts`,
+`zoneLamps.ts`, `spawnStages.ts`, `GammaBlendPass.ts`,
 `src/renderer/src/components/SkyLayers.tsx`, `WeatherParticles.tsx`,
-`LensFlare.tsx`, and the zone transparency rule in `ZoneViewer.tsx`
+`LampLights.tsx`, `LensFlare.tsx`, and the zone transparency rule in
+`ZoneViewer.tsx`
 
 The layouts of generator chunks, D3M effect meshes, KeyFrame curves and
-environment (weather) records, FFXI's texture-stage and lighting maths, and its
-zone transparency rule were worked out with reference to
+environment (weather) records, the zone's point lights (generator light links
+and the MZB light table), particle setup flags (billboards, depth writes,
+haze), FFXI's texture-stage and lighting maths, and its zone transparency rule
+were worked out with reference to
 [kuluu-ffxi](https://github.com/jondwillis/kuluu-ffxi) and to xim in
 [Heyrio/FFXI-BROWSER-GAME](https://github.com/Heyrio/FFXI-BROWSER-GAME), both
 GPL-3.0. Their source was read as a description of the file formats and of the
