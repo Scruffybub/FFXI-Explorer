@@ -315,6 +315,36 @@ rvcr (0x48, blue 248) blended had painted the canals lavender. Untextured
 layers draw under the textured sheets (renderOrder 1.5). Diagnostic
 `?untex=grey|white|black`.
 
+**Effects sweep, stage 3 (2026-10-11).** `scripts/effects-sweep.cjs <outDir>
+[k/n] [ids]`: every zone at night, Effect distance Everywhere, two views (the
+default overview; 22 across and 12 up from the busiest cluster of effects),
+five captures each — water and effects off (W), Generator water on (A, and A2
+0.7 s later), Zone effects on too (B, and C a second later). Scores: wBright
+(W->A brightened > 60 levels), wFlicker (A->A2), changed / bright (A->B),
+flicker (B->C), fps. `?untex=white` reproduces the old milky canal: wBright
+0.27 against 0. Turning Generator water on rebuilds the zone (over 4 s in
+Dynamis - Valkurm); the sweep waits for the mesh count to settle — a fixed
+wait made a dozen false flags. Four windows at once depress fps; read fps from
+a single-window run. A PC asleep overnight left zones on the loading screen.
+285 zones, no errors. Fixed from it:
+- **Scenery models** (`sceneryModel`): a mode/ folder, not additive — Beaucedine
+  Glacier's entrance walls and windows (mode/entr, 0x44, render state 0x1801:
+  lit, texture alpha ignored), Bastok's windmill, Metalworks' water wheel —
+  stay with Generator water; as particles they faded out.
+- **Continuous emission** (flag 0x04): one alive at a time, the next born when
+  the last expires. Provenance's 209 crystal generators emit every frame and
+  live 6000: 714 giant crystals stacked into white blobs. Read from the data
+  (no other reading fits every-frame emission with a 6000-frame life); xim's
+  local files do not cover it.
+- **Haze** (render state 0x10, xim hazeEffect — the screen behind, bent): left
+  out; drawn plain, Lufaise's fire shimmer (fd01..03) was a grey blob.
+Judged correct, not faults: Hall of the Gods' light shafts, Empyreal
+Paradox's hex barrier, the airships' and Cloister of Gales' and Mount Kamihr's
+cloud seas, Lufaise's and Misareaux's surf (wave foam on 400-600 frame alpha
+curves — flicker is the surf), the Feretory / Abdhaljs Isle shore waves.
+Left: Beaucedine Glacier's entrance draws a flat grey slab with Generator
+water on (with or without Zone effects) — Generator water's own.
+
 **Batching**: Zone effects draws every generator sharing link, model, blend,
 flags and tint as one InstancedMesh, with an emitter per generator (own clock,
 own run of slots, `owner` per slot). Everywhere, fps off / unbatched / batched:

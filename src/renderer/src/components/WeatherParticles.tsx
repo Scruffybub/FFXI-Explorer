@@ -139,7 +139,20 @@ const zonePick = (sp: GeneratorSpawn) =>
 export function zoneMeshPicker(zone: ParsedZone): (sp: GeneratorSpawn) => boolean {
   const water = waterFolders(zone)
   return sp => sp.link === 'mesh' && zonePick(sp) && !water.has(sp.dir) &&
-    !sp.prefabIndices.some(i => colourSheet(zone, i))
+    !sp.prefabIndices.some(i => colourSheet(zone, i)) && !sceneryModel(sp)
+}
+
+/**
+ * A model a generator places as scenery (a mode/ folder, not additive):
+ * Beaucedine Glacier's entrance walls and windows (mode/entr, blend 0x44,
+ * render state 0x1801 — lit, texture alpha ignored), Bastok's windmill,
+ * Metalworks' water wheel. Drawn as particles they lost their texture alpha
+ * and faded out (effects sweep, 2026-10-11); they stay with Generator water.
+ * Additive ones in mode/ are lamps (East Ronfaure's mode/ligh) and stay here.
+ */
+function sceneryModel(sp: GeneratorSpawn): boolean {
+  const additive = sp.blend < 0 || (sp.blend & 0x0f) === 8
+  return /(^|\/)mode(\/|$)/.test(sp.dir) && !additive
 }
 
 /**
@@ -235,6 +248,10 @@ function buildSystems(
     const isMesh = sp.link === 'mesh' && !!meshPick?.(sp)
     if (!isMesh && (sp.link !== 'sprite' || sp.life <= 0)) continue
     if (!pick(sp)) continue
+    // Render state 0x10 (xim hazeEffect): the screen behind, bent — heat
+    // shimmer over Lufaise's fires (fd03). Not reproduced; drawn plain it is
+    // an additive grey blob, so it is left out.
+    if (sp.renderState & 0x10) continue
     // No alpha and no curve to raise it: never seen.
     if (isMesh && sp.tint[3] === 0 && !sp.curves.alpha) continue
     const key = batch
@@ -307,7 +324,7 @@ function buildSystems(
     let capacity = 0
     for (const g of group) {
       const perEmission = Math.max(1, Math.floor(Math.max(1, g.emission.count) * emitScale))
-      const cap = g.life <= 0 ? perEmission : Math.min(MAX_PARTICLES,
+      const cap = g.life <= 0 || g.emission.continuous ? perEmission : Math.min(MAX_PARTICLES,
         perEmission * Math.ceil((g.life + 1) / Math.max(1, g.emission.every)))
       emitters.push({ spawn: g, first: capacity, capacity: cap, perEmission, next: -1, cursor: 0 })
       capacity += cap
@@ -478,6 +495,18 @@ function ParticleField({ systems, weather, range = 1 }: { systems: System[]; wea
         const culled = !forever && !camRel && reach > 0 &&
           tmp.p.set(sp.position[0], -sp.position[1], -sp.position[2]).distanceTo(player) > reach
         if (culled) e.next = frames + sp.emission.every
+        // Emission flag 0x04, continuous: one at a time, the next born when
+        // the last expires. Provenance's crystals emit every frame and live
+        // 6000; emitted freely, 714 giant crystals stacked into white blobs
+        // (effects sweep, 2026-10-11). Read from the data, not from xim.
+        if (sp.emission.continuous && e.next <= frames) {
+          let alive = false
+          for (let i = e.first; i < e.first + e.capacity && !alive; i++) {
+            const age = frames - s.born[i]
+            alive = age >= 0 && (forever || age < sp.life)
+          }
+          if (alive) e.next = frames + 1
+        }
         while (e.next <= frames) {
           for (let k = 0; k < e.perEmission; k++) {
             const i = e.first + e.cursor
