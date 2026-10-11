@@ -18,9 +18,9 @@ import {
 import {
   ffxiLight, FFXI_LIGHT_PARS, FFXI_LIGHT_VERTEX, sampleTerrainLight, sunDirection, zoneFogShift,
 } from '../lib/zoneLighting'
-import { applySpawnStages } from '../lib/spawnStages'
+import { applySpawnStages, setSubtractive, untexturedTexel } from '../lib/spawnStages'
 import { SkyLayers } from './SkyLayers'
-import { WeatherParticles, ZoneEffects } from './WeatherParticles'
+import { WeatherParticles, ZoneEffects, zoneMeshPicker, waterFolders, colourSheet } from './WeatherParticles'
 import { LampLights } from './LampLights'
 import { zoneLamps, LAMP_VERTEX_PARS, LAMP_FRAGMENT_PARS, LAMP_VERTEX, buildLampTexture, lampSlots } from '../lib/zoneLamps'
 import { LensFlare } from './LensFlare'
@@ -886,7 +886,7 @@ const EFFECT_FPS = 60
 
 /** One generator-placed mesh the animator drives each frame. */
 interface SpawnAnim {
-  tex: THREE.Texture
+  tex: THREE.Texture | null              // null: an untextured layer
   uv: [number, number]                   // steady scroll per frame
   tint: THREE.Vector4                    // the stage uniform; w is tint alpha on /128
   life: number                           // frames per particle; 0 = forever
@@ -920,7 +920,7 @@ function SpawnAnimator({ anims }: { anims: SpawnAnim[] }) {
         if (a.curves.v) oy += sampleKeyFrames(a.curves.v, progress)
         if (a.curves.alpha) a.tint.w = (sampleKeyFrames(a.curves.alpha, progress) * 255) / 128
       }
-      a.tex.offset.set(ox % 1, oy % 1)
+      a.tex?.offset.set(ox % 1, oy % 1)
     }
   })
   return null
@@ -1691,7 +1691,7 @@ function CameraOrientation() {
  * meshes themselves, so a harness can hide a class of them.
  */
 function ProbeHook({ meshes, zoneData }: { meshes: THREE.Object3D[]; zoneData: ParsedZone }) {
-  const { camera } = useThree()
+  const { camera, controls } = useThree()
   useEffect(() => {
     const w = window as unknown as { __probeAt?: (x: number, y: number) => unknown }
     w.__probeAt = (x: number, y: number) => {
@@ -1718,8 +1718,17 @@ function ProbeHook({ meshes, zoneData }: { meshes: THREE.Object3D[]; zoneData: P
       })
     }
     ;(window as unknown as { __zoneMeshes?: THREE.Object3D[] }).__zoneMeshes = meshes
-    return () => { delete w.__probeAt }
-  }, [camera, meshes, zoneData])
+    // window.__camTo(from, to), world units: a close-up of something placed by the data.
+    const c = window as unknown as { __camTo?: (from: number[], to: number[]) => void }
+    c.__camTo = (from, to) => {
+      camera.position.set(from[0], from[1], from[2])
+      const orbit = controls as unknown as { target?: THREE.Vector3; update?: () => void } | null
+      orbit?.target?.set(to[0], to[1], to[2])
+      camera.lookAt(to[0], to[1], to[2])
+      orbit?.update?.()
+    }
+    return () => { delete w.__probeAt; delete c.__camTo }
+  }, [camera, controls, meshes, zoneData])
   return null
 }
 
@@ -3980,6 +3989,8 @@ export default function ZoneViewer({
     // A shader that fails to compile drops its draws silently, which is how the
     // water shader hid for days. The cost is no fog on these meshes for now.
     const spawnAnims: SpawnAnim[] = []
+    const zoneFxPick = zoneMeshPicker(zoneData)
+    const waterDirs = waterFolders(zoneData)
     if (genSpawn) {
       let built = 0
       let startHidden = 0
@@ -3992,8 +4003,9 @@ export default function ZoneViewer({
         for (const prefabIdx of sp.prefabIndices) {
           const baseGeo = geoMap.get(prefabIdx)
           const prefab = zoneData.prefabs[prefabIdx]
-          const tex = prefab ? zoneData.textures[prefab.materialIndex] : undefined
-          if (!baseGeo || !prefab || !tex) continue
+          // A blank texture name draws colour only (see ParsedZoneMesh.untextured).
+          const tex = prefab && !prefab.untextured ? zoneData.textures[prefab.materialIndex] : undefined
+          if (!baseGeo || !prefab || (!tex && !prefab.untextured)) continue
 
           // FFXI multiplies three things in gamma space, each on its 0x80 =
           // identity scale: texture × vertex colour × generator tint. The first
@@ -4027,25 +4039,39 @@ export default function ZoneViewer({
           geometries.push(geo)
           // Effective alpha before the texel: tint x2 (MODULATE4X) x vertex alpha.
           const translucent = (sp.tint[3] / 128) * 2 * minAlpha < 0.99
-          const map = new THREE.DataTexture(new Uint8Array(tex.rgba), tex.width, tex.height, THREE.RGBAFormat)
-          map.wrapS = THREE.RepeatWrapping
-          map.wrapT = THREE.RepeatWrapping
-          map.flipY = false
-          map.colorSpace = THREE.SRGBColorSpace
-          map.magFilter = THREE.LinearFilter
-          map.minFilter = THREE.LinearMipmapLinearFilter
-          map.generateMipmaps = true
-          map.needsUpdate = true
-          textures.push(map)
+          let map: THREE.DataTexture | null = null
+          if (tex) {
+            map = new THREE.DataTexture(new Uint8Array(tex.rgba), tex.width, tex.height, THREE.RGBAFormat)
+            map.wrapS = THREE.RepeatWrapping
+            map.wrapT = THREE.RepeatWrapping
+            map.flipY = false
+            map.colorSpace = THREE.SRGBColorSpace
+            map.magFilter = THREE.LinearFilter
+            map.minFilter = THREE.LinearMipmapLinearFilter
+            map.generateMipmaps = true
+            map.needsUpdate = true
+            textures.push(map)
+          }
+          // The blend byte's low nibble: 8 adds, 1 or 2 subtracts, anything
+          // else (0x44, or no byte at all) is an alpha blend. Bastok Markets'
+          // rvcr (0x48, tint blue 248) is meant to add a blue cast; blended,
+          // it painted the canals solid lavender (Ryan, 2026-10-10). No byte
+          // stays an alpha blend here: the seas were judged against the game
+          // that way. Every layer is sorted and none writes depth, as in game;
+          // the tint is applied by the stage patch.
+          const nib = sp.blend >= 0 ? sp.blend & 0x0f : 4
           const mat = new THREE.MeshBasicMaterial({
             map,
             vertexColors: true,
-            // Blend byte 0x44 is an alpha blend: every layer is sorted and none
-            // writes depth, as in game. The tint is applied by the stage patch.
             transparent: true,
             depthWrite: false,
             side: THREE.DoubleSide,
+            blending: nib === 8 ? THREE.AdditiveBlending : THREE.NormalBlending,
           })
+          if (nib === 1 || nib === 2) setSubtractive(mat)
+          // Bastok Markets' rvcr adds blue 248 over its canal; drawn as a glow
+          // it turned the canal white. Water's untextured layers all darken.
+          if (!map) untexturedTexel(mat, nib === 8 && !waterDirs.has(sp.dir) && !colourSheet(zoneData, prefabIdx))
           const tone = waterTone(sp.dir, prefab.textureName)
           const tint = tone === 1 ? sp.tint : [sp.tint[0] * tone, sp.tint[1] * tone, sp.tint[2] * tone, sp.tint[3]]
           const tintUniform = applySpawnStages(mat, tint)
@@ -4053,10 +4079,14 @@ export default function ZoneViewer({
           const mesh = new THREE.InstancedMesh(geo, mat, 1)
           mesh.userData.textureName = prefab.textureName ?? ''
           mesh.userData.generator = sp.generator
+          // Zone effects draws this one as a particle while it is on.
+          if (zoneFxPick(sp)) mesh.userData.zoneFx = true
           mesh.frustumCulled = false
           // Drawn by GammaBlendPass when post-processing is on; see PostStack.
           mesh.layers.set(GAMMA_BLEND_LAYER)
-          mesh.renderOrder = prefab.d3m ? 3 : translucent ? 2 : 1 // all blended; this orders them
+          // All blended; this orders them. An untextured colour layer goes
+          // under the textured sheets, so the water's texture shows on top.
+          mesh.renderOrder = prefab.d3m ? 3 : translucent ? (map ? 2 : 1.5) : 1
           mesh.setMatrixAt(0, matrix)
           mesh.instanceMatrix.needsUpdate = true
           instancedMeshes.push(mesh)
@@ -4138,6 +4168,12 @@ export default function ZoneViewer({
     const off = new URLSearchParams(window.location.search).has('nolamps')
     zoneLamps.uLampOn.value = scene.zoneEffects && !scene.mapView && !off ? 1 : 0
   }, [scene.zoneEffects, scene.mapView])
+
+  // Generator water's static copies of the mesh effects Zone effects draws.
+  useEffect(() => {
+    const fx = scene.zoneEffects && !scene.mapView
+    for (const m of instancedMeshes) if (m.userData.zoneFx) m.visible = !fx
+  }, [instancedMeshes, scene.zoneEffects, scene.mapView])
 
   // Exactly one weather state is visible at a time, switched by a per-mesh flag
   // so changing it costs nothing. Meshes with no weatherState tag are ordinary

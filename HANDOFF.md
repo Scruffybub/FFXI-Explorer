@@ -277,6 +277,54 @@ Fixed: Zone effects drew only when Generator water or Zone weather was on —
 they sit on the gamma-blend layer and PostStack enabled that pass only for
 those; `generatorLayer` now includes `scene.zoneEffects`.
 
+**Zone effects, stage 2: mesh effects (2026-10-10).** Auto-run generators that
+link a mesh, outside the water —
+lamp light pools, window glows, light cones, crystals. Water stays with
+Generator water: any folder holding a scrolling mesh (seas, rivers, falls, lava)
+and everything else in it — the sea's flat colour layer, foam, bubbles
+(`zoneMeshPicker`). The first rule ("does not scroll") drew Port Bastok's
+colour layer esea/col1 (x100, depth write) over the sea in brown (Ryan,
+2026-10-10). Folder names alone do not separate water from lights. Generator water tags its copy of a
+picked spawn `userData.zoneFx` and hides it while Zone effects is on. Mesh
+effects run in the same ParticleField: each submesh one material (geometry
+groups); life 0 = a singleton born once (xim maxLifeSpan 0), never emit-culled,
+faded by draw distance only; spin 0x0B; setup flag 0x1000 = depth write (meshes
+only), 0x4000 = xim's XZ billboard (turned about the vertical); scrolling u/v
+and life curves via `aUvOffset`. Seen: Bastok Markets' arcade lamps fill their
+archways with warm light (auc*, 902-vertex light volumes) and window glows
+(wind/ch*). The wind/ccL* meshes carry tint 0,0,0 additive — they add nothing.
+**Untextured generator meshes (2026-10-10).** An MMB with a blank texture name
+(16 spaces) took the zone's most-used texture in ZoneFile — right or not for
+placed terrain, wrong for generator meshes: their UVs are all zero, so a
+scrolling one sampled one texel of that texture at a time and Bastok Markets'
+canals and fountain flashed through its colours, with a floor-tile pattern on
+the far sea (lowcol, u 0..8) (Ryan). Now `ParsedZoneMesh.untextured`; generator
+meshes draw it untextured on a texel chosen by `untexturedTexel` (spawnStages):
+grey 0x80 for glows (Bastok's arcade lamp comes out amber, as before), black
+for water. Water = a folder with a scrolling mesh, or a flat untextured sheet
+(`colourSheet`: vertical extent < 5% of horizontal). A census of all zones
+(213) found every flat untextured mesh is water, a floor decal or a shadow
+(Hall of the Gods' kage) and every lamp glow a volume; Norg's lamp_suimen
+(lamp reflections on water, additive) and Chamber of Oracles' warp_dis fall on
+the water side and now draw faint or not at all. White was tried for all:
+milk over every canal. Zone effects never takes a colour sheet (Windurst
+Waters' wt01..10 sit in effe/mizu with nothing scrolling; drawn additive they
+whitened the canals). Generator water also honours the blend byte now:
+low nibble 8 additive, 1/2 subtractive, else (and no byte) alpha — Bastok's
+rvcr (0x48, blue 248) blended had painted the canals lavender. Untextured
+layers draw under the textured sheets (renderOrder 1.5). Diagnostic
+`?untex=grey|white|black`.
+
+**Batching**: Zone effects draws every generator sharing link, model, blend,
+flags and tint as one InstancedMesh, with an emitter per generator (own clock,
+own run of slots, `owner` per slot). Everywhere, fps off / unbatched / batched:
+Castle Zvahl Keep 157/72/148 (380 systems -> 4), Outer Ra'Kaznar 133/43/117
+(797 -> 14), The Shrouded Maw 173/48/152, Bastok Markets 64/50/61. Weather
+systems stay one per generator. Diagnostics: `?nomeshfx=1` sprites only,
+`?onlymeshfx=1` meshes only, `?nobatch=1`. Census hook
+`window.__camTo(from, to)` places the camera (world units) for close-ups;
+`SWEEP_FULL=1` keeps the sweep's overview at full size.
+
 **Lamp light on terrain is in the game data** (Ryan asked, 2026-10-10; read
 from xim as format reference only — ParticleGeneratorParser, ParticleInitializers,
 Particle.getPointLightParams, ZoneDefParser, ZoneDrawer, ShaderConstants):

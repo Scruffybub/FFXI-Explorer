@@ -115,6 +115,12 @@ export interface ParsedZoneMesh {
   celestial?: boolean
   /** The weather state whose folder (weat/<state>/…) holds this mesh, if any. */
   weatherState?: string
+  /**
+   * The MMB names no texture (a blank name). Placed terrain still takes the
+   * zone's most-used texture (materialIndex); generator meshes draw untextured,
+   * colour only — Bastok's river colour layers took a floor tile instead.
+   */
+  untextured?: boolean
   /** A 0x21 sprite quad: placed only by particle generators, like a D3M. */
   sprite?: boolean
   /** A lens-flare sheet's meshes, each with its place along the flare line. */

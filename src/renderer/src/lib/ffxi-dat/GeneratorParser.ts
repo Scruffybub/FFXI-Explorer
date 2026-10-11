@@ -102,11 +102,9 @@ export interface RawModelSpawn {
   flipbook: boolean
   /**
    * Section-3 0x60 (xim ScreenFlashApplier): each frame a live particle adds
-   * its colour, doubled, over the whole screen, fading out between 
-ear and
-   * ar units away and as it leaves the centre of view (
-earAngle,
-   * arAngle, on xim's zoomed squared measure). Thunder's lightning flash in
+   * its colour, doubled, over the whole screen, fading out between `near` and
+   * `far` units away and as it leaves the centre of view (`nearAngle`,
+   * `farAngle`, on xim's zoomed squared measure). Thunder's lightning flash in
    * Riverne and Tavnazian Safehold.
    */
   screenFlash: { near: number; far: number; nearAngle: number; farAngle: number } | null

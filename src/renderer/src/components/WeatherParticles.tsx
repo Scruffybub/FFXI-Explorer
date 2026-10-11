@@ -4,7 +4,7 @@ import * as THREE from 'three'
 import type { ParsedZone } from '../lib/ffxi-dat'
 import type { GeneratorSpawn } from '../lib/ffxi-dat/types'
 import { sampleKeyFrames } from '../lib/ffxi-dat/GeneratorParser'
-import { applySpawnStages, setSubtractive } from '../lib/spawnStages'
+import { applySpawnStages, setSubtractive, untexturedTexel } from '../lib/spawnStages'
 import { GAMMA_BLEND_LAYER } from '../lib/GammaBlendPass'
 import { spreadOffset } from './SkyLayers'
 import { childEvents, pruneChildEvents } from '../lib/weatherEvents'
@@ -60,14 +60,32 @@ const FLIP = new THREE.Matrix4().makeRotationX(Math.PI)
 
 const decode = (c: number) => (c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4))
 
-interface System {
+/** One generator in a system: its own clock and its own run of particle slots. */
+interface Emitter {
   spawn: GeneratorSpawn
+  /** First slot, and how many it owns. */
+  first: number
+  capacity: number
+  perEmission: number
+  next: number
+  cursor: number
+}
+
+/**
+ * One draw: every generator that shares a model, a blend and a tint (Zone
+ * effects batches them — Outer Ra'Kaznar's 797 mesh effects are 14 such sets),
+ * or a single generator (the weather's).
+ */
+interface System {
+  /** The first emitter's generator: what the batch shares. */
+  spawn: GeneratorSpawn
+  emitters: Emitter[]
+  /** Each slot's emitter. */
+  owner: Uint16Array
   mesh: THREE.InstancedMesh
   alpha: THREE.InstancedBufferAttribute
-  map: THREE.Texture | null
-  perEmission: number
+  maps: THREE.Texture[]
   capacity: number
-  next: number
   // Particle state, DAT space (camera-relative for camera followers).
   pos: Float32Array
   vel: Float32Array
@@ -76,10 +94,11 @@ interface System {
   born: Float32Array
   /** 1 once a particle's expiry has been handled (its children started). */
   expired: Uint8Array
-  cursor: number
   /** A flipbook's frames, as uv offsets from frame 0; null for one frame. */
   frameOffsets: Float32Array | null
   uvOffset: THREE.InstancedBufferAttribute
+  /** A mesh whose texture scrolls (0x27/0x28, or u/v life curves). */
+  scrolls: boolean
 }
 
 /**
@@ -103,99 +122,215 @@ function weatherPick(state: string): (sp: GeneratorSpawn) => boolean {
 const zonePick = (sp: GeneratorSpawn) =>
   sp.emission.autoRun && sp.attach === 0 && !sp.followCamera && !/(^|\/)weat(\/|$)/.test(sp.dir)
 
-function buildSystems(zone: ParsedZone, pick: (sp: GeneratorSpawn) => boolean, emitScale: number): System[] {
-  const out: System[] = []
+/**
+ * The zone's mesh effects that Zone effects draws: lamp glows and light cones,
+ * crystals, warp shimmer — every auto-run mesh outside the water. Generator
+ * water hides its own copy of these while Zone effects is on.
+ *
+ * Water is a folder holding a scrolling sheet (seas, rivers, falls, lava), and
+ * everything else in that folder: the sea's flat colour layer, foam, bubbles.
+ * Those are layered under and over the scrolling sheets in Generator water's
+ * own order; drawn here, Port Bastok's colour layer (esea/col1, x100, depth
+ * write) covered the sea in brown (Ryan, 2026-10-10). Every water folder in the
+ * four Bastok zones holds a scrolling sheet and no lamp folder does; the names
+ * alone do not tell them apart (a census of all zones found water under
+ * effe/kawa, seae, umi*, mizu, taki, lights under ligh, ramp, lamp, ligt).
+ */
+export function zoneMeshPicker(zone: ParsedZone): (sp: GeneratorSpawn) => boolean {
+  const water = waterFolders(zone)
+  return sp => sp.link === 'mesh' && zonePick(sp) && !water.has(sp.dir) &&
+    !sp.prefabIndices.some(i => colourSheet(zone, i))
+}
+
+/**
+ * An untextured, flat, level mesh: a water colour layer. Windurst Waters' and
+ * Northern San d'Oria's canal layers (wt00..wt12), Davoi's river (rvme),
+ * Jugner's ponds (ike) — some in folders with no scrolling sheet at all, so
+ * the folder rule missed them and Zone effects lit Windurst's canals in white
+ * patches (2026-10-10). A census of all zones found every lamp glow among the
+ * untextured meshes is a volume — a cone, a box, a shell round the lamp.
+ * Flat: the vertical extent under 5% of the horizontal.
+ */
+export function colourSheet(zone: ParsedZone, prefabIdx: number): boolean {
+  const p = zone.prefabs[prefabIdx]
+  if (!p?.untextured || p.vertices.length < 9) return false
+  let y0 = Infinity, y1 = -Infinity, x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity
+  for (let k = 0; k < p.vertices.length; k += 3) {
+    x0 = Math.min(x0, p.vertices[k]); x1 = Math.max(x1, p.vertices[k])
+    y0 = Math.min(y0, p.vertices[k + 1]); y1 = Math.max(y1, p.vertices[k + 1])
+    z0 = Math.min(z0, p.vertices[k + 2]); z1 = Math.max(z1, p.vertices[k + 2])
+  }
+  return y1 - y0 < 0.05 * Math.max(x1 - x0, z1 - z0)
+}
+
+/** The DAT folders that hold water: any with a mesh that scrolls its texture. */
+export function waterFolders(zone: ParsedZone): Set<string> {
+  return new Set((zone.spawns ?? [])
+    .filter(sp => sp.link === 'mesh' && (sp.uvScroll[0] || sp.uvScroll[1]))
+    .map(sp => sp.dir))
+}
+
+/** An effect's sheet. Clamped unless the mesh tiles or scrolls it. */
+function sheetTexture(tex: ParsedZone['textures'][number] | undefined, wrap: boolean, mips: boolean): THREE.DataTexture | null {
+  // An MMB with a blank texture name draws colour only.
+  if (!tex) return null
+  const map = new THREE.DataTexture(new Uint8Array(tex.rgba), tex.width, tex.height, THREE.RGBAFormat)
+  map.magFilter = THREE.LinearFilter
+  // No mipmaps for sprites: the rain sheet is a few hairline streaks, and
+  // averaging them down for a distant quad left nothing to see.
+  map.minFilter = mips ? THREE.LinearMipmapLinearFilter : THREE.LinearFilter
+  map.generateMipmaps = mips
+  if (wrap) map.wrapS = map.wrapT = THREE.RepeatWrapping
+  map.flipY = false
+  map.colorSpace = THREE.SRGBColorSpace
+  map.needsUpdate = true
+  return map
+}
+
+function particleMaterial(sp: GeneratorSpawn, map: THREE.Texture | null, isMesh: boolean): THREE.MeshBasicMaterial {
+  const nib = sp.blend >= 0 ? sp.blend & 0x0f : 8
+  const subtract = nib === 1 || nib === 2
+  const blending = nib === 8 ? THREE.AdditiveBlending : THREE.NormalBlending
+  const mat = new THREE.MeshBasicMaterial({
+    map, vertexColors: true, transparent: true, side: THREE.DoubleSide,
+    // Setup flag 0x1000: the particle writes depth (xim depthMask). Mesh
+    // effects only; the sprites keep the look already checked against the game.
+    depthWrite: isMesh && (sp.billboard & 0x1000) !== 0,
+    fog: blending === THREE.NormalBlending && !subtract, blending,
+  })
+  if (subtract) setSubtractive(mat)
+  if (!map) untexturedTexel(mat, blending === THREE.AdditiveBlending)
+  // The tint's alpha is per particle (the life curve), so the stage takes
+  // it from an instance attribute instead of the uniform.
+  applySpawnStages(mat, [sp.tint[0], sp.tint[1], sp.tint[2], 128], false)
+  const stages = mat.onBeforeCompile
+  mat.onBeforeCompile = (shader, renderer) => {
+    stages(shader, renderer)
+    shader.vertexShader = shader.vertexShader
+      .replace('void main() {', 'attribute float aAlpha;\nattribute vec2 aUvOffset;\nvarying float vAlpha;\nvoid main() {\n  vAlpha = aAlpha;')
+      .replace('#include <uv_vertex>', '#include <uv_vertex>\n#ifdef USE_MAP\n  vMapUv += aUvOffset;\n#endif')
+    shader.fragmentShader = shader.fragmentShader
+      .replace('void main() {', 'varying float vAlpha;\nvoid main() {')
+      .replace('uSpawnTint.a * 2.0', 'uSpawnTint.a * vAlpha * 2.0')
+  }
+  mat.customProgramCacheKey = () => 'weather-particles'
+  return mat
+}
+
+/**
+ * `meshPick` also takes the generators that link a mesh (lamp glows, light
+ * cones, fountain streams): every submesh of the MMB, one material each,
+ * sharing the particles. A mesh with no life lives forever — the game emits
+ * it once (xim: maxLifeSpan 0 is a singleton).
+ *
+ * `batch` draws generators that share a model, blend, flags and tint as one
+ * system, each with its own clock — hundreds of draws down to tens.
+ */
+function buildSystems(
+  zone: ParsedZone, pick: (sp: GeneratorSpawn) => boolean, emitScale: number,
+  meshPick?: (sp: GeneratorSpawn) => boolean, batch = false,
+): System[] {
+  const groups = new Map<string, GeneratorSpawn[]>()
   for (const sp of zone.spawns ?? []) {
-    if (sp.link !== 'sprite' || sp.life <= 0) continue
+    const isMesh = sp.link === 'mesh' && !!meshPick?.(sp)
+    if (!isMesh && (sp.link !== 'sprite' || sp.life <= 0)) continue
     if (!pick(sp)) continue
-    const p = zone.prefabs[sp.prefabIndices[0]]
-    if (!p) continue
-    const tex = zone.textures[p.materialIndex]
-    if (!tex) continue
+    // No alpha and no curve to raise it: never seen.
+    if (isMesh && sp.tint[3] === 0 && !sp.curves.alpha) continue
+    const key = batch
+      ? [sp.link, sp.prefabIndices.join('+'), sp.blend, sp.billboard, sp.renderState, sp.followCamera,
+          sp.emission.batched, sp.tint.slice(0, 3).join('.'),
+          !!(sp.uvScroll[0] || sp.uvScroll[1] || sp.curves.u || sp.curves.v)].join('|')
+      : String(groups.size)
+    const g = groups.get(key)
+    if (g) g.push(sp)
+    else groups.set(key, [sp])
+  }
 
-    // A flipbook draws one frame at a time: frame 0's quad, moved across the
-    // sheet per particle. The shared snowflake `hit3` is sixteen frames of a
-    // 4x4 grid; drawn whole, all sixteen stacked on every flake.
-    const frame0 = p.frames?.[0]
-    const verts = frame0?.vertices ?? p.vertices
-    const uvs = frame0?.uvs ?? p.uvs
-    const colors = frame0?.colors ?? p.colors
-    const n = verts.length / 3
+  const out: System[] = []
+  for (const group of groups.values()) {
+    const sp = group[0]
+    const isMesh = sp.link === 'mesh'
+    const pos: number[] = [], uv: number[] = [], col: number[] = [], idx: number[] = []
     const geo = new THREE.BufferGeometry()
-    geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3))
-    geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2))
-    const col = new Float32Array(n * 4)
-    for (let v = 0; v < n; v++) {
-      for (let c = 0; c < 3; c++) col[v * 4 + c] = decode((colors[v * 4 + c] ?? 0.5) * 2)
-      col[v * 4 + 3] = Math.min(1, (colors[v * 4 + 3] ?? 0.5) * 2)
-    }
-    geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 4))
-    geo.setIndex(frame0 ? Array.from({ length: n }, (_, i) => i) : p.indices)
+    const maps: THREE.Texture[] = []
+    const mats: THREE.MeshBasicMaterial[] = []
     let frameOffsets: Float32Array | null = null
-    if (p.frames && p.frames.length > 1) {
-      const minUv = (u: number[]) => [Math.min(...u.filter((_, i) => i % 2 === 0)), Math.min(...u.filter((_, i) => i % 2 === 1))]
-      const base = minUv(uvs)
-      frameOffsets = new Float32Array(p.frames.length * 2)
-      p.frames.forEach((f, i) => {
-        const m = minUv(f.uvs)
-        frameOffsets![i * 2] = m[0] - base[0]
-        frameOffsets![i * 2 + 1] = m[1] - base[1]
-      })
+    const scrolls = isMesh && !!(sp.uvScroll[0] || sp.uvScroll[1] || sp.curves.u || sp.curves.v)
+    for (const pi of isMesh ? sp.prefabIndices : sp.prefabIndices.slice(0, 1)) {
+      const p = zone.prefabs[pi]
+      if (!p) continue
+      const tex = isMesh && p.untextured ? undefined : zone.textures[p.materialIndex]
+      if (!tex && !(isMesh && p.untextured)) continue
+
+      // A flipbook draws one frame at a time: frame 0's quad, moved across the
+      // sheet per particle. The shared snowflake `hit3` is sixteen frames of a
+      // 4x4 grid; drawn whole, all sixteen stacked on every flake.
+      const frame0 = p.frames?.[0]
+      const verts = frame0?.vertices ?? p.vertices
+      const uvs = frame0?.uvs ?? p.uvs
+      const colors = frame0?.colors ?? p.colors
+      const n = verts.length / 3
+      const base = pos.length / 3
+      pos.push(...verts)
+      uv.push(...uvs)
+      for (let v = 0; v < n; v++) {
+        for (let c = 0; c < 3; c++) col.push(decode((colors[v * 4 + c] ?? 0.5) * 2))
+        col.push(Math.min(1, (colors[v * 4 + 3] ?? 0.5) * 2))
+      }
+      const local = frame0 ? Array.from({ length: n }, (_, i) => i) : p.indices
+      geo.addGroup(idx.length, local.length, mats.length)
+      for (const i of local) idx.push(base + i)
+      if (!isMesh && p.frames && p.frames.length > 1) {
+        const minUv = (u: number[]) => [Math.min(...u.filter((_, i) => i % 2 === 0)), Math.min(...u.filter((_, i) => i % 2 === 1))]
+        const b = minUv(uvs)
+        frameOffsets = new Float32Array(p.frames.length * 2)
+        p.frames.forEach((f, i) => {
+          const m = minUv(f.uvs)
+          frameOffsets![i * 2] = m[0] - b[0]
+          frameOffsets![i * 2 + 1] = m[1] - b[1]
+        })
+      }
+      const tiles = uvs.some(x => x < -0.001 || x > 1.001)
+      const map = sheetTexture(tex, isMesh && (scrolls || tiles), isMesh)
+      if (map) maps.push(map)
+      mats.push(particleMaterial(sp, map, isMesh))
     }
+    if (!mats.length) continue
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2))
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 4))
+    geo.setIndex(idx)
+    if (mats.length === 1) geo.clearGroups()
 
-    const map = new THREE.DataTexture(new Uint8Array(tex.rgba), tex.width, tex.height, THREE.RGBAFormat)
-    map.magFilter = THREE.LinearFilter
-    // No mipmaps: the rain sheet is a few hairline streaks, and averaging them
-    // down for a distant quad left nothing to see.
-    map.minFilter = THREE.LinearFilter
-    map.generateMipmaps = false
-    map.flipY = false
-    map.colorSpace = THREE.SRGBColorSpace
-    map.needsUpdate = true
-
-    const nib = sp.blend >= 0 ? sp.blend & 0x0f : 8
-    const subtract = nib === 1 || nib === 2
-    const blending = nib === 8 ? THREE.AdditiveBlending : THREE.NormalBlending
-    const mat = new THREE.MeshBasicMaterial({
-      map, vertexColors: true, transparent: true, depthWrite: false, side: THREE.DoubleSide,
-      fog: blending === THREE.NormalBlending && !subtract, blending,
-    })
-    if (subtract) setSubtractive(mat)
-    // The tint's alpha is per particle (the life curve), so the stage takes
-    // it from an instance attribute instead of the uniform.
-    applySpawnStages(mat, [sp.tint[0], sp.tint[1], sp.tint[2], 128], false)
-    const stages = mat.onBeforeCompile
-    mat.onBeforeCompile = (shader, renderer) => {
-      stages(shader, renderer)
-      shader.vertexShader = shader.vertexShader
-        .replace('void main() {', 'attribute float aAlpha;\nattribute vec2 aUvOffset;\nvarying float vAlpha;\nvoid main() {\n  vAlpha = aAlpha;')
-        .replace('#include <uv_vertex>', '#include <uv_vertex>\n#ifdef USE_MAP\n  vMapUv += aUvOffset;\n#endif')
-      shader.fragmentShader = shader.fragmentShader
-        .replace('void main() {', 'varying float vAlpha;\nvoid main() {')
-        .replace('uSpawnTint.a * 2.0', 'uSpawnTint.a * vAlpha * 2.0')
+    const emitters: Emitter[] = []
+    let capacity = 0
+    for (const g of group) {
+      const perEmission = Math.max(1, Math.floor(Math.max(1, g.emission.count) * emitScale))
+      const cap = g.life <= 0 ? perEmission : Math.min(MAX_PARTICLES,
+        perEmission * Math.ceil((g.life + 1) / Math.max(1, g.emission.every)))
+      emitters.push({ spawn: g, first: capacity, capacity: cap, perEmission, next: -1, cursor: 0 })
+      capacity += cap
     }
-    mat.customProgramCacheKey = () => 'weather-particles'
-
-    const perEmission = Math.max(1, Math.floor(Math.max(1, sp.emission.count) * emitScale))
-    const capacity = Math.min(MAX_PARTICLES,
-      perEmission * Math.ceil((sp.life + 1) / Math.max(1, sp.emission.every)))
+    const owner = new Uint16Array(capacity)
+    emitters.forEach((e, k) => owner.fill(k, e.first, e.first + e.capacity))
     const alpha = new THREE.InstancedBufferAttribute(new Float32Array(capacity), 1)
     geo.setAttribute('aAlpha', alpha)
     const uvOffset = new THREE.InstancedBufferAttribute(new Float32Array(capacity * 2), 2)
     geo.setAttribute('aUvOffset', uvOffset)
-    const mesh = new THREE.InstancedMesh(geo, mat, capacity)
+    const mesh = new THREE.InstancedMesh(geo, mats.length === 1 ? mats[0] : mats, capacity)
     mesh.frustumCulled = false
     mesh.layers.set(GAMMA_BLEND_LAYER)
     mesh.renderOrder = 5
     mesh.count = 0
 
     out.push({
-      spawn: sp, mesh, alpha, map, perEmission, capacity, next: -1, cursor: 0,
+      spawn: sp, emitters, owner, mesh, alpha, maps, capacity,
       pos: new Float32Array(capacity * 3), vel: new Float32Array(capacity * 3),
       scl: new Float32Array(capacity * 3), rot: new Float32Array(capacity * 3),
       born: new Float32Array(capacity).fill(-Infinity),
       expired: new Uint8Array(capacity),
-      frameOffsets, uvOffset,
+      frameOffsets, uvOffset, scrolls,
     })
   }
   return out
@@ -236,7 +371,7 @@ export function WeatherParticles({ zone, state }: { zone: ParsedZone; state: str
     const s = buildSystems(zone, weatherPick(state), WEATHER_EMIT_SCALE)
     if (s.length) {
       console.log(`[WXP] ${s.length} weather particle systems for ${state}: ` +
-        s.map(x => `${x.spawn.generator}(${x.perEmission}/${x.spawn.emission.every}f, ${x.capacity} max)`).join(' '))
+        s.map(x => `${x.spawn.generator}(${x.emitters[0].perEmission}/${x.spawn.emission.every}f, ${x.capacity} max)`).join(' '))
     }
     // Diagnostic (?census=1): the live systems, for probes.
     if (new URLSearchParams(window.location.search).has('census')) {
@@ -247,7 +382,7 @@ export function WeatherParticles({ zone, state }: { zone: ParsedZone; state: str
   return <ParticleField systems={systems} weather />
 }
 
-/** The zone's own ambient sprite effects (Scene → Zone effects). */
+/** The zone's own ambient effects, sprites and meshes (Scene → Zone effects). */
 export function ZoneEffects({ zone, range }: {
   zone: ParsedZone
   /**
@@ -260,7 +395,11 @@ export function ZoneEffects({ zone, range }: {
   range: number
 }) {
   const systems = useMemo(() => {
-    const s = buildSystems(zone, zonePick, 1)
+    // Diagnostics: ?nomeshfx=1 the sprites alone, as before the mesh effects;
+    // ?onlymeshfx=1 the meshes alone; ?nobatch=1 one draw per generator.
+    const q = new URLSearchParams(window.location.search)
+    const pick = q.has('onlymeshfx') ? (sp: GeneratorSpawn) => sp.link === 'mesh' && zonePick(sp) : zonePick
+    const s = buildSystems(zone, pick, 1, q.has('nomeshfx') ? undefined : zoneMeshPicker(zone), !q.has('nobatch'))
     console.log(`[ZFX] ${s.length} zone effect particle systems`)
     if (new URLSearchParams(window.location.search).has('census')) {
       (window as unknown as { __zfx?: System[] }).__zfx = s
@@ -278,15 +417,15 @@ function ParticleField({ systems, weather, range = 1 }: { systems: System[]; wea
   useEffect(() => () => {
     for (const s of systems) {
       s.mesh.geometry.dispose()
-      ;(s.mesh.material as THREE.Material).dispose()
-      s.map?.dispose()
+      for (const m of [s.mesh.material].flat()) m.dispose()
+      for (const m of s.maps) m.dispose()
       s.mesh.dispose()
     }
   }, [systems])
 
   const tmp = useMemo(() => ({
     off: new THREE.Vector3(), p: new THREE.Vector3(), q: new THREE.Quaternion(), e: new THREE.Euler(0, 0, 0, 'ZYX'),
-    s: new THREE.Vector3(), m: new THREE.Matrix4(), yaw: new THREE.Quaternion(), up: new THREE.Vector3(0, 1, 0), zero: new THREE.Vector3(),
+    s: new THREE.Vector3(), m: new THREE.Matrix4(), rot: new THREE.Matrix4(), yaw: new THREE.Quaternion(), up: new THREE.Vector3(0, 1, 0), zero: new THREE.Vector3(),
     right: new THREE.Vector3(), camUp: new THREE.Vector3(), view: new THREE.Vector3(),
     flash: new THREE.Vector3(), cs: new THREE.Vector3(),
   }), [])
@@ -306,7 +445,8 @@ function ParticleField({ systems, weather, range = 1 }: { systems: System[]; wea
     pruneChildEvents(frames)
 
     for (const s of systems) {
-      const sp = s.spawn
+      // What every emitter in the system shares (the batch key).
+      const sp0 = s.spawn
       // Where a particle lives (xim Particle.updateAssociatedPosition):
       //   follow       followCamera: rides the camera, in world axes
       //   bake         followCamera with render state 0x0080: born at the
@@ -316,9 +456,9 @@ function ParticleField({ systems, weather, range = 1 }: { systems: System[]; wea
       //                Uleguerand's snow is born 10 ahead, so it always falls
       //                in front of you; in fixed world axes it fell behind
       //                whenever the camera faced the other way.
-      const attached = (sp.renderState & 0x400) !== 0
-      const follow = sp.followCamera && !attached && (sp.renderState & 0x80) === 0
-      const bake = sp.followCamera && !attached && !follow
+      const attached = (sp0.renderState & 0x400) !== 0
+      const follow = sp0.followCamera && !attached && (sp0.renderState & 0x80) === 0
+      const bake = sp0.followCamera && !attached && !follow
       const camRel = follow || bake || attached
       // Where particle i is now, in world space, for the children it starts.
       const post = (names: string[], dir: string, frame: number, i: number) => {
@@ -328,70 +468,78 @@ function ParticleField({ systems, weather, range = 1 }: { systems: System[]; wea
       }
       // Emit — for a placed generator with an emit range, only while the
       // camera (standing in for the player) is within it.
-      if (s.next < 0) s.next = frames
-      if (frames - s.next > sp.emission.every * 4) s.next = frames
-      const reach = sp.emitRange * range
-      const culled = !camRel && reach > 0 &&
-        tmp.p.set(sp.position[0], -sp.position[1], -sp.position[2]).distanceTo(player) > reach
-      if (culled) s.next = frames + sp.emission.every
-      while (s.next <= frames) {
-        for (let k = 0; k < s.perEmission; k++) {
-          const i = s.cursor
-          s.cursor = (s.cursor + 1) % s.capacity
-          spreadOffset(sp.spread, tmp.off)
-          if (attached) {
-            // World point: camera + base turned with the view + spread, then
-            // stored in DAT axes like every other particle (x, -y, -z).
-            // Turned with the heading only: up is the world's, ahead is level.
-            // With the camera's own tilt, an overview looking down put "10 up,
-            // 10 ahead" in the middle of the picture, and Jugner's rain mist
-            // (rai2: 30 additive puffs) whited out the view (2026-10-09).
-            camera.getWorldDirection(tmp.view)
-            tmp.view.y = 0
-            // Straight down: the top of the screen is the heading.
-            if (tmp.view.lengthSq() < 1e-6) tmp.view.set(0, 1, 0).applyQuaternion(camera.quaternion).setY(0)
-            tmp.view.normalize()
-            tmp.camUp.set(0, 1, 0)
-            tmp.right.crossVectors(tmp.view, tmp.camUp).normalize()
-            tmp.p.copy(camera.position)
-              .addScaledVector(tmp.right, sp.position[0])
-              .addScaledVector(tmp.camUp, -sp.position[1])
-              .addScaledVector(tmp.view, sp.position[2])
-            s.pos[i * 3] = tmp.p.x + tmp.off.x
-            s.pos[i * 3 + 1] = -tmp.p.y + tmp.off.y
-            s.pos[i * 3 + 2] = -tmp.p.z + tmp.off.z
-          } else {
-            s.pos[i * 3] = sp.position[0] + tmp.off.x
-            s.pos[i * 3 + 1] = sp.position[1] + tmp.off.y
-            s.pos[i * 3 + 2] = sp.position[2] + tmp.off.z
-            if (bake) {
-              s.pos[i * 3] += camera.position.x
-              s.pos[i * 3 + 1] -= camera.position.y
-              s.pos[i * 3 + 2] -= camera.position.z
+      for (const e of s.emitters) {
+        const sp = e.spawn
+        // A singleton (no life) is born once and stays.
+        const forever = sp.life <= 0
+        if (e.next < 0) e.next = frames
+        if (frames - e.next > sp.emission.every * 4) e.next = frames
+        const reach = sp.emitRange * range
+        const culled = !forever && !camRel && reach > 0 &&
+          tmp.p.set(sp.position[0], -sp.position[1], -sp.position[2]).distanceTo(player) > reach
+        if (culled) e.next = frames + sp.emission.every
+        while (e.next <= frames) {
+          for (let k = 0; k < e.perEmission; k++) {
+            const i = e.first + e.cursor
+            e.cursor = (e.cursor + 1) % e.capacity
+            spreadOffset(sp.spread, tmp.off)
+            if (attached) {
+              // World point: camera + base turned with the view + spread, then
+              // stored in DAT axes like every other particle (x, -y, -z).
+              // Turned with the heading only: up is the world's, ahead is level.
+              // With the camera's own tilt, an overview looking down put "10 up,
+              // 10 ahead" in the middle of the picture, and Jugner's rain mist
+              // (rai2: 30 additive puffs) whited out the view (2026-10-09).
+              camera.getWorldDirection(tmp.view)
+              tmp.view.y = 0
+              // Straight down: the top of the screen is the heading.
+              if (tmp.view.lengthSq() < 1e-6) tmp.view.set(0, 1, 0).applyQuaternion(camera.quaternion).setY(0)
+              tmp.view.normalize()
+              tmp.camUp.set(0, 1, 0)
+              tmp.right.crossVectors(tmp.view, tmp.camUp).normalize()
+              tmp.p.copy(camera.position)
+                .addScaledVector(tmp.right, sp.position[0])
+                .addScaledVector(tmp.camUp, -sp.position[1])
+                .addScaledVector(tmp.view, sp.position[2])
+              s.pos[i * 3] = tmp.p.x + tmp.off.x
+              s.pos[i * 3 + 1] = -tmp.p.y + tmp.off.y
+              s.pos[i * 3 + 2] = -tmp.p.z + tmp.off.z
+            } else {
+              s.pos[i * 3] = sp.position[0] + tmp.off.x
+              s.pos[i * 3 + 1] = sp.position[1] + tmp.off.y
+              s.pos[i * 3 + 2] = sp.position[2] + tmp.off.z
+              if (bake) {
+                s.pos[i * 3] += camera.position.x
+                s.pos[i * 3 + 1] -= camera.position.y
+                s.pos[i * 3 + 2] -= camera.position.z
+              }
             }
+            for (let c = 0; c < 3; c++) {
+              s.vel[i * 3 + c] = sp.velocity[c] + sp.velocityVariance[c] * rand()
+              s.scl[i * 3 + c] = sp.scale[c] + sp.scaleVariance[c] * Math.random()
+              s.rot[i * 3 + c] = sp.rotation[c] + sp.rotationVariance[c] * rand()
+            }
+            // Spread births across the frame they share, so a batch is not a sheet.
+            s.born[i] = e.next - Math.random()
+            s.expired[i] = 0
+            if (sp.children.birth.length) post(sp.children.birth, sp.dir, s.born[i], i)
           }
-          for (let c = 0; c < 3; c++) {
-            s.vel[i * 3 + c] = sp.velocity[c] + sp.velocityVariance[c] * rand()
-            s.scl[i * 3 + c] = sp.scale[c] + sp.scaleVariance[c] * Math.random()
-            s.rot[i * 3 + c] = sp.rotation[c] + sp.rotationVariance[c] * rand()
-          }
-          // Spread births across the frame they share, so a batch is not a sheet.
-          s.born[i] = s.next - Math.random()
-          s.expired[i] = 0
-          if (sp.children.birth.length) post(sp.children.birth, sp.dir, s.born[i], i)
+          e.next = forever ? Infinity : e.next + sp.emission.every + Math.random() * sp.emission.variance
         }
-        s.next += sp.emission.every + Math.random() * sp.emission.variance
       }
 
       // Step and draw.
       let drawn = 0
       for (let i = 0; i < s.capacity; i++) {
+        const sp = s.emitters[s.owner[i]].spawn
+        const forever = sp.life <= 0
+        const life = forever ? Infinity : sp.life
         const age = frames - s.born[i]
-        if (age >= sp.life && !s.expired[i]) {
+        if (age >= life && !s.expired[i]) {
           s.expired[i] = 1
-          if (sp.children.expire.length) post(sp.children.expire, sp.dir, s.born[i] + sp.life, i)
+          if (sp.children.expire.length) post(sp.children.expire, sp.dir, s.born[i] + life, i)
         }
-        if (!(age >= 0 && age < sp.life)) continue
+        if (!(age >= 0 && age < life)) continue
         if (sp.moves) {
           for (let c = 0; c < 3; c++) {
             s.vel[i * 3 + c] += sp.accel[c] * dt
@@ -399,9 +547,11 @@ function ParticleField({ systems, weather, range = 1 }: { systems: System[]; wea
           }
         }
         for (let c = 0; c < 3; c++) s.scl[i * 3 + c] += sp.scaleVelocity[c] * dt
+        // 0x0B: turns per frame (Bastok Markets' windmill).
+        for (let c = 0; c < 3; c++) s.rot[i * 3 + c] += sp.spin[c] * dt
 
         const a = sp.curves.alpha
-          ? (sampleKeyFrames(sp.curves.alpha, age / sp.life) * 255) / 128
+          ? (sampleKeyFrames(sp.curves.alpha, age / life) * 255) / 128
           : sp.tint[3] / 128
         // DAT → world: x, -y, -z; camera followers ride the camera.
         tmp.p.set(s.pos[i * 3], -s.pos[i * 3 + 1], -s.pos[i * 3 + 2])
@@ -420,6 +570,13 @@ function ParticleField({ systems, weather, range = 1 }: { systems: System[]; wea
           // A curtain: upright, turned about the vertical to face the camera.
           tmp.yaw.setFromAxisAngle(tmp.up, Math.atan2(camera.position.x - tmp.p.x, camera.position.z - tmp.p.z))
           tmp.m.compose(tmp.p, tmp.yaw, tmp.s).multiply(FLIP)
+        } else if (sp.billboard & 0x4000) {
+          // xim's XZ billboard: the authored mesh, turned about the vertical
+          // to face the camera (Bastok Markets' fountain streams).
+          tmp.yaw.setFromAxisAngle(tmp.up, Math.atan2(camera.position.x - tmp.p.x, camera.position.z - tmp.p.z))
+          tmp.e.set(s.rot[i * 3], s.rot[i * 3 + 1], s.rot[i * 3 + 2], 'ZYX')
+          tmp.q.setFromEuler(tmp.e)
+          tmp.m.compose(tmp.zero, tmp.q, tmp.s).premultiply(FLIP).premultiply(tmp.rot.makeRotationFromQuaternion(tmp.yaw)).setPosition(tmp.p)
         } else {
           tmp.e.set(s.rot[i * 3], s.rot[i * 3 + 1], s.rot[i * 3 + 2], 'ZYX')
           tmp.q.setFromEuler(tmp.e)
@@ -440,7 +597,7 @@ function ParticleField({ systems, weather, range = 1 }: { systems: System[]; wea
             // cold blue), on the byte/255 scale, doubled. Its alpha is 0 in
             // every shipped flash and has no curve, so it is not applied —
             // taken literally the flash would never show.
-            const t = age / sp.life
+            const t = age / life
             const ch = (curve: number[] | undefined, byte: number) => (curve ? sampleKeyFrames(curve, t) : byte / 255) * 2 * k
             tmp.flash.x += ch(sp.curves.r, sp.tint[0])
             tmp.flash.y += ch(sp.curves.g, sp.tint[1])
@@ -452,8 +609,15 @@ function ParticleField({ systems, weather, range = 1 }: { systems: System[]; wea
           // xim SpriteSheetFrameUpdater: frame floor((n + 1) x progress),
           // held on the last; without the updater, frame 0.
           const nf = s.frameOffsets.length / 2
-          const f = sp.flipbook ? Math.min(nf - 1, Math.floor((nf + 1) * (age / sp.life))) : 0
+          const f = sp.flipbook ? Math.min(nf - 1, Math.floor((nf + 1) * (age / life))) : 0
           s.uvOffset.setXY(drawn, s.frameOffsets[f * 2], s.frameOffsets[f * 2 + 1])
+        } else if (s.scrolls) {
+          // Scroll per frame, plus the u/v life curves (as SpawnAnimator).
+          let ou = sp.uvScroll[0] * age
+          let ov = sp.uvScroll[1] * age
+          if (!forever && sp.curves.u) ou += sampleKeyFrames(sp.curves.u, age / life)
+          if (!forever && sp.curves.v) ov += sampleKeyFrames(sp.curves.v, age / life)
+          s.uvOffset.setXY(drawn, ou % 1, ov % 1)
         }
         drawn++
       }
@@ -462,7 +626,7 @@ function ParticleField({ systems, weather, range = 1 }: { systems: System[]; wea
       s.mesh.visible = drawn > 0
       s.mesh.instanceMatrix.needsUpdate = true
       s.alpha.needsUpdate = true
-      if (s.frameOffsets) s.uvOffset.needsUpdate = true
+      if (s.frameOffsets || s.scrolls) s.uvOffset.needsUpdate = true
     }
     // The flash, added in gamma like the game, at most a white screen.
     const fl = Math.max(tmp.flash.x, tmp.flash.y, tmp.flash.z)

@@ -304,7 +304,8 @@ app.whenReady().then(async () => {
             const m = await metrics(st)
             const rect = await canvasRect()
             const img = await win.webContents.capturePage(rect || undefined)
-            const small = img.resize({ width: 480 })
+            // SWEEP_FULL=1 keeps the overview at full size (close-ups).
+            const small = process.env.SWEEP_FULL ? img : img.resize({ width: 480 })
             await fs.writeFile(join(outDir, 'img', `${zone.id}-${st}-over.jpg`), small.toJPEG(80))
             smalls[st] = grayOf(img.resize({ width: 96 })).g
             m.sameAs = Object.keys(smalls).filter(o => o !== st && meanDiff(smalls[o], smalls[st]) < 0.6)

@@ -242,6 +242,7 @@ export function parseZoneFile(
         if (!mesh.textureName) {
           // Blank texture name — resolved after all MMB blocks are parsed
           mesh.materialIndex = -1
+          mesh.untextured = true
           continue
         }
         const texIdx = textureNameMap.get(mesh.textureName)

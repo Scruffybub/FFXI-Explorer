@@ -40,6 +40,32 @@ export function setSubtractive(mat: THREE.Material): void {
   mat.blendDstAlpha = THREE.OneFactor
 }
 
+/**
+ * The texel an untextured generator mesh (blank texture name) stands on.
+ * Judged, not decoded: these meshes carry soft-edged vertex alpha and zero
+ * UVs, so their whole look is texel x colour x tint.
+ *
+ *   glows   lamp light pools and window glows (additive): grey 0x80, the
+ *           game's identity. Bastok Markets' arcade lamp (vertex 0.69, tint
+ *           205,138,68) then comes out amber (1, 0.75, 0.37) in the game's
+ *           maths; on white it saturated to a pale yellow.
+ *   water   the water's colour layers (Bastok's rvcol, allcol, funmiz, Port
+ *           Bastok's col1, Windurst's wt*; the caller decides, by water folder
+ *           or a flat sheet — WeatherParticles colourSheet): black. White
+ *           laid milk over every canal; black darkens them into the near-black
+ *           water the game shows (2026-10-10).
+ *
+ * Before this they took the zone's most-used texture, which scrolled one
+ * texel at a time across their zero UVs: Bastok's canals and fountain flashed
+ * through its colours (Ryan, 2026-10-10). Applied to the material colour,
+ * ahead of the stages. ?untex=grey|white|black forces one.
+ */
+export function untexturedTexel(mat: THREE.MeshBasicMaterial, glow: boolean): void {
+  const force = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('untex') : null
+  const v = force === 'white' ? 1 : force === 'black' ? 0 : force === 'grey' ? 0.5 : glow ? 0.5 : 0
+  mat.color.setRGB(v, v, v, THREE.SRGBColorSpace)
+}
+
 export function applySpawnStages(mat: THREE.MeshBasicMaterial, tint: number[], lit = true): THREE.Vector4 {
   const decode = (c: number) => (c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4))
   // Colour is gamma-authored; alpha is a weight and is not.
