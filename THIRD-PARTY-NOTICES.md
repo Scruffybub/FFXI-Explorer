@@ -78,7 +78,7 @@ here so anyone relying on it can make their own assessment.
 **Files:** `src/renderer/src/lib/ffxi-dat/GeneratorParser.ts`, `D3mParser.ts`,
 `SpriteParser.ts`, `EnvironmentParser.ts`, `CollisionParser.ts` (water height),
 `MzbParser.ts` (point-light table), `src/renderer/src/lib/zoneLighting.ts`,
-`zoneLamps.ts`, `spawnStages.ts`, `GammaBlendPass.ts`,
+`zoneLamps.ts`, `spawnStages.ts`, `GammaBlendPass.ts`, `HazePass.ts`,
 `src/renderer/src/components/SkyLayers.tsx`, `WeatherParticles.tsx`,
 `LampLights.tsx`, `LensFlare.tsx`, the zone transparency rule in
 `ZoneViewer.tsx`, and `src/renderer/src/lib/uiLook.ts` (the game's menu art)

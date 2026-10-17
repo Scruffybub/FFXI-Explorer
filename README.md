@@ -61,6 +61,11 @@ have them, dungeons a page per floor, and any of them can be saved as a PNG.
 **Weather geometry** — every zone carries sky and weather meshes the client
 swaps between at runtime. They can be picked and drawn.
 
+**UI looks** — the app can wear the game's own menus: any of FFXI's eight
+window styles, with its frames, menu font, capsule buttons, scroll bars and
+pointing hand, all read from your installation. Or *Modern*, a sharp dark-and-gold
+style. Chosen on first launch; changed any time under **Interface**.
+
 ---
 
 ## Installing
