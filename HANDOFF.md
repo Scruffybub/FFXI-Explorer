@@ -370,6 +370,35 @@ strength red; `?nohaze=1` skips the pass). Altepa's live values: dis1 alpha
 0.1-0.46, ka01 0.1-0.23, before the x2 stage. Needs post-processing on, like
 Generator water's blend; without it haze is not drawn.
 
+**Water sweep (2026-10-11 to 10-17), toward Generator water out of beta.**
+`scripts/water-sweep.cjs` aims at each zone's four widest water folders,
+captures them with Generator water off then on (W|A side by side) and flags
+brightening, new violet, and flicker. `SWEEP_EXTRA` is appended last to the
+query (the last repeated key wins: `&scene_zoneWeather=true` for the lit look);
+`SWEEP_BODIES` is a file of page JS returning `[{dir, kind, size, at, from?}]`
+for close-ups. All 285 zones, unlit and lit, run clean. Two fixes came out of it:
+- **Time-of-day curves** (0x60-0x63) now drive Generator water too
+  (SpawnAnimator): colour set from 2 x the curve, alpha multiplied. Bibiki Bay
+  and Feretory's channels went purple -> turquoise, Phanauet Channel's lake
+  milk-white -> teal.
+- **Lighting**: only generators with render-state bit **0x0001** are lit (xim
+  `lightingEnabled`; D3D passes the colour through when lighting is off), and a
+  lit mesh takes the light along its own DAT normal. ZoneViewer flips every
+  prefab's normals except those `isWaterPrefab` keeps raw; FFXI_LIGHT_VERTEX
+  negates to undo the flip, so raw ones (`geometry.userData.rawNormals`) must
+  not be negated. Negated, Foret de Hennetiel's river sheets faced down and got
+  ambient only, about a third of their light. Only matters with Zone weather on.
+  `__ffxiLight` (census) exposes the light uniforms.
+Ryan judged correct: Dangruf Wadi's steaming pools, Beaucedine's cloud sea
+(the "grey slab" — a little pixelated, a filtering question). Still open:
+Foret de Hennetiel. Its river is now bright enough but more violet than
+Ryan's in-game shot, which is redder (river tint 75,0,197 over a dark red
+`nam4` texture; xim applies the tint after the light, as here). Its open sea
+shows hard-edged pink, teal and navy blocks: the `bs#` sheets (white texel,
+vertex colours magenta 180,0,84 / teal 42,119,174 per section, time-of-day
+colour 0.03-0.1, alpha 40). Needs an in-game shot of the sea. The game's lily
+pads on the river do not show in ours either — not looked into.
+
 **Batching**: Zone effects draws every generator sharing link, model, blend,
 flags and tint as one InstancedMesh, with an emitter per generator (own clock,
 own run of slots, `owner` per slot). Everywhere, fps off / unbatched / batched:

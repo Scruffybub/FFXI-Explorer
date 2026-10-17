@@ -21,7 +21,17 @@ import { ffxiLight, FFXI_LIGHT_PARS, FFXI_LIGHT_VERTEX } from './zoneLighting'
  * so the stage-0 clamp can happen before it is applied.
  *
  * `lit` false leaves Zone weather's terrain light out: the sky layers (clouds,
- * sun, stars) carry their own time-of-day colour instead.
+ * sun, stars) carry their own time-of-day colour instead, and a generator
+ * without render-state bit 0x0001 is unlit in the game too (xim
+ * ParticleInitializers.kt lightingEnabled; D3D passes the colour through when
+ * lighting is off).
+ *
+ * FFXI_LIGHT_VERTEX negates the normal to undo the flip ZoneViewer gives every
+ * prefab it does not take for water. Prefabs it does (`rawNormals`) keep the
+ * DAT's normals and must not be negated again: they faced down, missed the sun
+ * and kept only the ambient, about a third of their light. Foret de
+ * Hennetiel's magenta rivers drew near-black indigo (Ryan's in-game
+ * screenshot, 2026-10-11).
  */
 /**
  * D3D's subtractive blend (blend byte low nibble 1 or 2): screen − source x
@@ -66,7 +76,7 @@ export function untexturedTexel(mat: THREE.MeshBasicMaterial, glow: boolean): vo
   mat.color.setRGB(v, v, v, THREE.SRGBColorSpace)
 }
 
-export function applySpawnStages(mat: THREE.MeshBasicMaterial, tint: number[], lit = true): THREE.Vector4 {
+export function applySpawnStages(mat: THREE.MeshBasicMaterial, tint: number[], lit = true, rawNormals = false): THREE.Vector4 {
   const decode = (c: number) => (c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4))
   // Colour is gamma-authored; alpha is a weight and is not.
   const uTint = new THREE.Vector4(
@@ -80,7 +90,7 @@ export function applySpawnStages(mat: THREE.MeshBasicMaterial, tint: number[], l
     // chain). In gamma that is × light; these colours are linear, so × light^2.2.
     shader.vertexShader = shader.vertexShader
       .replace('void main() {', `${FFXI_LIGHT_PARS}\nvoid main() {`)
-      .replace('#include <fog_vertex>', `#include <fog_vertex>\n${FFXI_LIGHT_VERTEX}`)
+      .replace('#include <fog_vertex>', `#include <fog_vertex>\n${rawNormals ? FFXI_LIGHT_VERTEX.split('-normalize(').join('normalize(') : FFXI_LIGHT_VERTEX}`)
     shader.fragmentShader = shader.fragmentShader
       .replace('void main() {', `uniform vec4 uSpawnTint;\n${GAMMA_OUT_GLSL.pars}\n${FFXI_LIGHT_PARS}\nvoid main() {`)
       .replace('#include <dithering_fragment>', `#include <dithering_fragment>\n${GAMMA_OUT_GLSL.main}`)
@@ -92,6 +102,6 @@ export function applySpawnStages(mat: THREE.MeshBasicMaterial, tint: number[], l
         '  spawnStage0.a * uSpawnTint.a * 2.0), 0.0, 1.0);',
       ].join('\n'))
   }
-  mat.customProgramCacheKey = () => (lit ? 'genspawn-stages' : 'genspawn-stages-unlit')
+  mat.customProgramCacheKey = () => (lit ? (rawNormals ? 'genspawn-stages-raw' : 'genspawn-stages') : 'genspawn-stages-unlit')
   return uTint
 }

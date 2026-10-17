@@ -894,6 +894,10 @@ interface SpawnAnim {
   tint: THREE.Vector4                    // the stage uniform; w is tint alpha on /128
   life: number                           // frames per particle; 0 = forever
   curves: { alpha?: number[]; u?: number[]; v?: number[] }
+  /** The tint bytes (after waterTone), and the time-of-day curves over them. */
+  base: number[]
+  tone: number
+  tod: { r?: number[]; g?: number[]; b?: number[]; alpha?: number[] }
 }
 
 /**
@@ -910,19 +914,34 @@ interface SpawnAnim {
  * simply the frame count modulo the life. The U/V curves add to the texture
  * offset — that slide is the rolling surf. The alpha curve is the tint alpha
  * on the byte/255 scale, converted to the /128 scale the stage patch uses.
+ *
+ * Time-of-day curves (0x60-0x63), as the sky layers use them: a colour curve
+ * sets that channel from the hour, an alpha curve multiplies the alpha. Many
+ * water layers carry them — Bibiki Bay's shallows take their colour from
+ * them — and ignoring them left those layers at their raw tint (water sweep,
+ * 2026-10-11).
  */
-function SpawnAnimator({ anims }: { anims: SpawnAnim[] }) {
+function SpawnAnimator({ anims, timeOfDayRef }: { anims: SpawnAnim[]; timeOfDayRef: React.MutableRefObject<number> }) {
   useFrame(({ clock }) => {
     const frames = clock.getElapsedTime() * EFFECT_FPS
+    const day = ((((timeOfDayRef.current ?? 12) / 24) % 1) + 1) % 1
+    const decode = (c: number) => (c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4))
     for (const a of anims) {
       let ox = a.uv[0] * frames
       let oy = a.uv[1] * frames
+      let alpha = a.base[3] / 128
       if (a.life > 0) {
         const progress = (frames % a.life) / a.life
         if (a.curves.u) ox += sampleKeyFrames(a.curves.u, progress)
         if (a.curves.v) oy += sampleKeyFrames(a.curves.v, progress)
-        if (a.curves.alpha) a.tint.w = (sampleKeyFrames(a.curves.alpha, progress) * 255) / 128
+        if (a.curves.alpha) alpha = (sampleKeyFrames(a.curves.alpha, progress) * 255) / 128
       }
+      const t = a.tod
+      if (t.r) a.tint.x = decode(2 * sampleKeyFrames(t.r, day) * a.tone)
+      if (t.g) a.tint.y = decode(2 * sampleKeyFrames(t.g, day) * a.tone)
+      if (t.b) a.tint.z = decode(2 * sampleKeyFrames(t.b, day) * a.tone)
+      if (t.alpha) alpha *= sampleKeyFrames(t.alpha, day)
+      a.tint.w = alpha
       a.tex?.offset.set(ox % 1, oy % 1)
     }
   })
@@ -2941,6 +2960,8 @@ export default function ZoneViewer({
         normalArray[i] = nx; normalArray[i + 1] = ny; normalArray[i + 2] = nz
       }
       geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normalArray, 3))
+      // Generator lighting needs to know which way these went (applySpawnStages).
+      geometry.userData.rawNormals = isWater
 
       // The fourth vertex-colour channel is a blend weight, not padding. FFXI
       // lays overlay tiles over base terrain and fades them in with it: a patch
@@ -4089,7 +4110,8 @@ export default function ZoneViewer({
           if (!map) untexturedTexel(mat, nib === 8 && !waterDirs.has(sp.dir) && !colourSheet(zoneData, prefabIdx))
           const tone = waterTone(sp.dir, prefab.textureName)
           const tint = tone === 1 ? sp.tint : [sp.tint[0] * tone, sp.tint[1] * tone, sp.tint[2] * tone, sp.tint[3]]
-          const tintUniform = applySpawnStages(mat, tint)
+          // Render-state bit 0x0001: lit by the zone's light (see applySpawnStages).
+          const tintUniform = applySpawnStages(mat, tint, (sp.renderState & 0x0001) !== 0, !!baseGeo.userData.rawNormals)
           materials.push(mat)
           const mesh = new THREE.InstancedMesh(geo, mat, 1)
           mesh.userData.textureName = prefab.textureName ?? ''
@@ -4106,8 +4128,9 @@ export default function ZoneViewer({
           mesh.instanceMatrix.needsUpdate = true
           instancedMeshes.push(mesh)
           const animated = sp.life > 0 && !!(sp.curves.alpha || sp.curves.u || sp.curves.v)
-          if (sp.uvScroll[0] || sp.uvScroll[1] || animated) {
-            spawnAnims.push({ tex: map, uv: sp.uvScroll, tint: tintUniform, life: sp.life, curves: sp.curves })
+          const tod = sp.todCurves ?? {}
+          if (sp.uvScroll[0] || sp.uvScroll[1] || animated || Object.keys(tod).length) {
+            spawnAnims.push({ tex: map, uv: sp.uvScroll, tint: tintUniform, life: sp.life, curves: sp.curves, base: tint, tone, tod })
           }
           // One line per drawn mesh, so a harness can find the prefab index to
           // isolate with ?pickprefab= — the chunk name a generator uses is not
@@ -4181,6 +4204,7 @@ export default function ZoneViewer({
   useEffect(() => {
     hazeUniforms.uHazePx.value = HAZE_PX_OVERRIDE ?? scene.hazeStrength
     if (CENSUS) (window as unknown as { __haze?: typeof hazeUniforms }).__haze = hazeUniforms
+    if (CENSUS) (window as unknown as { __ffxiLight?: typeof ffxiLight }).__ffxiLight = ffxiLight
   }, [scene.hazeStrength])
 
   // Lamp light follows Scene -> Zone effects: a uniform, so no rebuild.
@@ -4507,7 +4531,7 @@ export default function ZoneViewer({
           fogScale={scene.weatherFogScale}
         />
       )}
-      {spawnAnims.length > 0 && <SpawnAnimator anims={spawnAnims} />}
+      {spawnAnims.length > 0 && <SpawnAnimator anims={spawnAnims} timeOfDayRef={timeOfDayRef} />}
       {waterMaterials.length > 0 && (
         <WaterAnimator materials={waterMaterials} vertexTint={scene.waterTint} />
       )}
