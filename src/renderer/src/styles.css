@@ -827,3 +827,150 @@ select {
   cursor: pointer;
 }
 .clear-equip:hover { color: var(--text); border-color: var(--accent-dim); }
+
+/* ── UI look (lib/uiLook.ts) ───────────────────────────────────────── */
+/*
+ * <html data-look="classic|modern">. Classic frames each panel with the game's
+ * own window art (--win-frame, a 9-slice of the style's corners and edges, and
+ * --win-bg, its background tile, both read from the install at startup) and
+ * sets the labels in the game's menu font. Modern is our own styling after the
+ * official site: dark panels, gold hairlines, Noto Serif.
+ *
+ * Help text — info popups, notes, release notes, errors — stays in the normal
+ * sans-serif in both: the game font is for labels, not paragraphs (Ryan,
+ * 2026-10-17).
+ */
+:root { --ui-font: 'Segoe UI', system-ui, sans-serif; --help-font: 'Segoe UI', system-ui, sans-serif; }
+
+:root[data-look='modern'] {
+  --bg: #0a0e15;
+  --panel: #0d131c;
+  --panel-2: #162030;
+  --line: rgba(201, 168, 92, 0.2);
+  --text: #e6e3da;
+  --muted: #9ba3b1;
+  --accent: #c9a85c;
+  --accent-dim: #4d3f22;
+  --gold: #c9a85c;
+  --ui-font: 'Noto Serif', Georgia, serif;
+}
+
+:root[data-look='classic'] {
+  --bg: #07070f;
+  --panel: #14122c;
+  --panel-2: rgba(255, 255, 255, 0.08);
+  --line: rgba(255, 255, 255, 0.14);
+  --text: #f2f2f6;
+  --muted: #b4b6c8;
+  --accent: #b8c4ff;
+  --accent-dim: rgba(150, 165, 255, 0.28);
+  --ui-font: 'FFXI Menu', 'Segoe UI', system-ui, sans-serif;
+}
+
+/* Labels and buttons take the look's font; help text keeps the plain one. */
+:root[data-look] body { font-family: var(--ui-font); }
+:root[data-look] :is(button, select, input) { font-family: inherit; }
+:root[data-look] :is(.info-pop, .note, .update-notes, .error-box, .setup-card p, .zone-path, .path, .inspector dl, .placing-hint, .toast) {
+  font-family: var(--help-font);
+}
+
+/* Classic: the game's frame and background on every window-like box. */
+:root[data-look='classic'] :is(.panel, .sidebar, .modal, .setup-card, .inspector) {
+  background: var(--win-bg) repeat;
+  border: 6px solid transparent;
+  border-image-source: var(--win-frame);
+  border-image-slice: 24;
+  border-image-width: 24px;
+  border-image-repeat: stretch;
+  border-radius: 0;
+}
+/* The menu font is a 16px bitmap: anything else scales its pixels. */
+:root[data-look='classic'][data-look-font='game'] .control-row .value { font-family: var(--ui-font); }
+:root[data-look='classic'][data-look-font='game'] :is(
+  .section-head, .control, .control.toggle, .control-row .value, .zone-name, .view-switch button,
+  .mode-switch button, .preset, .reset, .place-btn, select, .search, .modal h2, .update-actions button,
+  .view-tools button, .sidebar-head h1, .look-name
+) {
+  font-size: 16px;
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  text-shadow: 1px 1px 0 rgba(0, 0, 0, 0.45);
+}
+:root[data-look='classic'] .section-head { text-transform: none; letter-spacing: 0.04em; padding: 9px 12px; }
+:root[data-look='classic'] .section { border-bottom-color: rgba(255, 255, 255, 0.1); }
+:root[data-look='classic'] :is(.search, select) { background: rgba(0, 0, 20, 0.45); }
+:root[data-look='classic'] .zone-list li button.active { background: rgba(150, 165, 255, 0.24); box-shadow: inset 0 0 0 1px rgba(220, 225, 255, 0.35); }
+
+/* Modern: gold hairline frames and spaced serif titles. */
+:root[data-look='modern'] :is(.panel, .sidebar) {
+  background: linear-gradient(180deg, #0f1620, #0a0f16);
+}
+:root[data-look='modern'] .panel { border-left: 1px solid rgba(201, 168, 92, 0.45); }
+:root[data-look='modern'] .sidebar { border-right: 1px solid rgba(201, 168, 92, 0.45); }
+:root[data-look='modern'] :is(.modal, .setup-card, .inspector) {
+  background: linear-gradient(180deg, rgba(14, 20, 30, 0.97), rgba(8, 12, 18, 0.97));
+  border: 1px solid rgba(201, 168, 92, 0.6);
+  border-radius: 2px;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6), 0 0 0 4px rgba(201, 168, 92, 0.08), 0 18px 40px rgba(0, 0, 0, 0.6);
+}
+:root[data-look='modern'] .section-head {
+  color: #e9dcb6;
+  font-weight: 500;
+  letter-spacing: 0.26em;
+}
+:root[data-look='modern'] .section { border-bottom: 0; background: linear-gradient(90deg, transparent, rgba(201, 168, 92, 0.35) 15%, rgba(201, 168, 92, 0.35) 85%, transparent) bottom / 100% 1px no-repeat; }
+:root[data-look='modern'] :is(.control, .control.toggle) { font-size: 12.5px; }
+:root[data-look='modern'] .zone-name { font-size: 13px; }
+:root[data-look='modern'] .view-switch button { font-weight: 500; letter-spacing: 0.12em; }
+:root[data-look='modern'] :is(.view-switch button.active, .mode-switch button.active) { background: linear-gradient(180deg, rgba(201, 168, 92, 0.28), rgba(201, 168, 92, 0.08)); color: #f3e6c0; }
+:root[data-look='modern'] .zone-list li button.active { background: linear-gradient(90deg, rgba(201, 168, 92, 0.24), rgba(201, 168, 92, 0.04)); box-shadow: inset 2px 0 0 var(--gold); }
+:root[data-look='modern'] input[type='range']::-webkit-slider-thumb { border-radius: 1px; transform: rotate(45deg); background: linear-gradient(135deg, #f3e3b3, #a77d33); }
+
+/* ── First-launch look picker ──────────────────────────────────────── */
+.look-picker { width: 760px; max-width: calc(100vw - 40px); }
+.look-picker > p { font-family: var(--help-font); color: var(--muted); font-size: 12px; margin: 0 0 14px; }
+.look-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.look-card {
+  cursor: pointer;
+  padding: 10px 12px;
+  min-height: 92px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--text);
+  text-align: left;
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+}
+.look-card:hover, .look-card:focus-visible { outline-color: var(--accent); }
+.look-grid .look-card.classic {
+  background: var(--win-bg) repeat;
+  border: 6px solid transparent;
+  border-image-source: var(--win-frame);
+  border-image-slice: 24;
+  border-image-width: 24px;
+  border-image-repeat: stretch;
+  font-family: 'FFXI Menu', 'Segoe UI', sans-serif;
+  font-size: 16px;
+  text-shadow: 1px 1px 0 rgba(0, 0, 0, 0.45);
+  color: #f2f2f6;
+}
+.look-grid .look-card.modern {
+  background: linear-gradient(180deg, #0f1620, #0a0f16);
+  border: 1px solid rgba(201, 168, 92, 0.6);
+  font-family: 'Noto Serif', Georgia, serif;
+  color: #e6e3da;
+}
+.look-card.modern .look-name { color: #e9dcb6; letter-spacing: 0.2em; text-transform: uppercase; font-size: 12px; }
+.look-card .look-sample { opacity: 0.85; }
+.look-card.disabled { opacity: 0.4; cursor: default; }
+
+/* Classic windows with Modern text (Interface -> Text). */
+:root[data-look='classic'][data-look-font='modern'] { --ui-font: 'Noto Serif', Georgia, serif; }
+:root[data-look='classic'][data-look-font='modern'] :is(.control, .control.toggle) { font-size: 12.5px; }
+:root[data-look='classic'][data-look-font='modern'] .zone-name { font-size: 13px; }
+:root[data-look='classic'][data-look-font='modern'] .section-head { font-weight: 500; letter-spacing: 0.22em; text-transform: uppercase; }
+:root[data-look='classic'][data-look-font='modern'] .view-switch button { font-weight: 500; letter-spacing: 0.12em; }
+:root[data-look='classic'][data-look-font='modern'] :is(.section-head, .control, .zone-name, .view-switch button, .mode-switch button, .preset) {
+  text-shadow: 1px 1px 0 rgba(0, 0, 0, 0.45);
+}

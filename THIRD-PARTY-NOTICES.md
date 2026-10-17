@@ -80,19 +80,32 @@ here so anyone relying on it can make their own assessment.
 `MzbParser.ts` (point-light table), `src/renderer/src/lib/zoneLighting.ts`,
 `zoneLamps.ts`, `spawnStages.ts`, `GammaBlendPass.ts`,
 `src/renderer/src/components/SkyLayers.tsx`, `WeatherParticles.tsx`,
-`LampLights.tsx`, `LensFlare.tsx`, and the zone transparency rule in
-`ZoneViewer.tsx`
+`LampLights.tsx`, `LensFlare.tsx`, the zone transparency rule in
+`ZoneViewer.tsx`, and `src/renderer/src/lib/uiLook.ts` (the game's menu art)
 
 The layouts of generator chunks, D3M effect meshes, KeyFrame curves and
 environment (weather) records, the zone's point lights (generator light links
 and the MZB light table), particle setup flags (billboards, depth writes,
-haze), FFXI's texture-stage and lighting maths, and its zone transparency rule
-were worked out with reference to
+haze), FFXI's texture-stage and lighting maths, its zone transparency rule, and
+where the game keeps its menu window styles and font were worked out with
+reference to
 [kuluu-ffxi](https://github.com/jondwillis/kuluu-ffxi) and to xim in
 [Heyrio/FFXI-BROWSER-GAME](https://github.com/Heyrio/FFXI-BROWSER-GAME), both
 GPL-3.0. Their source was read as a description of the file formats and of the
 game's behaviour; no code was copied, and these implementations were written
 independently. This notice records that research.
+
+---
+
+## Noto Serif (SIL Open Font License 1.1)
+
+**Files:** `@fontsource/noto-serif` (Latin, weights 400, 500 and 600), bundled
+into the app for the Modern look.
+
+Noto Serif is Copyright 2022 The Noto Project Authors
+(https://github.com/notofonts/latin-greek-cyrillic), licensed under the SIL Open
+Font License, Version 1.1 (https://openfontlicense.org). It is redistributed
+unmodified, as packaged by Fontsource.
 
 ---
 
@@ -102,6 +115,6 @@ FINAL FANTASY XI is a registered trademark of Square Enix Holdings Co., Ltd.
 This project is not affiliated with, endorsed by, or sponsored by Square Enix.
 
 **No game assets are distributed.** The application reads zone geometry,
-textures, models, animations and music from the Final Fantasy XI installation
-already present on the user's own machine. Nothing is uploaded, and no server,
+textures, models, animations, music, and the Classic look's menu art and font,
+from the Final Fantasy XI installation already present on the user's own machine. Nothing is uploaded, and no server,
 account or internet connection is involved.

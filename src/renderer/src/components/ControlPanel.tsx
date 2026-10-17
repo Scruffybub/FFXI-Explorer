@@ -8,6 +8,7 @@ import { PRESETS } from '../lib/settings'
 import type { MusicStatus } from '../lib/zoneMusic'
 import type { MapScale } from './ZoneViewer'
 import { WEATHER_TYPES, nativeWeather, weatherDir } from '../lib/weatherTypes'
+import { UI_LOOKS, type UiLook, type UiText } from '../lib/uiLook'
 
 interface ControlPanelProps {
   lighting: LightingSettings
@@ -41,6 +42,13 @@ interface ControlPanelProps {
   updateCheckState: 'idle' | 'checking' | 'current' | 'failed'
   onCheckUpdatesChange: (on: boolean) => void
   onCheckNow: () => void
+  /** The app's look (lib/uiLook.ts); Classic needs the game's art read first. */
+  uiLook: UiLook
+  classicReady: boolean
+  onUiLook: (look: UiLook) => void
+  /** Classic's text: the game's menu font or Modern's. */
+  uiText: UiText
+  onUiText: (text: UiText) => void
 }
 
 /**
@@ -219,6 +227,7 @@ export default function ControlPanel({
   onLighting, onPost, onScene, onPointLights, onUpdateLight, onRemoveLight,
   onSelectLight, onTogglePlacing, onPreset, onReset,
   appVersion, checkUpdates, updateCheckState, onCheckUpdatesChange, onCheckNow,
+  uiLook, classicReady, onUiLook, uiText, onUiText,
 }: ControlPanelProps) {
   const lit = lighting.mode === 'lit'
   const selected = pointLights.lights.find(l => l.id === selectedLightId) ?? null
@@ -1055,6 +1064,34 @@ export default function ControlPanel({
           onChange={v => onScene({ showCollision: v })}
           info="Draw the collision mesh FFXI actually uses for movement, in green. It is not the visible geometry — it carries invisible walls and leaves out decoration — so it will not match the art everywhere. This is exactly what Walk mode stands on."
         />
+      </Section>
+
+      <Section
+        title="Interface"
+        defaultOpen={false}
+        info="How the app's own panels look. Classic uses Final Fantasy XI's menu art and font, read from your install, in any of the game's eight window styles. Modern is a clean high-resolution style."
+      >
+        <SelectField
+          label="UI look"
+          value={uiLook}
+          onChange={v => onUiLook(v as UiLook)}
+          info="Window 1 to 8 are the game's own window styles, as chosen in its config menu. Help text like this stays in a plain font in every look."
+        >
+          {UI_LOOKS.map(l => (
+            <option key={l.id} value={l.id} disabled={l.id !== 'modern' && !classicReady}>{l.name}</option>
+          ))}
+        </SelectField>
+        {uiLook !== 'modern' && (
+          <SelectField
+            label="Text"
+            value={uiText}
+            onChange={v => onUiText(v as UiText)}
+            info="The lettering on the Classic windows: the game's own menu font, or the Modern look's smoother serif font for a sharper, high-resolution read."
+          >
+            <option value="game">Game font</option>
+            <option value="modern">Modern font</option>
+          </SelectField>
+        )}
       </Section>
 
       <Section

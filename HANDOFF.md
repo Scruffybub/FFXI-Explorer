@@ -399,6 +399,39 @@ vertex colours magenta 180,0,84 / teal 42,119,174 per section, time-of-day
 colour 0.03-0.1, alpha 40). Needs an in-game shot of the sea. The game's lily
 pads on the river do not show in ours either — not looked into.
 
+**UI look (2026-10-17), stage 1 of 3.** Interface -> UI look: Classic Window
+1-8 (the game's own window styles) or Modern, and Interface -> Text (Classic
+windows with the game font or Modern's Noto Serif, `ffxi-explorer.uiText`,
+`data-look-font="modern"`; Ryan asked for it); a picker on the very first
+launch (no `ffxi-explorer.uiLook` in localStorage). `lib/uiLook.ts` reads the
+art from the install at startup, never shipped: window style n is file id
+13 + n (ROM/0/14-21), group `menu    win00` over `newtex` (128x128
+background), `corner` (24px corners at uv 1,1 / 7,1 / 1,7 / 7,7), `hfr1`/`vfr1`
+(5px edges). The frame pieces are opaque silver or gold on black — the game
+blends black away — so brightness becomes alpha. They are drawn into one 58px
+9-slice for CSS `border-image` (`--win-frame`), the tile darkened to 0.62
+(`--win-bg`). ROM/119/51 is the shared menu kit: `font    moji` (16px cells,
+64 per row, ASCII from cell 0), `buttonto` (capsule buttons), `colorbal`
+(orbs, Prev/Next), `hnf999` (scroll bar), `keytop`, `gauge`, `yubi` (the hand
+cursor). `lib/bitmapFont.ts` turns `font moji` into a real TrueType font at
+runtime (`FFXI Menu`): the glyphs are white inside a baked black outline, so
+only pixels with brightness >= 112 are ink (counting the outline drew every
+letter a pixel bold); a CSS shadow puts the outline back. It must be drawn at
+16px. `<html data-look="classic|modern">` drives styles.css; help text (info
+popups, notes, release notes) stays in Segoe UI in every look (Ryan). Modern
+is our own CSS after finalfantasyxi.com's look (dark panels, gold hairlines),
+with Noto Serif bundled (`@fontsource/noto-serif`, OFL). The site's own images
+are Square Enix artwork and would have to ship, so none are used. Stage 2:
+toggles, sliders, dropdowns and buttons in the game's art (capsules, orbs) and
+in Modern's gold; stage 3: scroll bar, hand cursor. Scan scripts for the UI
+files were scratch work; the facts are above.
+
+**package.json had lost its build tools** at v0.1.0 (176fb06 dropped
+`scripts` and `devDependencies`; only the lockfile still had them). Any
+`npm install` then pruned electron, electron-vite, typescript and
+electron-builder. Restored 2026-10-17 from the lockfile's own record; the
+versions are unchanged.
+
 **Batching**: Zone effects draws every generator sharing link, model, blend,
 flags and tint as one InstancedMesh, with an emitter per generator (own clock,
 own run of slots, `owner` per slot). Everywhere, fps off / unbatched / batched:

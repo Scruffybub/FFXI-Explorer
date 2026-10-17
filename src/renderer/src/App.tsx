@@ -7,6 +7,8 @@ import ZoneViewer, { type MapScale } from './components/ZoneViewer'
 import UpdateNotice from './components/UpdateNotice'
 import ControlPanel from './components/ControlPanel'
 import ModelBrowser from './components/ModelBrowser'
+import LookPicker from './components/LookPicker'
+import { applyLook, loadClassicKit, saveLook, savedLook, saveText, savedText, type ClassicKit, type UiLook, type UiText } from './lib/uiLook'
 import { composeCharacter, type CharacterSpec, type ComposedCharacter } from './lib/characterModel'
 import {
   DEFAULT_LIGHTING, DEFAULT_POST, DEFAULT_SCENE, DEFAULT_POINT_LIGHTS,
@@ -169,6 +171,28 @@ export default function App() {
     setCheckUpdates(on)
     localStorage.setItem(UPDATE_PREF_KEY, on ? 'on' : 'off')
   }, [])
+
+  // ── UI look (lib/uiLook.ts) ─────────────────────────────────────────────
+  // Null until the player picks one: the first launch shows the picker. The
+  // Classic kit (window art and menu font) is read from the install once.
+  const [uiLook, setUiLook] = useState<UiLook | null>(() => savedLook())
+  const [lookKit, setLookKit] = useState<ClassicKit | null>(null)
+  const [lookKitFailed, setLookKitFailed] = useState(false)
+  useEffect(() => {
+    if (!ffxiPath) return
+    let cancelled = false
+    loadClassicKit(ffxiPath)
+      .then(kit => { if (!cancelled) setLookKit(kit) })
+      .catch(e => { console.warn('[uiLook] classic kit not read:', e); if (!cancelled) setLookKitFailed(true) })
+    return () => { cancelled = true }
+  }, [ffxiPath])
+  const [uiText, setUiText] = useState<UiText>(() => savedText())
+  useEffect(() => { applyLook(uiLook ?? 'modern', lookKit, uiText) }, [uiLook, lookKit, uiText])
+  const chooseLook = useCallback((look: UiLook) => { saveLook(look); setUiLook(look) }, [])
+  const chooseText = useCallback((text: UiText) => { saveText(text); setUiText(text) }, [])
+  const lookPicker = ffxiPath && uiLook === null
+    ? <LookPicker kit={lookKit} kitFailed={lookKitFailed} onPick={chooseLook} />
+    : null
 
   const [uiHidden, setUiHidden] = useState(false)
   const [fullscreen, setFullscreen] = useState(false)
@@ -509,6 +533,7 @@ export default function App() {
           clipIndex={charClip}
           onClipIndex={setCharClip}
         />
+        {lookPicker}
       </div>
     )
   }
@@ -699,9 +724,15 @@ export default function App() {
         updateCheckState={checkState}
         onCheckUpdatesChange={setUpdatePref}
         onCheckNow={() => runUpdateCheck(true)}
+        uiLook={uiLook ?? 'modern'}
+        classicReady={!!lookKit}
+        onUiLook={chooseLook}
+        uiText={uiText}
+        onUiText={chooseText}
       />
 
-      {updateInfo && (
+      {lookPicker}
+      {updateInfo && !lookPicker && (
         <UpdateNotice
           info={updateInfo}
           onDismiss={() => setUpdateInfo(null)}
