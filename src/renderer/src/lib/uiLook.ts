@@ -70,6 +70,8 @@ export interface ClassicKit {
   styles: ClassicStyle[] // index 0 = window style 1
   /** The CSS family name the menu font was registered under, or null if it failed. */
   font: string | null
+  /** Control art as CSS variables (--ui-capsule and friends), or empty if it failed. */
+  controls: Record<string, string>
 }
 
 export const CLASSIC_FONT = 'FFXI Menu'
@@ -143,6 +145,52 @@ function backgroundImage(t: Texture): string {
   return c.toDataURL()
 }
 
+/** A region of a texture as its own canvas, black made clear and tinted (0..1 per channel). */
+function piece(t: Texture, x: number, y: number, w: number, h: number, tint: number[], alpha: number): HTMLCanvasElement {
+  const src = canvasOf(t, true)
+  const c = document.createElement('canvas'); c.width = w; c.height = h
+  const g = c.getContext('2d')!
+  g.drawImage(src, x, y, w, h, 0, 0, w, h)
+  const d = g.getImageData(0, 0, w, h)
+  for (let i = 0; i < d.data.length; i += 4) {
+    d.data[i] *= tint[0]; d.data[i + 1] *= tint[1]; d.data[i + 2] *= tint[2]; d.data[i + 3] *= alpha
+  }
+  g.putImageData(d, 0, 0)
+  return c
+}
+
+/**
+ * The menu kit's controls (ROM/119/51), as the game's own menus use them
+ * (element groups "menu    framesus" / "windowps"):
+ *   buttonto  every menu row is a capsule: its left end at uv 16,0 (48x16)
+ *             and its right end at uv 0,16 (40x16), joined into one 88x16
+ *             bar, drawn over a dark plate and then again tinted 96,96,127 —
+ *             the blue-silver sheen of FFXI's menu entries;
+ *             uv 0,0 (15x15) is the round bullet;
+ *   colorbal  the coloured orbs, blue first at 0,0 (16x16).
+ * Black is clear in all of them (the game blends it away).
+ */
+function controlArt(tex: Map<string, Texture>): Record<string, string> {
+  const btn = tex.get('menu buttonto'), orbs = tex.get('menu colorbal')
+  if (!btn || !orbs) return {}
+  const tint = [96 / 127, 96 / 127, 1]
+  const capsule = (alpha: number) => {
+    const c = document.createElement('canvas'); c.width = 88; c.height = 16
+    const g = c.getContext('2d')!
+    g.drawImage(piece(btn, 16, 0, 48, 16, tint, alpha), 0, 0)
+    g.drawImage(piece(btn, 0, 16, 40, 16, tint, alpha), 48, 0)
+    return `url(${c.toDataURL()})`
+  }
+  const one = (c: HTMLCanvasElement) => `url(${c.toDataURL()})`
+  return {
+    '--ui-capsule': capsule(0.42),
+    '--ui-capsule-lit': capsule(1),
+    '--ui-bullet': one(piece(btn, 0, 0, 15, 15, [0.55, 0.55, 0.62], 0.75)),
+    '--ui-bullet-lit': one(piece(btn, 0, 0, 15, 15, tint, 1)),
+    '--ui-orb': one(piece(orbs, 0, 0, 16, 16, [1, 1, 1], 1)),
+  }
+}
+
 /** File id -> path, from VTABLE (which ROM) and FTABLE (folder << 7 | file). */
 async function fileIdPath(root: string, id: number, tables: { v?: Uint8Array; f?: DataView }): Promise<string | null> {
   tables.v ??= new Uint8Array(await window.ffxi.readDat(root, 'VTABLE.DAT'))
@@ -171,8 +219,11 @@ export function loadClassicKit(root: string): Promise<ClassicKit> {
       styles.push({ frame: frameImage(get('corner'), get('hfr1'), get('vfr1')), background: backgroundImage(get('newtex')) })
     }
     let font: string | null = null
+    let controls: Record<string, string> = {}
     try {
-      const moji = texturesOf(await window.ffxi.readDat(root, 'ROM/119/51.DAT')).get('font moji')
+      const kitTex = texturesOf(await window.ffxi.readDat(root, 'ROM/119/51.DAT'))
+      try { controls = controlArt(kitTex) } catch (e) { console.warn('[uiLook] control art not built:', e) }
+      const moji = kitTex.get('font moji')
       if (moji) {
         const cells = new Map<number, number>()
         for (let c = 0x20; c <= 0x7e; c++) cells.set(c, c - 0x20)
@@ -188,7 +239,7 @@ export function loadClassicKit(root: string): Promise<ClassicKit> {
     } catch (e) {
       console.warn('[uiLook] menu font not built:', e)
     }
-    return { styles, font }
+    return { styles, font, controls }
   })()
   kitPromise.catch(() => { kitPromise = null })
   return kitPromise
@@ -210,14 +261,13 @@ export function applyLook(look: UiLook, kit: ClassicKit | null, text: UiText = '
   const n = look.startsWith('classic') ? Number(look.slice(7)) : 0
   if (n && kit) {
     root.dataset.look = 'classic'
-    for (const [k, v] of Object.entries(classicVars(kit.styles[n - 1]))) root.style.setProperty(k, v)
+    for (const [k, v] of Object.entries({ ...classicVars(kit.styles[n - 1]), ...kit.controls })) root.style.setProperty(k, v)
     // data-look-font: game (the menu font), modern (Noto Serif over the game's
     // windows), or fallback (the menu font could not be built).
     root.dataset.lookFont = text === 'modern' ? 'modern' : kit.font ? 'game' : 'fallback'
   } else {
     root.dataset.look = 'modern'
-    root.style.removeProperty('--win-frame')
-    root.style.removeProperty('--win-bg')
+    for (const k of ['--win-frame', '--win-bg', ...Object.keys(kit?.controls ?? {})]) root.style.removeProperty(k)
     delete root.dataset.lookFont
   }
 }

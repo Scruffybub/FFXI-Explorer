@@ -974,3 +974,126 @@ select {
 :root[data-look='classic'][data-look-font='modern'] :is(.section-head, .control, .zone-name, .view-switch button, .mode-switch button, .preset) {
   text-shadow: 1px 1px 0 rgba(0, 0, 0, 0.45);
 }
+
+/* ── UI look: controls (stage 2) ───────────────────────────────────── */
+/*
+ * Classic: buttons are the game's menu-row capsule (--ui-capsule, 88x16, its
+ * rounded ends kept whole by border-image while the middle stretches) over a
+ * dark plate; lit when active or hovered. Checkboxes are the round bullet,
+ * lit when on; slider knobs the blue orb. Modern: gold hairlines, a gold
+ * switch for checkboxes, the gold diamond knob.
+ *
+ * "Plain" buttons only: section headers, info icons, list rows and the look
+ * picker's cards keep their own styling.
+ */
+:root[data-look='classic'] :is(.panel, .sidebar, .modal, .inspector, .view-tools, .setup-card)
+  button:not(.section-head, .info, .look-card, .link-btn, .remove, .zone-list button) {
+  background: rgba(0, 0, 12, 0.5);
+  border-style: solid;
+  border-color: transparent;
+  border-width: 0 16px;
+  border-image-source: var(--ui-capsule);
+  border-image-slice: 0 10 fill;
+  border-image-width: 0 16px;
+  border-image-repeat: stretch;
+  border-radius: 14px;
+  min-height: 26px;
+  padding: 2px 2px;
+  color: var(--text);
+  box-shadow: none;
+}
+:root[data-look='classic'] :is(.panel, .sidebar, .modal, .inspector, .view-tools, .setup-card)
+  button:not(.section-head, .info, .look-card, .link-btn, .remove, .zone-list button):is(:hover, .active, .primary) {
+  border-image-source: var(--ui-capsule-lit);
+  color: #fff;
+  background: rgba(0, 0, 12, 0.5);
+}
+:root[data-look='classic'] :is(.panel, .sidebar, .modal, .inspector, .view-tools, .setup-card)
+  button:not(.section-head, .info, .look-card, .link-btn, .remove, .zone-list button):not(.active, .primary, :hover) {
+  color: var(--muted);
+}
+
+:root[data-look='classic'] input[type='checkbox'] {
+  appearance: none;
+  -webkit-appearance: none;
+  flex: none;
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  background: var(--ui-bullet) center / 15px no-repeat;
+  cursor: pointer;
+}
+:root[data-look='classic'] input[type='checkbox']:checked {
+  background-image: var(--ui-bullet-lit);
+  filter: drop-shadow(0 0 3px rgba(160, 175, 255, 0.85));
+}
+
+:root[data-look='classic'] input[type='range'] {
+  height: 4px;
+  background: rgba(0, 0, 20, 0.6);
+  box-shadow: inset 0 0 0 1px rgba(200, 210, 255, 0.28);
+}
+:root[data-look='classic'] input[type='range']::-webkit-slider-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 0;
+  background: var(--ui-orb) center / 16px no-repeat;
+}
+
+:root[data-look='classic'] select {
+  border: 1px solid rgba(200, 210, 255, 0.32);
+  border-radius: 3px;
+}
+
+/* Modern controls. */
+:root[data-look='modern'] :is(.panel, .sidebar, .modal, .inspector, .view-tools, .setup-card)
+  button:not(.section-head, .info, .look-card, .link-btn, .remove, .zone-list button) {
+  border-radius: 2px;
+  border: 1px solid rgba(201, 168, 92, 0.28);
+  background: rgba(255, 255, 255, 0.025);
+  color: var(--muted);
+  letter-spacing: 0.04em;
+}
+:root[data-look='modern'] :is(.panel, .sidebar, .modal, .inspector, .view-tools, .setup-card)
+  button:not(.section-head, .info, .look-card, .link-btn, .remove, .zone-list button):hover {
+  border-color: rgba(201, 168, 92, 0.75);
+  color: var(--text);
+}
+:root[data-look='modern'] :is(.panel, .sidebar, .modal, .inspector, .view-tools, .setup-card)
+  button:not(.section-head, .info, .look-card, .link-btn, .remove, .zone-list button):is(.active, .primary) {
+  border-color: var(--gold);
+  background: linear-gradient(180deg, rgba(201, 168, 92, 0.3), rgba(201, 168, 92, 0.08));
+  color: #f3e6c0;
+}
+
+:root[data-look='modern'] input[type='checkbox'] {
+  appearance: none;
+  -webkit-appearance: none;
+  flex: none;
+  width: 28px;
+  height: 15px;
+  margin: 0;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: radial-gradient(circle at 7px 50%, #6b7280 4.5px, transparent 5px), rgba(255, 255, 255, 0.04);
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+:root[data-look='modern'] input[type='checkbox']:checked {
+  border-color: rgba(201, 168, 92, 0.85);
+  background: radial-gradient(circle at 19px 50%, #f0dca5 4.5px, transparent 5px), rgba(201, 168, 92, 0.22);
+}
+
+:root[data-look='modern'] input[type='range'] { height: 2px; background: rgba(255, 255, 255, 0.16); }
+:root[data-look='modern'] input[type='range']::-webkit-slider-thumb { width: 11px; height: 11px; border: 1px solid #2a2010; }
+
+:root[data-look='modern'] select {
+  border: 1px solid rgba(201, 168, 92, 0.35);
+  border-radius: 2px;
+  background: #0b1018;
+}
+:root[data-look='modern'] :is(.search, .search:focus) { border-radius: 2px; border-color: rgba(201, 168, 92, 0.3); }
+/* The capsule's ends may overlap the label: they are mostly clear, and a row of
+   three ("Browse / Character / Maps") must fit the 260px sidebar in the 16px
+   menu font. */
+:root[data-look='classic'][data-look] .sidebar .mode-switch button { border-width: 0 3px; padding: 2px 0; letter-spacing: 0; min-width: 0; font-size: 14px; }

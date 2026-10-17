@@ -421,10 +421,20 @@ letter a pixel bold); a CSS shadow puts the outline back. It must be drawn at
 popups, notes, release notes) stays in Segoe UI in every look (Ryan). Modern
 is our own CSS after finalfantasyxi.com's look (dark panels, gold hairlines),
 with Noto Serif bundled (`@fontsource/noto-serif`, OFL). The site's own images
-are Square Enix artwork and would have to ship, so none are used. Stage 2:
-toggles, sliders, dropdowns and buttons in the game's art (capsules, orbs) and
-in Modern's gold; stage 3: scroll bar, hand cursor. Scan scripts for the UI
-files were scratch work; the facts are above.
+are Square Enix artwork and would have to ship, so none are used. Scan scripts
+for the UI files were scratch work; the facts are above.
+
+Stage 2 (controls): Classic buttons are the game's menu-row capsule. Every menu
+entry in `menu    framesus` / `windowps` is `buttonto` uv 16,0 (48x16, left
+end) plus uv 0,16 (40x16, right end), drawn black at 112/128 and then again
+tinted 96,96,127; here they are joined into one 88x16 bar (`--ui-capsule`,
+`--ui-capsule-lit`) used as a `border-image`, so the ends stay whole while the
+middle stretches. Checkboxes are the round bullet (`buttonto` 0,0 15x15, lit
+when on), slider knobs the blue orb (`colorbal` 0,0). One rule styles every
+plain button in the panels, sidebar, popups and view tools (not section heads,
+info icons, list rows or look cards). Modern: gold switch checkboxes,
+gold-outlined buttons. The Models view's three-tab row is 14px in Classic to
+fit the sidebar. Stage 3: scroll bar (`hnf999`), hand cursor (`yubi`).
 
 **package.json had lost its build tools** at v0.1.0 (176fb06 dropped
 `scripts` and `devDependencies`; only the lockfile still had them). Any
