@@ -7,8 +7,8 @@ Written 2026-08-03; substantially revised 2026-08-08, 2026-08-15 and 2026-08-17.
 
 ## 0. Start here — state of play
 
-Last worked **2026-10-09**. Everything is committed and pushed to main, and
-**v0.1.7 is published** (0.1.5: zone weather, generator water, the transparency rule; 0.1.6: sky draw order; 0.1.7: Zone effects, lamp light, untextured water, batching) at
+Last worked **2026-10-17**. Everything is committed and pushed to main, and
+**v0.1.8 is published** (0.1.5: zone weather, generator water, the transparency rule; 0.1.6: sky draw order; 0.1.7: Zone effects, lamp light, untextured water, batching; 0.1.8: UI looks, heat shimmer, water time-of-day colours and lighting) at
 <https://github.com/Scruffybub/FFXI-Explorer/releases>. The repository is
 **public** as of 2026-08-16.
 
