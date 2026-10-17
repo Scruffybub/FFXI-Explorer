@@ -159,6 +159,13 @@ function piece(t: Texture, x: number, y: number, w: number, h: number, tint: num
   return c
 }
 
+function mirrored(src: HTMLCanvasElement): HTMLCanvasElement {
+  const c = document.createElement('canvas'); c.width = src.width; c.height = src.height
+  const g = c.getContext('2d')!
+  g.translate(src.width, 0); g.scale(-1, 1); g.drawImage(src, 0, 0)
+  return c
+}
+
 /**
  * The menu kit's controls (ROM/119/51), as the game's own menus use them
  * (element groups "menu    framesus" / "windowps"):
@@ -167,11 +174,16 @@ function piece(t: Texture, x: number, y: number, w: number, h: number, tint: num
  *             bar, drawn over a dark plate and then again tinted 96,96,127 —
  *             the blue-silver sheen of FFXI's menu entries;
  *             uv 0,0 (15x15) is the round bullet;
- *   colorbal  the coloured orbs, blue first at 0,0 (16x16).
+ *   colorbal  the coloured orbs, blue first at 0,0 (16x16);
+ *   hnf999    the scroll bar ("menu    scroll"): track uv 56,0 (8x64, drawn
+ *             at 32/128), caps uv 48,0 and 48,4 (8x4), fill uv 58,0 (4x64);
+ *   yubi      the pointing hand ("menu    yubi"): uv 6,0 (26x32), drawn
+ *             mirrored so it points up and left; the fingertip lands at 5,1.
  * Black is clear in all of them (the game blends it away).
  */
 function controlArt(tex: Map<string, Texture>): Record<string, string> {
   const btn = tex.get('menu buttonto'), orbs = tex.get('menu colorbal')
+  const bar = tex.get('menu hnf999'), hand = tex.get('menu yubi')
   if (!btn || !orbs) return {}
   const tint = [96 / 127, 96 / 127, 1]
   const capsule = (alpha: number) => {
@@ -188,6 +200,13 @@ function controlArt(tex: Map<string, Texture>): Record<string, string> {
     '--ui-bullet': one(piece(btn, 0, 0, 15, 15, [0.55, 0.55, 0.62], 0.75)),
     '--ui-bullet-lit': one(piece(btn, 0, 0, 15, 15, tint, 1)),
     '--ui-orb': one(piece(orbs, 0, 0, 16, 16, [1, 1, 1], 1)),
+    ...(bar ? {
+      '--ui-scroll-track': one(piece(bar, 56, 0, 8, 64, [1, 1, 1], 0.3)),
+      '--ui-scroll-top': one(piece(bar, 48, 0, 8, 4, [1, 1, 1], 1)),
+      '--ui-scroll-bottom': one(piece(bar, 48, 4, 8, 4, [1, 1, 1], 1)),
+      '--ui-scroll-fill': one(piece(bar, 58, 0, 4, 64, [1, 1, 1], 0.9)),
+    } : {}),
+    ...(hand ? { '--ui-hand': `${one(mirrored(piece(hand, 6, 0, 26, 32, [1, 1, 1], 1)))} 5 1, pointer` } : {}),
   }
 }
 

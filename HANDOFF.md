@@ -434,7 +434,13 @@ when on), slider knobs the blue orb (`colorbal` 0,0). One rule styles every
 plain button in the panels, sidebar, popups and view tools (not section heads,
 info icons, list rows or look cards). Modern: gold switch checkboxes,
 gold-outlined buttons. The Models view's three-tab row is 14px in Classic to
-fit the sidebar. Stage 3: scroll bar (`hnf999`), hand cursor (`yubi`).
+fit the sidebar.
+
+Stage 3: Classic scroll bars are `menu    scroll` — `hnf999` track uv 56,0
+(8x64, at 30%), gem caps uv 48,0 / 48,4 (8x4) and crystal fill uv 58,0 (4x64),
+as `::-webkit-scrollbar` backgrounds. Everything clickable gets the game's
+pointing hand (`menu    yubi`, uv 6,0 26x32, mirrored as the menus draw it,
+hotspot at the fingertip 5,1) as `--ui-hand`. Modern: a slim gold thumb.
 
 **package.json had lost its build tools** at v0.1.0 (176fb06 dropped
 `scripts` and `devDependencies`; only the lockfile still had them). Any

@@ -1097,3 +1097,26 @@ select {
    three ("Browse / Character / Maps") must fit the 260px sidebar in the 16px
    menu font. */
 :root[data-look='classic'][data-look] .sidebar .mode-switch button { border-width: 0 3px; padding: 2px 0; letter-spacing: 0; min-width: 0; font-size: 14px; }
+
+/* ── UI look: scroll bars and cursor (stage 3) ─────────────────────── */
+/* Classic: the game's scroll bar (a crystal fill between two gem caps over a
+   faint track) and its pointing hand on everything clickable. */
+:root[data-look='classic'] ::-webkit-scrollbar { width: 10px; height: 10px; }
+:root[data-look='classic'] ::-webkit-scrollbar-track { background: var(--ui-scroll-track) center / 8px 64px repeat-y; }
+:root[data-look='classic'] ::-webkit-scrollbar-thumb,
+:root[data-look='classic'] ::-webkit-scrollbar-thumb:hover {
+  border-radius: 0;
+  background:
+    var(--ui-scroll-top) center top / 8px 4px no-repeat,
+    var(--ui-scroll-bottom) center bottom / 8px 4px no-repeat,
+    var(--ui-scroll-fill) center 4px / 4px calc(100% - 8px) no-repeat;
+}
+:root[data-look='classic'] :is(button, select, label.control.toggle, input[type='checkbox'], input[type='range'], .zone-list li button) {
+  cursor: var(--ui-hand, pointer);
+}
+:root[data-look='classic'] input[type='range']::-webkit-slider-thumb { cursor: var(--ui-hand, pointer); }
+
+/* Modern: a slim gold thumb. */
+:root[data-look='modern'] ::-webkit-scrollbar { width: 7px; height: 7px; }
+:root[data-look='modern'] ::-webkit-scrollbar-thumb { background: rgba(201, 168, 92, 0.35); border-radius: 0; }
+:root[data-look='modern'] ::-webkit-scrollbar-thumb:hover { background: rgba(201, 168, 92, 0.6); }
