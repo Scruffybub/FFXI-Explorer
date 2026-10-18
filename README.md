@@ -40,7 +40,7 @@ hand-placed point lights and image-based sky lighting.
 **Post-processing** — ambient occlusion, bloom, SMAA, depth of field, colour
 grading, vignette, and a choice of tone-mapping curves.
 
-**Model viewer** — 2,473 NPC, monster and object models with their animations,
+**Model viewer** — 2,467 NPC, monster and object models with their animations,
 plus a character builder that assembles a player character from a race skeleton
 and eight equipment slots, with real item names. The character you build is the
 one you walk zones as.

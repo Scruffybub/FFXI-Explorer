@@ -3,7 +3,11 @@ import rawModels from '../../../../resources/npc-model-paths.json'
 /**
  * The catalogue of NPC, monster and object models, with the ROM path of each.
  *
- * From Vanalytics (`public/data/npc-model-paths.json`) — 2,473 entries across 27
+ * From Vanalytics (`public/data/npc-model-paths.json`), corrected after a sweep
+ * that drew every entry (2026-10-17): 21 Trolls filed as "Lamia" renamed Troll
+ * 1-3 by skeleton (101, 116 and 96 bones; the Lamia have 115, 75 and 119), five
+ * files with no meshes and a "Table" that was Laire Reive 5's file removed, the
+ * two "Twitherym 2" renumbered. 2,467 entries across 27
  * categories. Bundled at build time like the zone list, so the viewer needs no
  * network and no sidecar file.
  */

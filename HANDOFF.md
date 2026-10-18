@@ -471,6 +471,19 @@ hovers it well above its rest pose and the head was cut off; Amoeban was out of
 view entirely. Bone translations are bind + animation, as xim's SkeletonInstance
 does — that part was right.
 
+**Model list sweep (2026-10-17).** Every entry drawn in the viewer (census
+`__loadModel(i)` / `__modelStatus()`; a 2,473-thumbnail contact sheet was made
+for Ryan, scratch only — game art, not published). Fixed in
+`resources/npc-model-paths.json` (details in modelList.ts): 21 Trolls filed as
+"Lamia" (the "duplicate" Lamia names) renamed Troll 1-3 by bone count, five
+mesh-less files and a "Table" that was Laire Reive 5's file dropped, Twitherym
+renumbered. The list shows all entries (it stopped at 400) and sorts numbers
+naturally. Still open: "Mamool Ja 3" and "Mamool Ja 5 3" share ROM4/2/56;
+Galka 1-3 (ROM/3/3-5, one untextured base body three times), Opo-opo 2 and the
+Ifrit Statues draw untextured; Elvaan M 12, Gargouille Statue 1-2, Cloud of
+Darkness 5 and Ghrah fling parts far out in their idle and frame as specks —
+an animation fault in those few, not the framing.
+
 **package.json had lost its build tools** at v0.1.0 (176fb06 dropped
 `scripts` and `devDependencies`; only the lockfile still had them). Any
 `npm install` then pruned electron, electron-vite, typescript and
@@ -1794,7 +1807,7 @@ postprocessing · electron-vite · TypeScript.
 | `resources/model-dat-paths.json` | Equipment models keyed `"race:slot"` → index → path |
 | `resources/item-names.json` | Model index → item names, built by `scripts/build-item-names.cjs` |
 | `resources/animation-paths.json` | ~300 animation sets per race |
-| `resources/npc-model-paths.json` | 2,473 named NPC/monster models |
+| `resources/npc-model-paths.json` | 2,467 named NPC/monster models (corrected 2026-10-17; see modelList.ts) |
 
 ### Build and package
 

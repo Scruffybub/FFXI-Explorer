@@ -57,7 +57,7 @@ export default function ModelBrowser({
   }, [mapZones, mapSearch])
 
   const filtered = useMemo(
-    // The whole list: 2,473 rows draw quickly, and a cap at 400 hid most
+    // The whole list: 2,467 rows draw quickly, and a cap at 400 hid most
     // models unless you searched for them.
     () => searchModels(search, category),
     [search, category],
