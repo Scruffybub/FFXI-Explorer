@@ -480,9 +480,11 @@ mesh-less files and a "Table" that was Laire Reive 5's file dropped, Twitherym
 renumbered. The list shows all entries (it stopped at 400) and sorts numbers
 naturally. Still open: "Mamool Ja 3" and "Mamool Ja 5 3" share ROM4/2/56;
 Galka 1-3 (ROM/3/3-5, one untextured base body three times), Opo-opo 2 and the
-Ifrit Statues draw untextured; Elvaan M 12, Gargouille Statue 1-2, Cloud of
-Darkness 5 and Ghrah fling parts far out in their idle and frame as specks —
-an animation fault in those few, not the framing.
+Ifrit Statues draw untextured. Elvaan M 12 framed as a speck: its idle parks
+bones 73-74 about 80,000 units away (the game hides parts that way), so the
+posed framing now ignores points beyond 10x the rest radius; a few thin streaks
+remain where a triangle joins a hidden point. Gargouille Statues, Cloud of
+Darkness 5 and the Barricades pose at normal size — they are just dark.
 
 **package.json had lost its build tools** at v0.1.0 (176fb06 dropped
 `scripts` and `devDependencies`; only the lockfile still had them). Any

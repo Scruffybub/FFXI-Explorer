@@ -70,12 +70,20 @@ function Animator({
     // Frame the pose, not the rest pose: a motion can carry the whole body
     // well away from where it rests (Aern 1 hovers, its head cut off by a
     // camera framed on the rest pose). Measured once per motion.
+    // Points parked far away are left out: the game hides parts by moving
+    // their bones off into the distance (Elvaan M 12's idle puts 45 vertices
+    // 80,000 units out), and framing them shrank the model to nothing.
     if (onPosed && measured.current !== clips) {
       measured.current = clips
       const box = new THREE.Box3()
+      const p = new THREE.Vector3()
+      const limit = built.radius * 10
       for (const mesh of built.meshes) {
-        mesh.geometry.computeBoundingBox()
-        if (mesh.geometry.boundingBox) box.union(mesh.geometry.boundingBox)
+        const pos = mesh.geometry.getAttribute('position')
+        for (let i = 0; i < pos.count; i++) {
+          p.fromBufferAttribute(pos, i)
+          if (p.distanceTo(built.center) <= limit) box.expandByPoint(p)
+        }
       }
       if (!box.isEmpty()) onPosed(box)
     }
