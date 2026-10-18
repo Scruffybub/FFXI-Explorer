@@ -442,6 +442,23 @@ as `::-webkit-scrollbar` backgrounds. Everything clickable gets the game's
 pointing hand (`menu    yubi`, uv 6,0 26x32, mirrored as the menus draw it,
 hotspot at the fingertip 5,1) as `--ui-hand`. Modern: a slim gold thumb.
 
+**Walk mode (2026-10-17).** Spawn: the old rule dropped from above the zone's
+bounding-box centre onto the first surface — in 149 of 285 zones there was no
+surface there, and with no "last grounded" yet the fall never ended.
+`CollisionWorld.findStandingSpot` now starts from where the camera looks
+(collision under the view centre, else the zone centre), searches every layer
+of the column and then rings around it, and accepts a floor within the slope
+limit, with headroom, and with ground a body's width out all round (Bibiki Bay,
+both Rala Waterways, Woh Gates and Zhayolm Remnants first picked ledges the
+walker slid off). The spawn seeds `lastGrounded`. A sweep entering every zone
+in Walk mode (`__camPos`, census) found a floor in all 285 and no falls.
+Third person: `loadMovementClips` loads the race's `def_` set (ROM/71/99-106;
+Tarutaru 103 male, 104 female) and the Avatar plays idl*, wlk* or run* (Shift)
+— the parsed clips now keep their 4-character block names, whose last digit is
+the body part. Player models look along their own +X once flipped, so the
+avatar turns `yaw - PI/2`; the body's yaw is the direction of travel, camera
+yaw + PI. Headless tests need `&walkdebug=1` (keys without pointer lock).
+
 **package.json had lost its build tools** at v0.1.0 (176fb06 dropped
 `scripts` and `devDependencies`; only the lockfile still had them). Any
 `npm install` then pruned electron, electron-vite, typescript and

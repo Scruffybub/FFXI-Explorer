@@ -157,6 +157,33 @@ export async function loadAnimationSet(
   return clips
 }
 
+/** A walker's movement clips, each the set of body parts played together. */
+export interface MovementClips {
+  idle: ParsedAnimation[]
+  walk: ParsedAnimation[]
+  run: ParsedAnimation[]
+}
+
+/**
+ * The race's default movement: the "def_" set (ROM/71/99 to 71/106), holding
+ * idl0/idl1, wlk0/wlk1 and run0/run1 — upper and lower body, played together.
+ * Walk mode used whatever the Character builder had loaded, which by default
+ * is nothing, so the character slid along frozen (README, 2026-10-17).
+ * Tarutaru share one entry with two files: 71/103 the male, 71/104 the female.
+ */
+export async function loadMovementClips(ffxiPath: string, race: number): Promise<MovementClips | null> {
+  const entry = animationOptions(race).find(e => e.name === 'def_')
+  if (!entry) return null
+  const paths = entry.paths.length > 1 ? [entry.paths[race === 6 ? 1 : 0]] : entry.paths
+  const clips: ParsedAnimation[] = []
+  for (const path of paths) {
+    try { clips.push(...parseAnimationDat(await window.ffxi.readDat(ffxiPath, path))) } catch { /* none */ }
+  }
+  const pick = (prefix: string) => clips.filter(c => c.name.startsWith(prefix))
+  const out = { idle: pick('idl'), walk: pick('wlk'), run: pick('run') }
+  return out.idle.length || out.walk.length ? out : null
+}
+
 /** Which pieces the character is wearing. Slot id → model index. */
 export type Equipment = Record<number, number | null>
 

@@ -12,6 +12,7 @@ import { sampleKeyFrames } from '../lib/ffxi-dat/GeneratorParser'
 import { buildModel, type BuiltModel } from '../lib/modelBuild'
 import { invertRigidMatrix4, poseSkeleton, skinMeshes } from '../lib/skinning'
 import { CollisionWorld } from '../lib/CollisionWorld'
+import type { MovementClips } from '../lib/characterModel'
 import {
   GammaBlendPass, GAMMA_BLEND_LAYER, SRGB_GLSL,
 } from '../lib/GammaBlendPass'
@@ -57,6 +58,8 @@ interface ZoneViewerProps {
   /** Player character to walk around as, if one has been built. */
   character?: ParsedDatFile | null
   characterClip?: number | null
+  /** The race's idle, walk and run, which walk mode plays by itself. */
+  characterMoves?: MovementClips | null
   /** Weather states this zone carries geometry for, once it has been parsed. */
   onWeatherStates?: (states: string[]) => void
   /** Map view's current scale, for the panel's readout. Null when it is off. */
@@ -1749,7 +1752,10 @@ function ProbeHook({ meshes, zoneData }: { meshes: THREE.Object3D[]; zoneData: P
       camera.lookAt(to[0], to[1], to[2])
       orbit?.update?.()
     }
-    return () => { delete w.__probeAt; delete c.__camTo }
+    // window.__camPos(): where the camera is now (the walk sweep checks the walker stays up).
+    const p = window as unknown as { __camPos?: () => number[] }
+    p.__camPos = () => camera.position.toArray()
+    return () => { delete w.__probeAt; delete c.__camTo; delete p.__camPos }
   }, [camera, controls, meshes, zoneData])
   return null
 }
@@ -2053,9 +2059,15 @@ export interface WalkBodyState {
   x: number
   y: number
   z: number
-  /** Facing, radians, same convention as the camera's yaw. */
+  /**
+   * Facing, radians: the body looks along (sin yaw, 0, cos yaw), the same
+   * convention as atan2 of the direction of travel. A camera with yaw y looks
+   * along (-sin y, -cos y), so facing where the camera looks is y + PI.
+   */
   yaw: number
   moving: boolean
+  /** Moving at run speed (Shift). */
+  running: boolean
 }
 
 /** Body radius for wall collision. Not exposed — it is a shape, not a taste. */
@@ -2113,23 +2125,42 @@ function WalkCamera({
   tuning.current = scene
 
   useEffect(() => {
-    // Snap straight to the ground under the middle of the zone rather than
-    // spawning high and falling: the zone's bounding-box centre can easily be
-    // underground, and from there "fall until you land" never terminates.
+    // Start where the camera is looking: the collision under the centre of the
+    // view, or failing that the nearest standable floor around it (see
+    // CollisionWorld.findStandingSpot). The old rule dropped from above the
+    // zone's bounding-box centre onto the first surface, which in open zones
+    // could be a gap between islands — no floor, and a fall with no end.
     if (!placed.current) {
-      const topY = center.y + size
-      let eyeY = center.y + size * 0.05
+      const t = tuning.current
+      let feet = new THREE.Vector3(center.x, center.y + size * 0.05 - t.walkEyeHeight, center.z)
       if (world) {
-        const from = new THREE.Vector3(center.x, topY, center.z)
-        const hit = world.groundBelow(from, size * 2.5)
-        if (hit) eyeY = hit.y + tuning.current.walkEyeHeight
+        const look = new THREE.Vector3()
+        camera.getWorldDirection(look)
+        const sight = world.castRay(camera.position, look, size * 4)
+        const preferred = sight ? camera.position.clone().addScaledVector(look, sight.distance) : center.clone()
+        const spot = world.findStandingSpot(preferred, {
+          slopeCos: Math.cos((t.walkSlopeLimit * Math.PI) / 180),
+          headroom: t.walkEyeHeight + 0.3,
+          footing: WALK_RADIUS * 2,
+          stepHeight: Math.max(t.walkStepHeight, 0.3),
+          step: 6,
+          maxRadius: size * 1.5,
+        })
+        if (spot) {
+          feet = spot
+          // The start is safe footing, so a fall before the first step lands
+          // here rather than going on for ever.
+          lastGrounded.current = spot.clone()
+        }
+        const old = world.groundBelow(new THREE.Vector3(center.x, center.y + size, center.z), size * 2.5)
         console.log(
-          `[Walk] spawn from (${center.x.toFixed(1)}, ${topY.toFixed(1)}, ${center.z.toFixed(1)}) ` +
-          `size=${size.toFixed(1)} hit=${hit ? hit.y.toFixed(2) : 'none'} eyeY=${eyeY.toFixed(2)}`,
+          `[Walk] spawn ${spot ? `at (${spot.x.toFixed(1)}, ${spot.y.toFixed(1)}, ${spot.z.toFixed(1)})` : 'none'} ` +
+          `${sight ? 'looked-at' : 'centre'} ${preferred.distanceTo(feet).toFixed(1)} from it; ` +
+          `old rule ${old ? `hit ${old.y.toFixed(1)}` : 'none'}`,
         )
       }
-      camera.position.set(center.x, eyeY, center.z)
-      feetRef.current.set(center.x, eyeY - tuning.current.walkEyeHeight, center.z)
+      camera.position.set(feet.x, feet.y + t.walkEyeHeight, feet.z)
+      feetRef.current.copy(feet)
       // A generous margin below the collision's own lowest point: anything
       // further down is unambiguously outside the world.
       if (world) {
@@ -2140,6 +2171,8 @@ function WalkCamera({
       yaw.current = e.y
       pitch.current = 0
       camera.quaternion.setFromEuler(new THREE.Euler(0, yaw.current, 0, 'YXZ'))
+      // Start facing away from the camera, not side-on to it.
+      if (body) body.current.yaw = yaw.current + Math.PI
       placed.current = true
     }
 
@@ -2402,12 +2435,13 @@ function WalkCamera({
       body.current.y = feet.y
       body.current.z = feet.z
       body.current.moving = wish.lengthSq() > 1e-10
+      body.current.running = move.current.run
       // The avatar faces where it is going, not where the camera looks, so
       // turning the camera in third person orbits rather than spinning the body.
       if (body.current.moving) {
         body.current.yaw = Math.atan2(wish.x, wish.z)
       } else if (!t.walkThirdPerson) {
-        body.current.yaw = yaw.current
+        body.current.yaw = yaw.current + Math.PI
       }
     }
 
@@ -2460,13 +2494,14 @@ function WalkCamera({
  * share a scale: a 2-unit-tall character is right for a 2-unit eye height.
  */
 function Avatar({
-  character, body, playing, speed, clipIndex,
+  character, body, playing, speed, clipIndex, moves,
 }: {
   character: ParsedDatFile
   body: React.RefObject<WalkBodyState>
   playing: boolean
   speed: number
   clipIndex: number | null
+  moves: MovementClips | null
 }) {
   const group = useRef<THREE.Group>(null)
   const time = useRef(0)
@@ -2498,21 +2533,34 @@ function Avatar({
     [character.animations, clipIndex],
   )
 
+  const state = useRef<'idle' | 'walk' | 'run' | null>(null)
+
   useFrame((_, delta) => {
     if (!group.current) return
     const b = body.current
 
     group.current.position.set(b.x, b.y, b.z)
-    // The model is authored facing -Z and the meshes sit under a PI flip, so
-    // the body's yaw goes on straight.
-    group.current.rotation.y = b.yaw
+    // Player models look along their own +X once flipped upright, so a
+    // quarter turn back lines them up with the body's facing. Without it the
+    // character walked side-on, a quarter turn off its direction of travel
+    // (README "Third-person walking mode", 2026-10-17).
+    group.current.rotation.y = b.yaw - Math.PI / 2
 
-    if (!built || !character.skeleton || !inverseBind || clips.length === 0) return
-    // Freeze the animation when standing still: without a proper idle clip,
-    // a walk cycle playing on the spot looks worse than a static pose.
-    if (playing && b.moving) time.current += delta * speed
+    if (!built || !character.skeleton || !inverseBind) return
+    // The race's own idle, walk and run when they loaded; otherwise whatever
+    // the Character builder chose, frozen while standing still.
+    let play = clips
+    if (moves) {
+      const next = !b.moving ? 'idle' : b.running && moves.run.length ? 'run' : 'walk'
+      if (next !== state.current) { state.current = next; time.current = 0 }
+      play = moves[next].length ? moves[next] : moves.idle
+      if (playing) time.current += delta * speed
+    } else if (playing && b.moving) {
+      time.current += delta * speed
+    }
+    if (play.length === 0) return
 
-    const pose = poseSkeleton(character.skeleton, clips, inverseBind, time.current)
+    const pose = poseSkeleton(character.skeleton, play, inverseBind, time.current)
     skinMeshes(built.skinTargets, pose)
     for (const mesh of built.meshes) {
       mesh.geometry.getAttribute('position').needsUpdate = true
@@ -2658,10 +2706,10 @@ export default function ZoneViewer({
   zoneData, lighting, post, scene, pointLights,
   selectedLightId = null, placingLight = false, onPlaceLight,
   inspecting = false, onInspectResult, onFlySpeedChange,
-  character = null, characterClip = null, onWeatherStates, onMapScale,
+  character = null, characterClip = null, characterMoves = null, onWeatherStates, onMapScale,
 }: ZoneViewerProps) {
   // Where the walking body is. Written by WalkCamera, read by Avatar.
-  const walkBody = useRef<WalkBodyState>({ x: 0, y: 0, z: 0, yaw: 0, moving: false })
+  const walkBody = useRef<WalkBodyState>({ x: 0, y: 0, z: 0, yaw: 0, moving: false, running: false })
   const zoneUniforms = useRef<ZoneUniforms>({
     fogHeightBase: { value: 0 },
     fogHeightRange: { value: 100 },
@@ -4630,6 +4678,7 @@ export default function ZoneViewer({
           playing
           speed={1}
           clipIndex={characterClip}
+          moves={characterMoves}
         />
       )}
 

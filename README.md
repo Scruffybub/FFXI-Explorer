@@ -1,18 +1,14 @@
-**Work in Progress**
+**Work in progress** — the rough edges as of 0.1.8:
 
-**Water** - Water flat-out does not render right now.
+**Water (beta)** - Scene → Generator water draws the game's own water, waves and foam. Most zones match the game; Foret de Hennetiel's sea and rivers do not yet. It is off by default.
 
-**Weather** - Weather does not render properly right now.
+**Zone effects (beta)** - The game's lamps, fires, smoke and glows play, but effects the game triggers (footsteps, doors, hit sparks) do not, and lamps cast no shadows.
 
-**Transparency** - Some zones have textures that don't render properly, primarily textures that have some sort of transparency. This includes some plants, wall textures, and ground textures.
+**Weather** - Zone weather draws the game's skies, clouds, rain, snow, fog and lighting. Still missing: the moon's phases, the pole star and Lufaise's scheduled lightning; light snow is very faint.
+
+**Transparency** - A few plants, walls and ground textures still do not blend exactly as they do in game.
 
 **Unknown textures** - Some zones have models/textures/effects hidden in out-of-bounds areas.
-
-**Weather domes** - Some zones have "domes" of weather data in the middle of the zones
-
-**Walking mode** - Walking mode will sometimes spawn you in an area with no floor. At the moment, quickly press the "noclip" button and you will be able to fly to an area with a floor and unselect "noclip".
-
-**Third-person walking mode** - Third person walking mode does not work properly. The characters are not animated and face the wrong direction when moving.
 
 **Model viewer** - The model viewer has a lot of issues such as incorrect animations, incorrect file naming, UI issues.
 
@@ -26,7 +22,7 @@ Everything is read straight out of your own local FFXI installation. Nothing is
 uploaded, and no server or account is involved. The only network request it ever
 makes is an optional check for a newer version — see [Updates](#updates).
 
-![Version](https://img.shields.io/badge/version-0.1.0-blue) ![Platform](https://img.shields.io/badge/platform-Windows-lightgrey)
+![Version](https://img.shields.io/badge/version-0.1.8-blue) ![Platform](https://img.shields.io/badge/platform-Windows-lightgrey)
 
 ---
 
@@ -58,8 +54,16 @@ for shaping a zone into a map.
 **Area maps** — the game's own parchment maps, in **Models → Maps**. 191 zones
 have them, dungeons a page per floor, and any of them can be saved as a PNG.
 
-**Weather geometry** — every zone carries sky and weather meshes the client
-swaps between at runtime. They can be picked and drawn.
+**Zone weather** — the game's own skies, sun, moon, stars, clouds, rain, snow,
+fog and time-of-day lighting, in any of a zone's weathers, read from its
+environment data. Desert heat and fires bend the air behind them.
+
+**Zone effects** — every zone's ambient effects: lamp and torch flames, fires,
+smoke, sparkles, waterfall spray, light pools and lit windows, and the light the
+game's lamps throw on the walls and floors around them.
+
+**Generator water** — the game's own seas, rivers, ponds and fountains, with
+their scrolling waves, foam and time-of-day colours.
 
 **UI looks** — the app can wear the game's own menus: any of FFXI's eight
 window styles, with its frames, menu font, capsule buttons, scroll bars and
@@ -74,8 +78,8 @@ Grab a build from [Releases](../../releases):
 
 | File | What it is |
 |---|---|
-| `FFXI-Explorer-0.1.0-setup.exe` | Installer. Lets you pick a location, adds a Start-menu entry, uninstalls cleanly |
-| `FFXI-Explorer-0.1.0-portable.exe` | Single file, nothing installed. Just run it |
+| `FFXI-Explorer-<version>-setup.exe` | Installer. Lets you pick a location, adds a Start-menu entry, uninstalls cleanly |
+| `FFXI-Explorer-<version>-portable.exe` | Single file, nothing installed. Just run it |
 
 **Windows will warn you.** The build is unsigned — a code-signing certificate
 costs a few hundred dollars a year — so SmartScreen shows "Windows protected
@@ -103,9 +107,10 @@ is a desktop application: it reads the files directly.
 
 **Orbit** drags to rotate, scrolls to zoom. **Fly** captures the mouse on click:
 `WASD` to move, `E`/`Space` up, `Q`/`Shift` down, scroll to change speed, `Esc`
-to release. **Walk** puts you on the ground: `WASD` to walk, `Shift` to run,
-`Esc` to release. Walk mode has step-up, slope limits, wall sliding and a noclip
-toggle, and can follow you in third person.
+to release. **Walk** puts you on the ground where the camera was looking: `WASD`
+to walk, `Shift` to run, `Esc` to release. Walk mode has step-up, slope limits,
+wall sliding and a noclip toggle, and can follow you in third person, where your
+character idles, walks and runs with its race's own animations.
 
 ### Lighting modes
 
@@ -120,9 +125,10 @@ Moonlit Night, Overcast and Clay Render.
 
 ### Point lights
 
-The zone files contain no light data at all, so torches and braziers are placed
-by hand. In Dynamic mode, open **Point lights → Place a light**, then click a
-surface. Each light has colour, intensity, range, falloff and a flicker amount;
+The game's own lamps light the world when **Zone effects** is on; in Dynamic
+mode the nearest of them become real lights (**Lamp lights** sets how many).
+Extra lights can be placed by hand: open **Point lights → Place a light**, then
+click a surface. Each light has colour, intensity, range, falloff and a flicker amount;
 the **headlamp** is a light attached to the camera, which is the quickest way to
 explore a dark interior. Lights are lost when you change zone.
 

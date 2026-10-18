@@ -9,7 +9,7 @@ import ControlPanel from './components/ControlPanel'
 import ModelBrowser from './components/ModelBrowser'
 import LookPicker from './components/LookPicker'
 import { applyLook, loadClassicKit, saveLook, savedLook, saveText, savedText, type ClassicKit, type UiLook, type UiText } from './lib/uiLook'
-import { composeCharacter, type CharacterSpec, type ComposedCharacter } from './lib/characterModel'
+import { composeCharacter, loadMovementClips, type CharacterSpec, type ComposedCharacter, type MovementClips } from './lib/characterModel'
 import {
   DEFAULT_LIGHTING, DEFAULT_POST, DEFAULT_SCENE, DEFAULT_POINT_LIGHTS,
   NEW_POINT_LIGHT, PRESETS,
@@ -112,6 +112,17 @@ export default function App() {
       .catch(() => { if (!cancelled) setCharacter(null) })
     return () => { cancelled = true }
   }, [ffxiPath, charSpec])
+
+  // Walk mode's idle, walk and run, for the character's race.
+  const [charMoves, setCharMoves] = useState<MovementClips | null>(null)
+  useEffect(() => {
+    if (!ffxiPath) return
+    let cancelled = false
+    loadMovementClips(ffxiPath, charSpec.race)
+      .then(m => { if (!cancelled) setCharMoves(m) })
+      .catch(() => { if (!cancelled) setCharMoves(null) })
+    return () => { cancelled = true }
+  }, [ffxiPath, charSpec.race])
 
   useEffect(() => {
     setCharClip(charSpec.animation === null ? null : 0)
@@ -610,6 +621,7 @@ export default function App() {
             onInspectResult={setSurfaceInfo}
             character={character}
             characterClip={charClip}
+            characterMoves={charMoves}
             onWeatherStates={setWeatherStates}
             onMapScale={setMapScale}
           />

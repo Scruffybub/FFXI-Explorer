@@ -83,6 +83,69 @@ export class CollisionWorld {
   }
 
   /**
+   * Somewhere a walker can stand, as near `preferred` as possible: a floor no
+   * steeper than `slopeCos`, with `headroom` clear above it and level ground
+   * `footing` units out all round. Each column is
+   * searched through every layer (a bridge over a river, a floor under a
+   * roof), choosing the layer nearest `preferred`'s height; the columns are
+   * `preferred` itself, then rings around it every `step` units out to
+   * `maxRadius`. Returns the feet position, or null if nothing qualifies.
+   *
+   * Walk mode used to drop straight down from above the zone's bounding-box
+   * centre and take the first surface: in open zones that centre can sit over
+   * a gap between islands, and with no floor ever found the walker fell
+   * forever (README "Walking mode", 2026-10-17).
+   */
+  findStandingSpot(
+    preferred: THREE.Vector3,
+    opts: { slopeCos: number; headroom: number; footing: number; stepHeight: number; step: number; maxRadius: number },
+  ): THREE.Vector3 | null {
+    const box = this.geometry.boundingBox ?? (this.geometry.computeBoundingBox(), this.geometry.boundingBox!)
+    const top = box.max.y + 5, depth = box.max.y - box.min.y + 10
+    const up = new THREE.Vector3(0, 1, 0)
+    const from = new THREE.Vector3()
+    const column = (x: number, z: number): THREE.Vector3 | null => {
+      let best: THREE.Vector3 | null = null
+      from.set(x, top, z)
+      for (let layer = 0, left = depth; layer < 32 && left > 0; layer++) {
+        const hit = this.groundBelow(from, left)
+        if (!hit) break
+        left -= from.y - hit.y + 0.05
+        from.y = hit.y - 0.05
+        if (hit.normal.y < opts.slopeCos) continue
+        const feet = new THREE.Vector3(x, hit.y, z)
+        if (this.castRay(feet.clone().setY(hit.y + 0.05), up, opts.headroom)) continue
+        // Room to stand, not a post-top or a ledge's lip: ground within a step
+        // all round, a body's width out. Bibiki Bay's first pick was a spot the
+        // walker slid off at once and fell 490 units.
+        let footing = true
+        for (let k = 0; k < 8 && footing; k++) {
+          const a = (k / 8) * Math.PI * 2
+          const probe = new THREE.Vector3(x + Math.cos(a) * opts.footing, hit.y + opts.stepHeight, z + Math.sin(a) * opts.footing)
+          const g = this.groundBelow(probe, opts.stepHeight * 2)
+          if (!g || g.normal.y < opts.slopeCos) footing = false
+        }
+        if (!footing) continue
+        if (!best || Math.abs(hit.y - preferred.y) < Math.abs(best.y - preferred.y)) best = feet
+      }
+      return best
+    }
+    const here = column(preferred.x, preferred.z)
+    if (here) return here
+    for (let r = opts.step; r <= opts.maxRadius; r += opts.step) {
+      const n = Math.max(8, Math.round((2 * Math.PI * r) / opts.step))
+      let best: THREE.Vector3 | null = null
+      for (let i = 0; i < n; i++) {
+        const a = (i / n) * Math.PI * 2
+        const spot = column(preferred.x + Math.cos(a) * r, preferred.z + Math.sin(a) * r)
+        if (spot && (!best || Math.abs(spot.y - preferred.y) < Math.abs(best.y - preferred.y))) best = spot
+      }
+      if (best) return best
+    }
+    return null
+  }
+
+  /**
    * First obstruction between `from` and `from + dir * distance`.
    * `dir` must be normalised.
    */

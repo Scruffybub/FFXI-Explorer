@@ -249,6 +249,12 @@ export interface AnimationBone {
 }
 
 export interface ParsedAnimation {
+  /**
+   * The block's four-character name. The last character is the body part a
+   * clip drives, played together: "wlk0" and "wlk1" are one walk. Player
+   * movement is idl* (standing), wlk* and run*.
+   */
+  name: string
   frameCount: number
   speed: number
   bones: AnimationBone[]

@@ -34,7 +34,7 @@ export function parseAnimationDat(buffer: ArrayBuffer): ParsedAnimation[] {
   let offset = 0
   while (offset < reader.length - DATHEAD_SIZE) {
     reader.seek(offset)
-    reader.skip(4) // block name
+    const name = reader.readString(4)
     const packed = reader.readUint32()
     const type = packed & 0x7F
     const nextUnits = (packed >> 7) & 0x7FFFF
@@ -43,7 +43,7 @@ export function parseAnimationDat(buffer: ArrayBuffer): ParsedAnimation[] {
     if (type === BLOCK_ANIM) {
       try {
         const anim = parseAnimBlock(reader, offset + DATHEAD_SIZE + BLOCK_PADDING)
-        if (anim) animations.push(anim)
+        if (anim) animations.push({ ...anim, name })
       } catch { /* a bad block must not lose the rest */ }
     }
 
@@ -55,7 +55,7 @@ export function parseAnimationDat(buffer: ArrayBuffer): ParsedAnimation[] {
   return animations
 }
 
-function parseAnimBlock(reader: DatReader, dataStart: number): ParsedAnimation | null {
+function parseAnimBlock(reader: DatReader, dataStart: number): Omit<ParsedAnimation, 'name'> | null {
   reader.seek(dataStart)
   reader.skip(2) // ver + nazo
   const element = reader.readUint16()
