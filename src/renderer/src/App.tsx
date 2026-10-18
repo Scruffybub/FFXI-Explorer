@@ -102,7 +102,7 @@ export default function App() {
     equipment: { 3: 0, 4: 0, 5: 0, 6: 0 },
   })
   const [character, setCharacter] = useState<ComposedCharacter | null>(null)
-  const [charClip, setCharClip] = useState<number | null>(null)
+  const [charMotion, setCharMotion] = useState<string | null>(null)
 
   useEffect(() => {
     if (!ffxiPath) return
@@ -125,7 +125,7 @@ export default function App() {
   }, [ffxiPath, charSpec.race])
 
   useEffect(() => {
-    setCharClip(charSpec.animation === null ? null : 0)
+    setCharMotion(null)
   }, [charSpec.animation])
 
   // ── Update check ────────────────────────────────────────────────────────
@@ -541,8 +541,8 @@ export default function App() {
           spec={charSpec}
           onSpec={setCharSpec}
           character={character}
-          clipIndex={charClip}
-          onClipIndex={setCharClip}
+          motion={charMotion}
+          onMotion={setCharMotion}
         />
         {lookPicker}
       </div>
@@ -620,7 +620,7 @@ export default function App() {
             inspecting={inspecting}
             onInspectResult={setSurfaceInfo}
             character={character}
-            characterClip={charClip}
+            characterMotion={charMotion}
             characterMoves={charMoves}
             onWeatherStates={setWeatherStates}
             onMapScale={setMapScale}

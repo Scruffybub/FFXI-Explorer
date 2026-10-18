@@ -13,6 +13,7 @@ import { buildModel, type BuiltModel } from '../lib/modelBuild'
 import { invertRigidMatrix4, poseSkeleton, skinMeshes } from '../lib/skinning'
 import { CollisionWorld } from '../lib/CollisionWorld'
 import type { MovementClips } from '../lib/characterModel'
+import { clipsForMotion } from '../lib/motions'
 import {
   GammaBlendPass, GAMMA_BLEND_LAYER, SRGB_GLSL,
 } from '../lib/GammaBlendPass'
@@ -57,7 +58,7 @@ interface ZoneViewerProps {
   onFlySpeedChange?: (speed: number) => void
   /** Player character to walk around as, if one has been built. */
   character?: ParsedDatFile | null
-  characterClip?: number | null
+  characterMotion?: string | null
   /** The race's idle, walk and run, which walk mode plays by itself. */
   characterMoves?: MovementClips | null
   /** Weather states this zone carries geometry for, once it has been parsed. */
@@ -2494,13 +2495,13 @@ function WalkCamera({
  * share a scale: a 2-unit-tall character is right for a 2-unit eye height.
  */
 function Avatar({
-  character, body, playing, speed, clipIndex, moves,
+  character, body, playing, speed, motion, moves,
 }: {
   character: ParsedDatFile
   body: React.RefObject<WalkBodyState>
   playing: boolean
   speed: number
-  clipIndex: number | null
+  motion: string | null
   moves: MovementClips | null
 }) {
   const group = useRef<THREE.Group>(null)
@@ -2526,12 +2527,7 @@ function Avatar({
     () => character.skeleton?.matrices.map(invertRigidMatrix4) ?? null,
     [character.skeleton],
   )
-  const clips = useMemo(
-    () => (clipIndex === null
-      ? character.animations
-      : character.animations.slice(clipIndex, clipIndex + 1)),
-    [character.animations, clipIndex],
-  )
+  const clips = useMemo(() => clipsForMotion(character.animations, motion), [character.animations, motion])
 
   const state = useRef<'idle' | 'walk' | 'run' | null>(null)
 
@@ -2706,7 +2702,7 @@ export default function ZoneViewer({
   zoneData, lighting, post, scene, pointLights,
   selectedLightId = null, placingLight = false, onPlaceLight,
   inspecting = false, onInspectResult, onFlySpeedChange,
-  character = null, characterClip = null, characterMoves = null, onWeatherStates, onMapScale,
+  character = null, characterMotion = null, characterMoves = null, onWeatherStates, onMapScale,
 }: ZoneViewerProps) {
   // Where the walking body is. Written by WalkCamera, read by Avatar.
   const walkBody = useRef<WalkBodyState>({ x: 0, y: 0, z: 0, yaw: 0, moving: false, running: false })
@@ -4677,7 +4673,7 @@ export default function ZoneViewer({
           body={walkBody}
           playing
           speed={1}
-          clipIndex={characterClip}
+          motion={characterMotion}
           moves={characterMoves}
         />
       )}

@@ -24,7 +24,7 @@ type LoadState =
   | { status: 'error'; message: string }
 
 export default function ModelBrowser({
-  ffxiPath, viewSwitch, uiHidden, spec, onSpec, character, clipIndex, onClipIndex,
+  ffxiPath, viewSwitch, uiHidden, spec, onSpec, character, motion, onMotion,
 }: {
   ffxiPath: string
   viewSwitch: ReactNode
@@ -32,8 +32,8 @@ export default function ModelBrowser({
   spec: CharacterSpec
   onSpec: (updater: (s: CharacterSpec) => CharacterSpec) => void
   character: ComposedCharacter | null
-  clipIndex: number | null
-  onClipIndex: (i: number | null) => void
+  motion: string | null
+  onMotion: (key: string | null) => void
 }) {
   const [search, setSearch] = useState('')
   const [category, setCategory] = useState<string | null>(null)
@@ -244,7 +244,7 @@ export default function ModelBrowser({
                   onStats={onStats}
                   playing={playing}
                   speed={speed}
-                  clipIndex={clipIndex}
+                  motion={motion}
                 />
                 {!uiHidden && (
                   <div className="hud">
@@ -295,7 +295,7 @@ export default function ModelBrowser({
               onStats={onStats}
               playing={playing}
               speed={speed}
-              clipIndex={clipIndex}
+              motion={motion}
             />
             {!uiHidden && (
               <div className="hud">
@@ -325,8 +325,8 @@ export default function ModelBrowser({
           settings={settings}
           onChange={patch => setSettings(s => ({ ...s, ...patch }))}
           animations={activeModel?.animations ?? []}
-          clipIndex={clipIndex}
-          onClipChange={onClipIndex}
+          motion={motion}
+          onMotionChange={onMotion}
           playing={playing}
           onPlayingChange={setPlaying}
           speed={speed}

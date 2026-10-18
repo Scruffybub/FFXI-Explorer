@@ -4,6 +4,7 @@ import { OrbitControls } from '@react-three/drei'
 import * as THREE from 'three'
 import type { ParsedDatFile } from '../lib/ffxi-dat'
 import { invertRigidMatrix4, poseSkeleton, skinMeshes } from '../lib/skinning'
+import { clipsForMotion } from '../lib/motions'
 import type { ModelSettings, ToneMappingMode } from '../lib/settings'
 import { buildModel, MODEL_DEBUG, type BuiltModel } from '../lib/modelBuild'
 
@@ -28,30 +29,28 @@ import { buildModel, MODEL_DEBUG, type BuiltModel } from '../lib/modelBuild'
  * skeleton, and inverting 69 matrices every frame is pure waste.
  */
 function Animator({
-  built, model, playing, speed, clipIndex, onFrame,
+  built, model, playing, speed, motion, onFrame, onPosed,
 }: {
   built: BuiltModel
   model: ParsedDatFile
   playing: boolean
   speed: number
-  /** Which clip to play, or null for all of them composed together. */
-  clipIndex: number | null
+  /** Which motion to play (lib/motions.ts), or null for the model's first — idle when it has one. */
+  motion: string | null
   onFrame?: (frame: number, total: number) => void
+  /** The posed model's bounds, once per motion, for framing. */
+  onPosed?: (box: THREE.Box3) => void
 }) {
   const time = useRef(0)
+  const measured = useRef<unknown>(null)
   const inverseBind = useMemo(
     () => model.skeleton?.matrices.map(invertRigidMatrix4) ?? null,
     [model.skeleton],
   )
 
-  // Clips compose by bone: each drives its own subset, so playing them together
-  // is the pose the game actually shows. Selecting one is for inspection.
-  const clips = useMemo(
-    () => (clipIndex === null
-      ? model.animations
-      : model.animations.slice(clipIndex, clipIndex + 1)),
-    [model.animations, clipIndex],
-  )
+  // A motion's clips compose by bone — upper body, lower body — so they play
+  // together. The other motions in the file are left out.
+  const clips = useMemo(() => clipsForMotion(model.animations, motion), [model.animations, motion])
 
   useFrame((_, delta) => {
     const skeleton = model.skeleton
@@ -66,6 +65,19 @@ function Animator({
     for (const mesh of built.meshes) {
       const attr = mesh.geometry.getAttribute('position')
       attr.needsUpdate = true
+    }
+
+    // Frame the pose, not the rest pose: a motion can carry the whole body
+    // well away from where it rests (Aern 1 hovers, its head cut off by a
+    // camera framed on the rest pose). Measured once per motion.
+    if (onPosed && measured.current !== clips) {
+      measured.current = clips
+      const box = new THREE.Box3()
+      for (const mesh of built.meshes) {
+        mesh.geometry.computeBoundingBox()
+        if (mesh.geometry.boundingBox) box.union(mesh.geometry.boundingBox)
+      }
+      if (!box.isEmpty()) onPosed(box)
     }
 
     const clip = clips[0]
@@ -137,14 +149,14 @@ export interface ModelStats {
 }
 
 export function ModelViewer({
-  model, settings, onStats, playing = true, speed = 1, clipIndex = null, onFrame,
+  model, settings, onStats, playing = true, speed = 1, motion = null, onFrame,
 }: {
   model: ParsedDatFile | null
   settings: ModelSettings
   onStats?: (stats: ModelStats | null) => void
   playing?: boolean
   speed?: number
-  clipIndex?: number | null
+  motion?: string | null
   onFrame?: (frame: number, total: number) => void
 }) {
   // Build and dispose in the *same* effect, so the two are always paired.
@@ -200,9 +212,19 @@ export function ModelViewer({
     }
   }, [built, settings.wireframe, settings.roughness])
 
+  // The posed bounds when the motion has been measured, else the rest pose.
+  const [posed, setPosed] = useState<{ center: THREE.Vector3; radius: number } | null>(null)
+  useEffect(() => { setPosed(null) }, [built, motion])
+  const onPosed = useMemo(() => (box: THREE.Box3) => {
+    const sphere = box.getBoundingSphere(new THREE.Sphere())
+    setPosed({ center: sphere.center, radius: Math.max(sphere.radius, 0.01) })
+  }, [])
+  const center = posed?.center ?? built?.center
+  const radius = posed?.radius ?? built?.radius ?? 1
+
   // Frame the model regardless of its size: FFXI models range from a rat to a
   // dragon, and a fixed camera distance is useless across that span.
-  const dist = built ? built.radius * 3.2 : 5
+  const dist = built ? radius * 3.2 : 5
 
   return (
     <Canvas
@@ -231,14 +253,14 @@ export function ModelViewer({
 
       {built && settings.showGround && (
         <gridHelper
-          args={[built.radius * 8, 20, '#3a4152', '#242a36']}
-          position={[0, -built.radius, 0]}
+          args={[radius * 8, 20, '#3a4152', '#242a36']}
+          position={[0, -radius, 0]}
         />
       )}
 
       {/* The model is built in an effect, so it does not exist when the Canvas
           creates its camera. This reframes once it arrives. */}
-      {built && <FrameCamera radius={built.radius} />}
+      {built && <FrameCamera radius={radius} />}
 
       {built && model && (
         <Animator
@@ -246,8 +268,9 @@ export function ModelViewer({
           model={model}
           playing={playing}
           speed={speed}
-          clipIndex={clipIndex}
+          motion={motion}
           onFrame={onFrame}
+          onPosed={onPosed}
         />
       )}
 
@@ -255,7 +278,7 @@ export function ModelViewer({
           the other way round swings the recentred model back off-origin. */}
       {built && (
         <group rotation={[Math.PI, 0, 0]}>
-          <group position={[-built.center.x, -built.center.y, -built.center.z]}>
+          <group position={[-center!.x, -center!.y, -center!.z]}>
             {built.meshes.map((mesh, i) => (
               <primitive key={i} object={mesh} />
             ))}
@@ -266,7 +289,7 @@ export function ModelViewer({
       <OrbitControls
         makeDefault
         target={[0, 0, 0]}
-        minDistance={built ? built.radius * 0.3 : 0.5}
+        minDistance={built ? radius * 0.3 : 0.5}
         maxDistance={dist * 6}
       />
     </Canvas>

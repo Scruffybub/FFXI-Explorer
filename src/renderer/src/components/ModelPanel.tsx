@@ -1,4 +1,5 @@
 import { Label } from './Info'
+import { motionsOf } from '../lib/motions'
 import type { ModelSettings, ToneMappingMode } from '../lib/settings'
 import type { ParsedAnimation } from '../lib/ffxi-dat'
 
@@ -47,19 +48,20 @@ function Slider({
 
 export default function ModelPanel({
   settings, onChange,
-  animations, clipIndex, onClipChange,
+  animations, motion, onMotionChange,
   playing, onPlayingChange, speed, onSpeedChange,
 }: {
   settings: ModelSettings
   onChange: (patch: Partial<ModelSettings>) => void
   animations: ParsedAnimation[]
-  clipIndex: number | null
-  onClipChange: (i: number | null) => void
+  motion: string | null
+  onMotionChange: (key: string | null) => void
   playing: boolean
   onPlayingChange: (v: boolean) => void
   speed: number
   onSpeedChange: (v: number) => void
 }) {
+  const motions = motionsOf(animations)
   return (
     <div className="panel">
       {animations.length > 0 && (
@@ -68,20 +70,16 @@ export default function ModelPanel({
           <div className="section-body">
             <label className="control">
               <Label
-                text="Clip"
-                info="FFXI splits one pose across several blocks — upper body, lower body, extras — so All together is the composed result the game shows. Individual clips are for inspecting one part. A character's animations come from separate files, where a set holds many unrelated motions, so those default to the first clip instead."
+                text="Motion"
+                info="Each motion in the model's file: idle, walk, run, attacks, spells and the rest. The game splits one motion across several clips (upper body, lower body), and they play together. Motions without a known name show their code from the file."
               />
               <select
-                value={clipIndex === null ? 'all' : String(clipIndex)}
-                onChange={e => onClipChange(e.target.value === 'all' ? null : Number(e.target.value))}
+                value={motion ?? motions[0]?.key ?? ''}
+                onChange={e => onMotionChange(e.target.value)}
               >
-                {/* FFXI splits a pose across blocks — upper body, lower body,
-                    extras — so playing them together is the composed result the
-                    game shows. Individual clips are for inspecting one part. */}
-                <option value="all">All together ({animations.length})</option>
-                {animations.map((a, i) => (
-                  <option key={i} value={i}>
-                    Clip {i + 1} — {a.frameCount}f, {a.bones.length} bones
+                {motions.map(m => (
+                  <option key={m.key} value={m.key}>
+                    {m.label} ({m.key}){m.clips.length > 1 ? ` — ${m.clips.length} parts` : ''}
                   </option>
                 ))}
               </select>

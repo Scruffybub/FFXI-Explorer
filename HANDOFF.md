@@ -459,6 +459,18 @@ the body part. Player models look along their own +X once flipped, so the
 avatar turns `yaw - PI/2`; the body's yaw is the direction of travel, camera
 yaw + PI. Headless tests need `&walkdebug=1` (keys without pointer lock).
 
+**Model viewer motions (2026-10-17).** The panel's default was "All together":
+every clip in the file at once, and an NPC file is a whole repertoire
+(Amoeban's 18: idle, battle stance, walk, run, three attacks, three spells,
+death, guard…), so the default pose was a jumble. `lib/motions.ts` groups clips
+by the first three characters of their block name (the last is the body part),
+names the known ones (idl, wlk, run, btl, ded, at#, ma#, some emotes; the rest
+show their code) and the panel's **Motion** list plays one, Idle first. The
+viewer also frames the *posed* model, measured once per motion: Aern 1's idle
+hovers it well above its rest pose and the head was cut off; Amoeban was out of
+view entirely. Bone translations are bind + animation, as xim's SkeletonInstance
+does — that part was right.
+
 **package.json had lost its build tools** at v0.1.0 (176fb06 dropped
 `scripts` and `devDependencies`; only the lockfile still had them). Any
 `npm install` then pruned electron, electron-vite, typescript and
