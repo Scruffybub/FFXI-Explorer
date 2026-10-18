@@ -4,7 +4,7 @@
 
 **Zone effects (beta)** - The game's lamps, fires, smoke and glows play, but effects the game triggers (footsteps, doors, hit sparks) do not, and lamps cast no shadows.
 
-**Weather** - Zone weather draws the game's skies, clouds, rain, snow, fog and lighting. Still missing: the moon's phases, the pole star and Lufaise's scheduled lightning; light snow is very faint.
+**Weather** - Zone weather draws the game's skies, clouds, rain, snow, fog and lighting. The moon shows its phase (today's in Vana'diel, or any you pick) and the pole star rises at night. Still missing: Lufaise's scheduled lightning; light snow is very faint.
 
 **Transparency** - A few plants, walls and ground textures still do not blend exactly as they do in game.
 

@@ -312,6 +312,11 @@ export interface SceneSettings {
    * the moon with its rainbow halo — or, off, as the viewer's plain discs.
    */
   gameSunMoon: boolean
+  /**
+   * Which of the moon phase sheet's 12 frames to show (lib/vanaTime.ts):
+   * 0 new, 6 full; -1 is today's moon in Vana'diel.
+   */
+  moonPhase: number
 
   /**
    * With Zone weather: stretches the weather's fog, 1 = the game's. Storms and
@@ -497,6 +502,7 @@ export const DEFAULT_SCENE: SceneSettings = {
   lampCount: 12,
   hazeStrength: 2,
   gameSunMoon: true,
+  moonPhase: -1,
   weatherFogScale: 1,
   zoneTransparency: true,
   anisotropy: 16,

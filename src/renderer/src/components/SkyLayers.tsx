@@ -103,6 +103,8 @@ interface Layer {
   slot: number
   /** Position multiplier: 1, or the push-out for layers born on a spread. */
   posScale: number
+  /** The moon's phase sheet: each frame's texture rectangle (u0, v0, u1, v1). */
+  phases?: [number, number, number, number][]
 }
 
 /**
@@ -156,6 +158,41 @@ const SKY_ONLY = typeof window !== 'undefined'
 
 const decode = (c: number) => (c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4))
 
+/**
+ * The moon phase sprite in a moon folder, as a texture plus each frame's
+ * rectangle. The frames are the sheet's 12 cells in cycle order.
+ */
+function phaseSheet(zone: ParsedZone, dir: string): { map: THREE.DataTexture; frames: [number, number, number, number][] } | null {
+  const sp = (zone.spawns ?? []).find(g => g.dir === dir && g.link === 'sprite' && g.attach === 0xf)
+  const p = sp && zone.prefabs[sp.prefabIndices[0]]
+  const tex = p ? zone.textures[p.materialIndex] : undefined
+  if (!p?.frames?.length || !tex) return null
+  const frames = p.frames.map(fr => {
+    let u0 = 1, v0 = 1, u1 = 0, v1 = 0
+    for (let k = 0; k < fr.uvs.length; k += 2) {
+      u0 = Math.min(u0, fr.uvs[k]); u1 = Math.max(u1, fr.uvs[k])
+      v0 = Math.min(v0, fr.uvs[k + 1]); v1 = Math.max(v1, fr.uvs[k + 1])
+    }
+    return [u0, v0, u1, v1] as [number, number, number, number]
+  })
+  const map = new THREE.DataTexture(new Uint8Array(tex.rgba), tex.width, tex.height, THREE.RGBAFormat)
+  map.flipY = false
+  map.colorSpace = THREE.SRGBColorSpace
+  map.magFilter = THREE.LinearFilter
+  map.minFilter = THREE.LinearFilter
+  map.needsUpdate = true
+  return { map, frames }
+}
+
+/** Shows one frame of a phase layer's sheet on its plane (v runs down the image). */
+function showPhase(l: Layer, frame: number): void {
+  const r = l.phases?.[frame]
+  if (!r || !l.map) return
+  l.map.repeat.set(r[2] - r[0], -(r[3] - r[1]))
+  l.map.offset.set(r[0], r[3])
+  l.map.updateMatrix()
+}
+
 function buildLayers(zone: ParsedZone, state: string, radius: number, gameSunMoon: boolean): Layer[] {
   // The weather's folder (and its star and moon folders), plus generators in
   // deeper folders that run by themselves (emission flag 0x10). Riverne keeps
@@ -194,7 +231,13 @@ function buildLayers(zone: ParsedZone, state: string, radius: number, gameSunMoo
   for (const [si, sp] of (zone.spawns ?? []).entries()) {
     const isChild = childNames.has(sp.dir + '|' + sp.generator) && !sp.emission.autoRun
     if (!isChild && !inState.test(sp.dir) && !(inSub.test(sp.dir) && sp.emission.autoRun)) continue
-    if (sp.link !== 'mesh') continue // WeatherParticles and LensFlare draw these
+    // WeatherParticles and LensFlare draw other links. The exception is a
+    // standing sprite that rides the camera — the pole star (weat/<state>/star
+    // `pole`, sprite hit6, 300 units out and 110 up, fading in at night on
+    // ksta): its quad is drawn like a canopy. WeatherParticles leaves sprites
+    // without a life alone.
+    const poleStar = sp.link === 'sprite' && sp.life <= 0 && sp.followCamera && sp.attach === 0
+    if (sp.link !== 'mesh' && !poleStar) continue
     // Haze (render state 0x10): Altepa's heat ka01 — WeatherParticles draws it
     // through HazePass; as a sky layer it was a faint colour veil.
     if (sp.renderState & 0x10) continue
@@ -216,7 +259,10 @@ function buildLayers(zone: ParsedZone, state: string, radius: number, gameSunMoo
       const size = 2 * radius * 0.8 * Math.tan(((deg / 2) * Math.PI) / 180)
       const geo = new THREE.PlaneGeometry(1, 1)
       geo.rotateY(Math.PI / 2) // face +X, the axis turned to the camera
-      const map = discTexture()
+      // The moon's shape: the weather's phase sprite (`moon`, attach 0xF, a
+      // 12-frame sheet "moon    moonshap" — lib/vanaTime.ts), one frame shown.
+      const phase = kind === 'moon' ? phaseSheet(zone, sp.dir) : null
+      const map = phase?.map ?? discTexture()
       const mat = new THREE.MeshBasicMaterial({
         map, transparent: true, depthWrite: false, side: THREE.DoubleSide, fog: false,
         blending: THREE.AdditiveBlending,
@@ -231,6 +277,7 @@ function buildLayers(zone: ParsedZone, state: string, radius: number, gameSunMoo
         mesh, kind, spawn: sp, tint, map, order: -30, slot: 0, posScale: 1,
         scale: new THREE.Vector3(size, size, size),
         base: new THREE.Vector3(), rotation: new THREE.Euler(), spin: [0, 0, 0],
+        ...(phase && { phases: phase.frames }),
       })
     }
     if (!sky) continue
@@ -253,7 +300,9 @@ function buildLayers(zone: ParsedZone, state: string, radius: number, gameSunMoo
       // disc plus an outer ring, and fading each to its own edge left a seam
       // where they meet (Lufaise's wind cld3/cld4).
       let rimHalf = 0
-      if (kind === 'camera' && !sp.spread) {
+      // Not the pole star: its quad's corners all sit on its "rim", and the
+      // fade took them to nothing.
+      if (kind === 'camera' && !sp.spread && !poleStar) {
         for (const qi of sp.prefabIndices) {
           const q = zone.prefabs[qi]
           if (!q) continue
@@ -319,7 +368,7 @@ function buildLayers(zone: ParsedZone, state: string, radius: number, gameSunMoo
       // Without a blend byte retail's particles add (kuluu particle_gen.rs);
       // the standing canopies keep alpha, as they always have here. Thunder's
       // bolt is a particle with a life and no byte.
-      const nib = sp.blend >= 0 ? sp.blend & 0x0f : sky && sp.life <= 0 ? 4 : 8
+      const nib = sp.blend >= 0 ? sp.blend & 0x0f : sky && sp.life <= 0 && sp.link === 'mesh' ? 4 : 8
       const blending = nib === 8 ? THREE.AdditiveBlending : THREE.NormalBlending
       const mat = new THREE.MeshBasicMaterial({
         ...(map && { map }),
@@ -393,6 +442,19 @@ function buildLayers(zone: ParsedZone, state: string, radius: number, gameSunMoo
         scale.multiplyScalar(k)
         posScale = k
         fogScale.value = 1 / k
+      } else if (kind === 'camera' && poleStar) {
+        // A small sprite placed away from the camera, not a canopy round it:
+        // move it out to the dome along its own direction, scaled to match, so
+        // it keeps the size it has at its own distance. Pushing its "rim" out
+        // like a canopy's blew the 2.5x quad up to 8,550x — a faint wash over
+        // the whole sky.
+        const d = Math.hypot(...sp.position)
+        if (d > 1) {
+          const k = Math.max(1, (radius * 0.95) / d)
+          scale.multiplyScalar(k)
+          posScale = k
+          fogScale.value = 1 / k
+        }
       } else if (kind === 'camera') {
         // Push the rim out to just inside the dome, keeping proportions.
         // Measured over all of the generator's pieces, so they scale as one:
@@ -444,7 +506,7 @@ function buildLayers(zone: ParsedZone, state: string, radius: number, gameSunMoo
 const FLIP = new THREE.Matrix4().makeRotationX(Math.PI)
 
 export function SkyLayers({
-  zone, state, timeOfDayRef, radius, gameSunMoon = true,
+  zone, state, timeOfDayRef, radius, gameSunMoon = true, moonFrame = 6,
 }: {
   zone: ParsedZone
   state: string
@@ -452,6 +514,8 @@ export function SkyLayers({
   radius: number
   /** The game's sun (its lens flare draws it) rather than the stand-in disc. */
   gameSunMoon?: boolean
+  /** Which frame of the moon's phase sheet to show (lib/vanaTime.ts). */
+  moonFrame?: number
 }) {
   const layers = useMemo(() => {
     const l = buildLayers(zone, state, radius, gameSunMoon)
@@ -463,6 +527,8 @@ export function SkyLayers({
     }
     return l
   }, [zone, state, radius, gameSunMoon])
+
+  useEffect(() => { for (const l of layers) if (l.phases) showPhase(l, moonFrame) }, [layers, moonFrame])
 
   // One clock per generator, shared by its pieces and copies. Rebuilt with the
   // layers, so a weather change starts every generator over, as zoning does.
@@ -584,7 +650,8 @@ export function SkyLayers({
           l.rotation.x + l.spin[0] * frames, l.rotation.y + l.spin[1] * frames, l.rotation.z + l.spin[2] * frames, 'ZYX')
         tmp.q.setFromEuler(tmp.spinE)
         tmp.at.copy(l.base)
-        if (sp.spread) tmp.at.add(em.offsets[l.slot]).multiplyScalar(l.posScale)
+        if (sp.spread) tmp.at.add(em.offsets[l.slot])
+        tmp.at.multiplyScalar(l.posScale) // 1 but for spreads and the pole star
         if (sp.billboard & 1) {
           // Faces the camera (setup flag 0x1): Thunder's bolt. The DAT's
           // y-down stays, so the bolt is not drawn upside down.

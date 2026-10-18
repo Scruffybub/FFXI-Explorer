@@ -14,6 +14,7 @@ import { invertRigidMatrix4, poseSkeleton, skinMeshes } from '../lib/skinning'
 import { CollisionWorld } from '../lib/CollisionWorld'
 import type { MovementClips } from '../lib/characterModel'
 import { clipsForMotion } from '../lib/motions'
+import { moonFrameFor } from '../lib/vanaTime'
 import {
   GammaBlendPass, GAMMA_BLEND_LAYER, SRGB_GLSL,
 } from '../lib/GammaBlendPass'
@@ -4561,7 +4562,7 @@ export default function ZoneViewer({
       {zoneLight && (
         <SkyLayers
           zone={zoneData} state={zoneSkyRecords[0].state} timeOfDayRef={timeOfDayRef} radius={farPlane * 0.9}
-          gameSunMoon={scene.gameSunMoon}
+          gameSunMoon={scene.gameSunMoon} moonFrame={moonFrameFor(scene.moonPhase)}
         />
       )}
       {zoneLight && <WeatherParticles zone={zoneData} state={zoneSkyRecords[0].state} />}

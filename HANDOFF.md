@@ -111,7 +111,7 @@ basic-material path with shader variant `'ffxi'`).
   units that glow whitened the whole sky, so it is not drawn until a reference
   says how retail sizes or blends it. The Ronfaure sun disc proper is the
   screen-space lens flare (lf02, not built); the moon's phase sprite is a 0x21
-  sheet (not parsed; no Vana'diel calendar either).
+  sheet — drawn since 2026-10-17, see "Moon phases and the pole star".
 - The Weather list shows the zone's recorded states while Zone weather is on
   ("star"/"effect" mesh groups fell back to clear skies and looked identical).
 
@@ -458,6 +458,22 @@ Tarutaru 103 male, 104 female) and the Avatar plays idl*, wlk* or run* (Shift)
 the body part. Player models look along their own +X once flipped, so the
 avatar turns `yaw - PI/2`; the body's yaw is the direction of travel, camera
 yaw + PI. Headless tests need `&walkdebug=1` (keys without pointer lock).
+
+**Moon phases and the pole star (2026-10-17).** The weather's moon folder
+holds a `moon` sprite (attach 0xF, additive 0x48, scale 20) whose sheet
+"moon    moonshap" is 12 frames in cycle order: 0 new, 1-5 waxing, 6 full,
+7-11 waning. The moon stand-in disc now shows one frame (SkyLayers
+phaseSheet/showPhase; v runs down the image, hence the negative repeat).
+Scene -> Moon phase: "Today in Vana'diel" (lib/vanaTime.ts — Earth time x25
+from Unix 1009810800 = year 886; d = (days + 26) % 84, full at 0, new at 42;
+rule from LandSandBoat vana_time.h, reference only) or any frame. The pole star
+is the star folder's `pole`: a standing sprite (hit6 -> "hit3    hit31",
+tint 148,148,54, 300 out and 110 up, ksta fades it in at night) let through
+SkyLayers as a camera layer: moved out to the dome along its own direction and
+scaled to match (the canopy rim push-out made it 8,550x), no canopy rim fade
+(its quad corners are all "rim" — the fade took them to alpha 0), additive as
+sprites without a blend byte are. West Ronfaure's fog (200-568) dims it by a
+third at its retail distance of 319, as retail would.
 
 **Model viewer motions (2026-10-17).** The panel's default was "All together":
 every clip in the file at once, and an NPC file is a whole repertoire

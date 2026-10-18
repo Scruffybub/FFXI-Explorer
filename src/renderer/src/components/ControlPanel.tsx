@@ -9,6 +9,7 @@ import type { MusicStatus } from '../lib/zoneMusic'
 import type { MapScale } from './ZoneViewer'
 import { WEATHER_TYPES, nativeWeather, weatherDir } from '../lib/weatherTypes'
 import { UI_LOOKS, type UiLook, type UiText } from '../lib/uiLook'
+import { MOON_FRAMES, moonPhase } from '../lib/vanaTime'
 
 interface ControlPanelProps {
   lighting: LightingSettings
@@ -918,6 +919,22 @@ export default function ControlPanel({
             onChange={v => onScene({ gameSunMoon: v })}
             info="On: the sun and moon as the game draws them — the sun is the weather's lens flare (white core, starburst, soft halo and the chain of rings across the screen, fading when terrain hides it), and the moon gets its rainbow halo. Off: the viewer's plain sun and moon discs."
           />
+        )}
+        {scene.zoneWeather && weatherStates.length > 0 && (
+          <SelectField
+            label="Moon phase"
+            value={scene.moonPhase}
+            onChange={v => onScene({ moonPhase: Number(v) })}
+            info="The moon's shape, from the game's own phase art. Today follows Vana'diel's calendar: the moon goes from full to new and back every 84 Vana'diel days, about 3 days 8 hours of real time. Only skies whose weather carries the phase art show it; elsewhere the moon stays a plain disc."
+          >
+            {(() => {
+              const now = moonPhase()
+              return <option value={-1}>Today in Vana'diel — {MOON_FRAMES[now.frame].name} ({now.percent}%)</option>
+            })()}
+            {MOON_FRAMES.map((f, i) => (
+              <option key={i} value={i}>{f.name} ({f.percent}%)</option>
+            ))}
+          </SelectField>
         )}
         {scene.zoneWeather && weatherStates.length > 0 && (
           <Slider
