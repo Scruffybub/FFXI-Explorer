@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, type ReactNode } from 'react'
+import { useState, useMemo, useCallback, useEffect, type ReactNode } from 'react'
 import { parseDatFile, hasAnimations, type ParsedDatFile } from '../lib/ffxi-dat'
 import { MODELS, MODEL_CATEGORIES, searchModels, type ModelEntry } from '../lib/modelList'
 import { ModelViewer, type ModelStats } from './ModelViewer'
@@ -57,11 +57,9 @@ export default function ModelBrowser({
   }, [mapZones, mapSearch])
 
   const filtered = useMemo(
-    () => searchModels(search, category).slice(0, 400),
-    [search, category],
-  )
-  const totalMatches = useMemo(
-    () => searchModels(search, category).length,
+    // The whole list: 2,473 rows draw quickly, and a cap at 400 hid most
+    // models unless you searched for them.
+    () => searchModels(search, category),
     [search, category],
   )
 
@@ -84,6 +82,20 @@ export default function ModelBrowser({
       setLoad({ status: 'error', message: String(err) })
     }
   }, [ffxiPath])
+
+  // ?census=1: window.__loadModel(i) opens MODELS[i], __modelStatus() reports
+  // the load, for the model sweep (one thumbnail per model).
+  useEffect(() => {
+    if (!new URLSearchParams(window.location.search).has('census')) return
+    const w = window as unknown as { __loadModel?: (i: number) => void }
+    w.__loadModel = (i: number) => { void loadModel(MODELS[i]) }
+    return () => { delete w.__loadModel }
+  }, [loadModel])
+  useEffect(() => {
+    if (!new URLSearchParams(window.location.search).has('census')) return
+    ;(window as unknown as { __modelStatus?: () => string }).__modelStatus = () =>
+      load.status === 'error' ? 'error: ' + load.message : load.status
+  }, [load])
 
   const onStats = useCallback((s: ModelStats | null) => setStats(s), [])
 
@@ -201,11 +213,6 @@ export default function ModelBrowser({
           ))}
           {filtered.length === 0 && (
             <li className="empty">No models match “{search}”.</li>
-          )}
-          {totalMatches > filtered.length && (
-            <li className="empty">
-              Showing {filtered.length} of {totalMatches}. Narrow the search to see more.
-            </li>
           )}
         </ul>
         )}

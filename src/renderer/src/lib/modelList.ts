@@ -14,9 +14,13 @@ export interface ModelEntry {
   path: string
 }
 
-export const MODELS: ModelEntry[] = (rawModels as ModelEntry[]).filter(
-  m => m && m.name && m.path,
-)
+/**
+ * By category, then by name with numbers in order — "Aern 2" before "Aern 10",
+ * where a plain sort put Aern 10, 11 and 12 between 1 and 2.
+ */
+export const MODELS: ModelEntry[] = (rawModels as ModelEntry[])
+  .filter(m => m && m.name && m.path)
+  .sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name, undefined, { numeric: true }))
 
 /** Category names, in descending order of how many models they hold. */
 export const MODEL_CATEGORIES: string[] = (() => {
