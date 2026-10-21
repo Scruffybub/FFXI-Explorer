@@ -475,6 +475,22 @@ scaled to match (the canopy rim push-out made it 8,550x), no canopy rim fade
 sprites without a blend byte are. West Ronfaure's fog (200-568) dims it by a
 third at its retail distance of 319, as retail would.
 
+**Lufaise's scheduled strikes (2026-10-17).** weat/thdr/kmi1 and kmi2 hold
+whole strike sequences — bolts (kmi2/kmi3 meshes, additive), cloud flashes
+(lih0/lih1, some subtractive 0x42), each generator starting the next through
+its birth children (kk*1 -> km*1 -> kh*1, 1a01 -> 1a02 -> 1a03) — all riding
+the camera 400-500 out, none auto-run and none any parent's child: the game's
+zone schedule fires a folder whole, and the data does not say when. SkyLayers
+now takes such folders' first generators as child-kind layers (`scheduled`),
+fires one folder at the camera every 20-45 s (the viewer's choice), and posts
+its own layers' birth children so the chain plays (it used to play only
+children WeatherParticles posted). kh*1 are not in Lufaise; their posts expire
+unheard. A census of every zone's weather: the same kmi1/kmi2 pair in 14 zones
+(Lufaise, Misareaux, the [S] zones, Arrapago/Silver Sea Remnants, both Silver
+Sea routes) and Marjami Ravine's kam1(/kam2); also Mount Zhayolm's clod/set1, a
+cloudy-weather event, so the rule is limited to thunder weathers (thdr, thd1,
+bolt).
+
 **Model viewer motions (2026-10-17).** The panel's default was "All together":
 every clip in the file at once, and an NPC file is a whole repertoire
 (Amoeban's 18: idle, battle stance, walk, run, three attacks, three spells,
@@ -3227,6 +3243,45 @@ rather than solved.
 ---
 
 ## 6. Feature ideas not started
+
+- **Ryan's roadmap additions, 2026-10-21.**
+  - **Survey every similar FFXI project, then beat them.** An exhaustive
+    search for anything like this app: zone or model viewers, DAT tools,
+    browser renderers (xim, kuluu-ffxi), POLUtils, the Ashita/Windower map
+    tools, Vanalytics, and whatever else turns up. For each, note what it does
+    that we don't. Then build our own version of every feature that fits this
+    app's style. Goals: the best and most fully-featured option, and faster
+    than the rest. Measure performance against them rather than assuming it.
+    Not started. The GPL rule still applies: format facts only, no code.
+  - **Ryan chose both directions, 2026-10-21, as two long-term features:**
+    - **Map maker.** Build a parchment map from a zone's geometry, in the style
+      of the game's own maps. The result must be *editable*, so the user can
+      fix whatever the auto-generation gets wrong.
+    - **Zone maker.** The diorama idea grown into an editor:
+      - Place, move, alter and delete models.
+      - Create, edit and remove terrain, possibly from terrain templates.
+      - Texture placement and/or a texture painter.
+      - Add weather.
+  - **Kept for the future, not now:** diorama, HQ still renders, reflections,
+    light shafts, lit fog, softer shadows, saved point lights. Foret de
+    Hennetiel water and the bloom white screen stay paused.
+  - **Next up, in order:** competitor survey, then lamp shadows, light snow,
+    event-triggered effects, and the remaining transparency faults.
+  - **Map maker research, 2026-10-21.** A quick search found no tool
+    that builds new FFXI zones. The developers once planned a player dungeon
+    maker and never shipped it. What does exist is map *drawing*: Remapster
+    (remapster.com) hand-makes HD versions of the in-game area maps, which the
+    wikis and HorizonXI use, and xurion/ffxi-map-dats edits the stock maps to
+    add exits and NM spawns. That leaves two possible directions; Ryan to choose:
+    1. **Map maker as in maps.** Generate a clean, high-resolution area map
+       from a zone's own geometry and collision: floors separated, walls
+       traced, styled like the parchment maps. Builds on Map view and Models →
+       Maps. Realistic.
+    2. **Map maker as in zones.** Compose new scenes from the game's own pieces:
+       place prefabs, models, effects, lights and weather, then save and reload
+       the layout. A natural extension of the unstarted diorama item. Writing
+       real game-loadable DATs is a much larger and riskier step. Saved layouts
+       must never contain game assets, only references to the user's install.
 
 - **Zone music — PLAYING IN THE APP as of 2026-08-10.** Panel → **Music** →
   *Zone music* (off by default) plus a volume slider and a line of status.

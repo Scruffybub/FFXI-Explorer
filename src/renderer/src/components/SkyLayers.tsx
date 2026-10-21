@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import type { ParsedZone } from '../lib/ffxi-dat'
@@ -105,6 +105,8 @@ interface Layer {
   posScale: number
   /** The moon's phase sheet: each frame's texture rectangle (u0, v0, u1, v1). */
   phases?: [number, number, number, number][]
+  /** A scheduled strike's first generator (see SCHEDULED below), started by the viewer's clock. */
+  scheduled?: boolean
 }
 
 /**
@@ -150,6 +152,9 @@ export function spreadOffset(s: GeneratorSpawn['spread'], out: THREE.Vector3): T
   if (s.rotY) out.applyAxisAngle(new THREE.Vector3(0, 1, 0), s.rotY)
   return out
 }
+
+/** The thunder weathers' folders (lib/weatherTypes: Thunder thdr/thd1, Thunderstorms bolt). */
+const THUNDER = /^(thdr|thd1|bolt)$/
 
 /** Diagnostic: ?skyonly=cld1,kat2 draws only the named sky generators. */
 const SKY_ONLY = typeof window !== 'undefined'
@@ -230,7 +235,20 @@ function buildLayers(zone: ParsedZone, state: string, radius: number, gameSunMoo
   const spawnCount = (zone.spawns ?? []).length
   for (const [si, sp] of (zone.spawns ?? []).entries()) {
     const isChild = childNames.has(sp.dir + '|' + sp.generator) && !sp.emission.autoRun
-    if (!isChild && !inState.test(sp.dir) && !(inSub.test(sp.dir) && sp.emission.autoRun)) continue
+    // A weather sub-folder whose generators neither run by themselves nor are
+    // started by a parent is fired whole by the game on a schedule: Lufaise's
+    // thunder strikes, weat/thdr/kmi1 and kmi2 (bolts kmi2/kmi3, cloud flashes
+    // lih0/lih1, each starting the next). Nothing in the data says when; the
+    // viewer fires one now and then (SkyLayers' strike clock). Its first
+    // generators play like children, started at the camera.
+    // Thunder weathers only (thdr, thd1, bolt): the census found the same pair
+    // of strike folders in 14 zones (Lufaise, Misareaux, the [S] zones, the
+    // Aht Urhgan remnants and sea routes) and Marjami Ravine's kam1 — but also
+    // Mount Zhayolm's clod/set1, a cloudy-weather event that must not fire on a
+    // half-minute clock.
+    const scheduled = THUNDER.test(state) && !isChild && !sp.emission.autoRun && sp.followCamera &&
+      sp.link === 'mesh' && inSub.test(sp.dir) && !inState.test(sp.dir)
+    if (!isChild && !scheduled && !inState.test(sp.dir) && !(inSub.test(sp.dir) && sp.emission.autoRun)) continue
     // WeatherParticles and LensFlare draw other links. The exception is a
     // standing sprite that rides the camera — the pole star (weat/<state>/star
     // `pole`, sprite hit6, 300 units out and 110 up, fading in at night on
@@ -244,7 +262,7 @@ function buildLayers(zone: ParsedZone, state: string, radius: number, gameSunMoo
     if (SKY_ONLY.length && !SKY_ONLY.includes(sp.generator)) continue
     // A weather generator that neither rides the camera nor the sun or moon
     // stands in the world: Riverne's light shafts (weat/thdr/tdr4).
-    const kind = isChild ? 'child' : sp.attach === 0xe ? 'sun' : sp.attach === 0xf ? 'moon' : sp.followCamera ? 'camera'
+    const kind = isChild || scheduled ? 'child' : sp.attach === 0xe ? 'sun' : sp.attach === 0xf ? 'moon' : sp.followCamera ? 'camera'
       : sp.attach === 0 ? 'world' : null
     if (!kind) continue
     const sky = kind === 'camera' || kind === 'world' || kind === 'child'
@@ -480,6 +498,7 @@ function buildLayers(zone: ParsedZone, state: string, radius: number, gameSunMoo
       if (sp.renderState & 0x200) fogScale.value = 0
       layers.push({
         mesh, kind, spawn: sp, tint, map, scale, slot, posScale,
+        ...(scheduled && { scheduled: true }),
         base: new THREE.Vector3(...sp.position),
         rotation: new THREE.Euler(sp.rotation[0], sp.rotation[1], sp.rotation[2], 'ZYX'),
         spin: sp.spin ?? [0, 0, 0],
@@ -557,6 +576,19 @@ export function SkyLayers({
     }
   }, [layers])
 
+  // Each scheduled folder's first generators, by folder.
+  const strikes = useMemo(() => {
+    const m = new Map<string, string[]>()
+    for (const l of layers) {
+      if (!l.scheduled) continue
+      const names = m.get(l.spawn.dir) ?? []
+      if (!names.includes(l.spawn.generator)) names.push(l.spawn.generator)
+      m.set(l.spawn.dir, names)
+    }
+    return m
+  }, [layers])
+  const nextStrike = useRef(-1)
+
   const tmp = useMemo(() => ({
     dir: new THREE.Vector3(), m: new THREE.Matrix4(), q: new THREE.Quaternion(),
     look: new THREE.Matrix4(), up: new THREE.Vector3(0, 1, 0), p: new THREE.Vector3(),
@@ -567,7 +599,21 @@ export function SkyLayers({
     const minutes = (timeOfDayRef.current ?? 12) * 60
     const day = (((minutes % 1440) + 1440) % 1440) / 1440
     const frames = clock.getElapsedTime() * EFFECT_FPS
-    // Children: take the posts meant for them (same name, parent's folder).
+    // Scheduled strikes: one folder at a time, at the camera, every 20-45 s.
+    // The interval is the viewer's choice — the game's schedule is not in the
+    // zone data.
+    if (strikes.size) {
+      if (nextStrike.current < 0) nextStrike.current = frames + 5 * EFFECT_FPS
+      if (frames >= nextStrike.current) {
+        const dirs = [...strikes.keys()]
+        const dir = dirs[Math.floor(Math.random() * dirs.length)]
+        for (const name of strikes.get(dir)!) childEvents.push({ name, dir, frame: frames, at: camera.position.clone() })
+        nextStrike.current = frames + (20 + Math.random() * 25) * EFFECT_FPS
+      }
+    }
+    // Children: take the posts meant for them (same name, parent's folder),
+    // and post their own birth children in turn — a sky layer can start the
+    // next one (Lufaise's kk*1 starts the bolt km*1, 1a01 starts 1a02).
     for (let k = childEvents.length - 1; k >= 0; k--) {
       const e = childEvents[k]
       for (const [sp, em] of emitters) {
@@ -576,6 +622,7 @@ export function SkyLayers({
         em.births[slot] = e.frame
         em.offsets[slot].copy(e.at)
         childEvents.splice(k, 1)
+        for (const name of sp.children.birth) childEvents.push({ name, dir: sp.dir, frame: e.frame, at: e.at.clone() })
         break
       }
     }
