@@ -670,7 +670,45 @@ without auto-run, surveyed in 8 zones:
     flames probably never draw today.
   - A universal shared-mesh fallback would therefore change what existing
     zones show: sweep before turning it on everywhere.
-- **Stage 2 plan:**
+- **Stage 2 built (2026-10-22): footsteps in walk mode, with Zone effects on.**
+  - **Shared meshes:** `parseSystemEffects` now also returns the
+    `syst/effe` D3Ms. parseZoneFile appends them under `<system>`, their
+    textures joining the pool like the shared sprites. A mesh link that
+    misses its own folders falls back to them **only for non-auto-run
+    generators**, so nothing already drawn changes.
+  - **Triggered mode:** `TriggeredEffects` (WeatherParticles) builds the
+    fses/fefs and fser/fefr generators with room for 6 bursts each. Its
+    ParticleField runs `triggered`: no clock, and each `childEvents` post
+    naming a generator fires one emission there, left in the world, plus the
+    generator's birth children.
+  - **Relays:** starters that draw nothing (no alpha, no curve, so
+    buildSystems drops them) relay their birth children. Sand `0300` →
+    `a301` puff; shallow water `0800` → `a802` + `a804`; deep `0900` →
+    `a902` + `a904`.
+  - **When a foot lands:** Avatar picks the lowest bind-pose bone on each
+    side (±z). On Hume male these are 37 and 87, not a matched pair: one sits
+    4 cm lower, so comparing foot to foot failed (2 footfalls in 4 s). Each
+    foot is now measured against its own lowest point in the clip, which
+    resets on idle/walk/run and creeps up 0.5% of height a second. A foot
+    lands when its height drops from over 3% to under 0.8% of the model's
+    height.
+  - **What fires:** `0T00` (T = `body.terrain`, published by WalkCamera with
+    `grounded`) is posted at the foot, on the ground. Walking uses fefs,
+    running uses fefr.
+  - **No character model:** FootstepCadence steps every 1/2 s walking or
+    1/3 s running, alternating ±0.15.
+  - **Measured** in Western Altepa (`?census=1` → `__steps`): walking 7
+    footfalls in 4 s, running 10, each from its own set. Placement checked by
+    boosting the puff colour x12 in a still: the two puffs sit where the feet
+    came down, behind the walker.
+  - **At the data's own strength the puffs barely show.** Sand `a301`: tint
+    38,38,28, alpha 16 (0.125), blend 0x48 additive, 0.4 units across.
+    Snow's `0400` (alpha 58) is white on white. Same question as light snow:
+    a retail reference is needed before any boost.
+- **Still to do:** the `fmrk` footprint effect (shared file generator, not
+  parsed: the system file's generators are not read at all), the footstep
+  sounds (0x3D), and a "Triggered effects" Play list (doors, rainbow).
+- **Stage 2 plan (as written before building):**
   1. Load the system D3Ms too.
   2. Resolve triggered mesh links against them.
   3. Detect foot contact from the avatar's foot bones: a local minimum of

@@ -1,7 +1,7 @@
 import { DatReader } from './DatReader'
 import { parseTextureBlock } from './TextureParser'
 import { parseModelSpawn, parseKeyFrames } from './GeneratorParser'
-import { parseD3m } from './D3mParser'
+import { parseD3m, type ParsedD3m } from './D3mParser'
 import { parseSprite, type ParsedSprite } from './SpriteParser'
 import { parseEnvironmentRecord } from './EnvironmentParser'
 import { decodeMzb, decodeMmb } from './ZoneDecrypt'
@@ -127,6 +127,12 @@ export function parseTexturesFromDat(
 export interface SystemEffects {
   textures: Map<string, ParsedTexture>
   sprites: { name: string; sprite: ParsedSprite }[]
+  /**
+   * Its D3M meshes (syst/effe): the footprints and rings footsteps place
+   * (`asi1`, `asi2`), splashes (`hit7`). Only triggered generators look here
+   * — see the mesh fallback in parseZoneFile.
+   */
+  meshes: { name: string; mesh: ParsedD3m }[]
 }
 
 export function parseSystemEffects(buffer: ArrayBuffer): SystemEffects {
@@ -139,7 +145,14 @@ export function parseSystemEffects(buffer: ArrayBuffer): SystemEffects {
     const s = parseSprite(new Uint8Array(buffer, block.dataOffset + BLOCK_PADDING, len))
     if (s) sprites.push({ name: block.name.trim(), sprite: s })
   }
-  return { textures: parseTexturesFromDat(buffer), sprites }
+  const meshes: SystemEffects['meshes'] = []
+  for (const block of blocks.filter(b => b.type === BLOCK_D3M)) {
+    const len = block.dataLength - BLOCK_PADDING
+    if (len <= 0) continue
+    const d = parseD3m(new Uint8Array(buffer, block.dataOffset + BLOCK_PADDING, len))
+    if (d) meshes.push({ name: block.name.trim(), mesh: d })
+  }
+  return { textures: parseTexturesFromDat(buffer), sprites, meshes }
 }
 
 /** The directory system sprites are filed under, apart from any zone's. */
@@ -549,6 +562,26 @@ export function parseZoneFile(
     pushSprite(sprite, name, SYSTEM_DIR, mi ?? -1)
     systemSprites++
   }
+  // And its meshes, the same way.
+  for (const { name, mesh: d } of system?.meshes ?? []) {
+    let mi = textureNameMap.get(d.textureName)
+    const tex = mi === undefined ? system!.textures.get(d.textureName) : undefined
+    if (tex) {
+      mi = textures.length
+      textures.push(tex)
+      textureNames.push(d.textureName)
+      textureNameMap.set(d.textureName, mi)
+      systemTextures++
+    }
+    const idx = prefabs.length
+    prefabs.push({
+      vertices: d.vertices, normals: d.normals, colors: d.colors, uvs: d.uvs,
+      indices: d.indices, materialIndex: mi ?? -1, blending: 0, textureName: d.textureName, d3m: true,
+    })
+    prefabChunk[idx] = name
+    prefabDir[idx] = SYSTEM_DIR
+    prefabSource[idx] = name
+  }
 
   // KeyFrame curves, keyed by directory and chunk name, for scoped lookup.
   const keyframes = new Map<string, number[]>()
@@ -627,6 +660,15 @@ export function parseZoneFile(
       }
       prefabIndices = anywhere(false)
       if (prefabIndices.length === 0) prefabIndices = anywhere(true)
+    }
+    // A triggered generator's mesh may live in the shared effects file too
+    // (footsteps' footprints and splashes). Only triggered ones: an auto-run
+    // generator resolved this way would start drawing in zones already judged
+    // — Whitegate's effe/setr lamps (ei30) are a lead, not yet checked.
+    if (prefabIndices.length === 0 && raw.link === 'mesh' && !raw.emission.autoRun) {
+      for (let p = 0; p < prefabChunk.length && !prefabIndices.length; p++) {
+        if (prefabChunk[p] === raw.model && prefabDir[p] === SYSTEM_DIR && prefabs[p].d3m) prefabIndices.push(p)
+      }
     }
     if (prefabIndices.length === 0) { unresolvedSpawns++; continue }
     const curves: GeneratorSpawn['curves'] = {}

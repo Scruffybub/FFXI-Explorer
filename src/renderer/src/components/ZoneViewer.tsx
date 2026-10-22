@@ -24,7 +24,8 @@ import {
 } from '../lib/zoneLighting'
 import { applySpawnStages, setSubtractive, untexturedTexel } from '../lib/spawnStages'
 import { SkyLayers } from './SkyLayers'
-import { WeatherParticles, ZoneEffects, zoneMeshPicker, waterFolders, colourSheet } from './WeatherParticles'
+import { WeatherParticles, ZoneEffects, TriggeredEffects, footstepDir, zoneMeshPicker, waterFolders, colourSheet } from './WeatherParticles'
+import { childEvents } from '../lib/weatherEvents'
 import { LampLights } from './LampLights'
 import { zoneLamps, LAMP_VERTEX_PARS, LAMP_FRAGMENT_PARS, LAMP_VERTEX, buildLampTexture, lampSlots } from '../lib/zoneLamps'
 import { LensFlare } from './LensFlare'
@@ -2070,6 +2071,10 @@ export interface WalkBodyState {
   moving: boolean
   /** Moving at run speed (Shift). */
   running: boolean
+  /** On the ground: not falling, not noclip. Footsteps fall only then. */
+  grounded: boolean
+  /** Ground type underfoot (ParsedCollision.terrain), 0 for none. */
+  terrain: number
 }
 
 /** Body radius for wall collision. Not exposed — it is a shape, not a taste. */
@@ -2274,6 +2279,7 @@ function WalkCamera({
       feetRef.current.add(free)
       camera.position.copy(feetRef.current).setY(feetRef.current.y + t.walkEyeHeight)
       velocityY.current = 0
+      if (body) body.current.grounded = false
       return
     }
 
@@ -2438,6 +2444,8 @@ function WalkCamera({
       body.current.z = feet.z
       body.current.moving = wish.lengthSq() > 1e-10
       body.current.running = move.current.run
+      body.current.grounded = grounded.current
+      body.current.terrain = grounded.current && ground ? ground.terrain : 0
       // The avatar faces where it is going, not where the camera looks, so
       // turning the camera in third person orbits rather than spinning the body.
       if (body.current.moving) {
@@ -2485,6 +2493,44 @@ function WalkCamera({
   return null
 }
 
+/** A zone's footstep effect folders: walking (fses/fefs) and running (fser/fefr). */
+interface FootstepDirs { walk: string | null; run: string | null }
+/** Foot lift and plant thresholds, as a share of the model's height. */
+const FOOT_LIFT = 0.03
+const FOOT_PLANT = 0.008
+/** How fast a foot's remembered lowest point creeps up, share of height per second. */
+const FOOT_BASE_DRIFT = 0.005
+/** The effects' clock: 60 frames a second (WeatherParticles EFFECT_FPS). */
+const EFFECT_CLOCK = 60
+/**
+ * The footstep effect for a ground type: `0T00`, T in hex (xim
+ * TerrainType.toFootEffectId). Stone, metal and wood have none.
+ */
+const footstepEffect = (terrain: number) => `0${terrain.toString(16)}00`
+
+/**
+ * Footsteps without a character model to watch: a step every half second
+ * walking, every third running, alternately a little left and right of the
+ * body. With a character, Avatar fires them as its feet touch down.
+ */
+function FootstepCadence({ body, footsteps }: { body: React.RefObject<WalkBodyState>; footsteps: FootstepDirs }) {
+  const t = useRef({ wait: 0, side: 1 })
+  const at = useMemo(() => new THREE.Vector3(), [])
+  useFrame(({ clock }, delta) => {
+    const b = body.current
+    const dir = b.running ? footsteps.run : footsteps.walk
+    if (!b.moving || !b.grounded || b.terrain <= 0 || !dir) { t.current.wait = 0; return }
+    t.current.wait -= delta
+    if (t.current.wait > 0) return
+    t.current.wait = b.running ? 1 / 3 : 1 / 2
+    t.current.side = -t.current.side
+    // Sideways from the facing (sin yaw, 0, cos yaw).
+    at.set(b.x + Math.cos(b.yaw) * 0.15 * t.current.side, b.y, b.z - Math.sin(b.yaw) * 0.15 * t.current.side)
+    childEvents.push({ name: footstepEffect(b.terrain), dir, frame: clock.getElapsedTime() * EFFECT_CLOCK, at: at.clone() })
+  })
+  return null
+}
+
 /**
  * The player character, drawn at the walking body's position.
  *
@@ -2496,7 +2542,7 @@ function WalkCamera({
  * share a scale: a 2-unit-tall character is right for a 2-unit eye height.
  */
 function Avatar({
-  character, body, playing, speed, motion, moves,
+  character, body, playing, speed, motion, moves, footsteps,
 }: {
   character: ParsedDatFile
   body: React.RefObject<WalkBodyState>
@@ -2504,8 +2550,11 @@ function Avatar({
   speed: number
   motion: string | null
   moves: MovementClips | null
+  /** The zone's footstep folders (TriggeredEffects); null when effects are off. */
+  footsteps?: FootstepDirs | null
 }) {
   const group = useRef<THREE.Group>(null)
+  const inner = useRef<THREE.Group>(null)
   const time = useRef(0)
   const [built, setBuilt] = useState<BuiltModel | null>(null)
 
@@ -2532,7 +2581,29 @@ function Avatar({
 
   const state = useRef<'idle' | 'walk' | 'run' | null>(null)
 
-  useFrame((_, delta) => {
+  // Footsteps: the game fires one as a foot touches down (xim
+  // emitFootSteps). The feet are the lowest bone on each side in the bind
+  // pose (model space is Y down, so the largest y; the model faces +X, so
+  // the sides are ±z). A foot lands when its height above its own lowest
+  // point in the clip drops from over FOOT_LIFT to under FOOT_PLANT of the
+  // model's height.
+  const feet = useMemo(() => {
+    if (!character.skeleton || !inverseBind || !built) return null
+    const rest = poseSkeleton(character.skeleton, [], inverseBind, 0).worldMats
+    const reach = Math.max(built.bounds.max.y - built.bounds.min.y, 0.5) * 2
+    let left = -1, right = -1
+    rest.forEach((m, i) => {
+      if (Math.hypot(m[12], m[13], m[14]) > reach) return
+      if (m[14] > 0 && (left < 0 || m[13] > rest[left][13])) left = i
+      if (m[14] < 0 && (right < 0 || m[13] > rest[right][13])) right = i
+    })
+    return left >= 0 && right >= 0
+      ? { bones: [left, right] as const, height: built.bounds.max.y - built.bounds.min.y, lifted: [false, false], base: [-Infinity, -Infinity], clip: null as string | null }
+      : null
+  }, [character.skeleton, inverseBind, built])
+  const footAt = useMemo(() => new THREE.Vector3(), [])
+
+  useFrame(({ clock }, delta) => {
     if (!group.current) return
     const b = body.current
 
@@ -2559,6 +2630,33 @@ function Avatar({
 
     const pose = poseSkeleton(character.skeleton, play, inverseBind, time.current)
     skinMeshes(built.skinTargets, pose)
+
+    if (feet && footsteps && inner.current && state.current !== 'idle') {
+      if (feet.clip !== state.current) { feet.clip = state.current; feet.base = [-Infinity, -Infinity]; feet.lifted = [false, false] }
+      for (let k = 0; k < 2; k++) {
+        // Height above this foot's own lowest point in the clip (model y grows
+        // downward). Each foot against itself: the two bones found are not a
+        // matched pair (Hume male: one sits 4 cm lower), and the animation
+        // moves them relative to the body, so a slope does not matter.
+        const y = pose.worldMats[feet.bones[k]][13]
+        feet.base[k] = Math.max(feet.base[k] - FOOT_BASE_DRIFT * feet.height * delta, y)
+        const h = (feet.base[k] - y) / feet.height
+        if (h > FOOT_LIFT) feet.lifted[k] = true
+        else if (h < FOOT_PLANT && feet.lifted[k]) {
+          feet.lifted[k] = false
+          const dir = b.running ? footsteps.run : footsteps.walk
+          if (b.moving && b.grounded && b.terrain > 0 && dir) {
+            group.current.updateMatrixWorld(true)
+            const m = pose.worldMats[feet.bones[k]]
+            footAt.set(m[12], m[13], m[14]).applyMatrix4(inner.current.matrixWorld)
+            footAt.y = b.y
+            childEvents.push({ name: footstepEffect(b.terrain), dir, frame: clock.getElapsedTime() * EFFECT_CLOCK, at: footAt.clone() })
+            // Census: every footfall, for the footstep harness.
+            if (CENSUS) ((window as unknown as { __steps?: string[] }).__steps ??= []).push(`${state.current} ${k} ${dir}/${footstepEffect(b.terrain)}`)
+          }
+        }
+      }
+    }
     for (const mesh of built.meshes) {
       mesh.geometry.getAttribute('position').needsUpdate = true
     }
@@ -2576,7 +2674,7 @@ function Avatar({
             Y becomes world -Y, so the lowest world point sits at zero when the
             offset is -bounds.max.y. Using the bounding-sphere radius instead
             floated the character, since that radius is a diagonal. */}
-        <group position={[-built.center.x, -built.bounds.max.y, -built.center.z]}>
+        <group ref={inner} position={[-built.center.x, -built.bounds.max.y, -built.center.z]}>
           {built.meshes.map((mesh, i) => (
             <primitive key={i} object={mesh} />
           ))}
@@ -2706,7 +2804,7 @@ export default function ZoneViewer({
   character = null, characterMotion = null, characterMoves = null, onWeatherStates, onMapScale,
 }: ZoneViewerProps) {
   // Where the walking body is. Written by WalkCamera, read by Avatar.
-  const walkBody = useRef<WalkBodyState>({ x: 0, y: 0, z: 0, yaw: 0, moving: false, running: false })
+  const walkBody = useRef<WalkBodyState>({ x: 0, y: 0, z: 0, yaw: 0, moving: false, running: false, grounded: false, terrain: 0 })
   const zoneUniforms = useRef<ZoneUniforms>({
     fogHeightBase: { value: 0 },
     fogHeightRange: { value: 100 },
@@ -2860,6 +2958,12 @@ export default function ZoneViewer({
 
   // A shadow-casting point light needs the shadow map enabled even when the
   // sun's own shadows are switched off.
+  // Footsteps (Zone effects, walk mode): the zone's footstep effect folders.
+  const footstepDirs = useMemo<FootstepDirs>(
+    () => ({ walk: footstepDir(zoneData, false), run: footstepDir(zoneData, true) }), [zoneData])
+  const footsteps = scene.zoneEffects && !scene.mapView && scene.cameraMode === 'walk' &&
+    (footstepDirs.walk || footstepDirs.run) ? footstepDirs : null
+
   // Lamp shadows ride on Dynamic's shadows switch, like the sun's.
   const lampShadowsOn = lit && lighting.shadows && scene.zoneEffects && !scene.mapView &&
     !NO_LAMP_LIGHTS && scene.lampShadows > 0 && scene.lampBrightness > 0
@@ -4679,8 +4783,11 @@ export default function ZoneViewer({
           speed={1}
           motion={characterMotion}
           moves={characterMoves}
+          footsteps={footsteps}
         />
       )}
+      {footsteps && <TriggeredEffects zone={zoneData} />}
+      {footsteps && !character && <FootstepCadence body={walkBody} footsteps={footsteps} />}
 
       {/* Already world space — deliberately outside the rotated group. */}
       {scene.showCollision && <CollisionOverlay world={collisionWorld} />}

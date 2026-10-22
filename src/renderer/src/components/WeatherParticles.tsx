@@ -287,6 +287,8 @@ function hazeMaterial(mat: THREE.MeshBasicMaterial): THREE.MeshBasicMaterial {
 function buildSystems(
   zone: ParsedZone, pick: (sp: GeneratorSpawn) => boolean, emitScale: number,
   meshPick?: (sp: GeneratorSpawn) => boolean, batch = false,
+  /** Triggered systems: room for this many bursts alive at once. */
+  bursts = 0,
 ): System[] {
   const groups = new Map<string, GeneratorSpawn[]>()
   for (const sp of zone.spawns ?? []) {
@@ -373,8 +375,9 @@ function buildSystems(
     let capacity = 0
     for (const g of group) {
       const perEmission = Math.max(1, Math.floor(Math.max(1, g.emission.count) * emitScale))
-      const cap = g.life <= 0 || g.emission.continuous ? perEmission : Math.min(MAX_PARTICLES,
-        perEmission * Math.ceil((g.life + 1) / Math.max(1, g.emission.every)))
+      const cap = bursts > 0 ? Math.min(MAX_PARTICLES, perEmission * bursts)
+        : g.life <= 0 || g.emission.continuous ? perEmission : Math.min(MAX_PARTICLES,
+          perEmission * Math.ceil((g.life + 1) / Math.max(1, g.emission.every)))
       emitters.push({ spawn: g, first: capacity, capacity: cap, perEmission, next: -1, cursor: 0 })
       capacity += cap
     }
@@ -476,8 +479,59 @@ export function ZoneEffects({ zone, range }: {
   return <ParticleField systems={systems} weather={false} range={range} />
 }
 
+/**
+ * Effects the game starts on an event rather than on a clock: footsteps
+ * (fses/fefs walking, fser/fefr running), fired by Footsteps below. Each post
+ * to `childEvents` naming one of these generators fires one emission there,
+ * and its birth children with it.
+ */
+export function TriggeredEffects({ zone }: { zone: ParsedZone }) {
+  const systems = useMemo(() => {
+    const pick = (sp: GeneratorSpawn) => TRIGGERED.test(sp.dir) && !sp.emission.autoRun
+    const s = buildSystems(zone, pick, 1, pick, false, 6)
+    if (new URLSearchParams(window.location.search).has('census')) {
+      (window as unknown as { __tfx?: System[] }).__tfx = s
+    }
+    return s
+  }, [zone])
+  // Starters that draw nothing themselves (no alpha, no curve; buildSystems
+  // leaves them out) still start their children: sand's 0300 starts the puff
+  // a301, shallow water's 0800 the splash a802 and ring a804. Posts naming
+  // one are passed on to its birth children, a frame later.
+  const relays = useMemo(() => {
+    const drawn = new Set(systems.flatMap(s => s.emitters.map(e => e.spawn.dir + '|' + e.spawn.generator)))
+    const m = new Map<string, string[]>()
+    for (const sp of zone.spawns ?? []) {
+      const key = sp.dir + '|' + sp.generator
+      if (TRIGGERED.test(sp.dir) && !drawn.has(key) && sp.children.birth.length) m.set(key, sp.children.birth)
+    }
+    return m
+  }, [zone, systems])
+  useFrame(() => {
+    for (let k = childEvents.length - 1; k >= 0; k--) {
+      const ev = childEvents[k]
+      const kids = relays.get(ev.dir + '|' + ev.name)
+      if (!kids) continue
+      childEvents.splice(k, 1)
+      for (const name of kids) childEvents.push({ name, dir: ev.dir, frame: ev.frame, at: ev.at.clone() })
+    }
+  })
+  return <ParticleField systems={systems} weather={false} triggered />
+}
+const TRIGGERED = /(^|\/)(fses\/fefs|fser\/fefr)$/
+
+/** The folder holding a zone's footstep effects, walking or running. */
+export function footstepDir(zone: ParsedZone, running: boolean): string | null {
+  const want = running ? /(^|\/)fser\/fefr$/ : /(^|\/)fses\/fefs$/
+  return (zone.spawns ?? []).find(sp => want.test(sp.dir))?.dir ?? null
+}
+
 /** Runs and draws a set of particle systems, and the screen flash they raise. */
-function ParticleField({ systems, weather, range = 1 }: { systems: System[]; weather: boolean; range?: number }) {
+function ParticleField({ systems, weather, range = 1, triggered = false }: {
+  systems: System[]; weather: boolean; range?: number
+  /** Emit only when a child event names the generator (TriggeredEffects). */
+  triggered?: boolean
+}) {
   const flash = useMemo(() => buildFlashQuad(), [])
   useEffect(() => () => { flash.mesh.geometry.dispose(); (flash.mesh.material as THREE.Material).dispose() }, [flash])
 
@@ -537,6 +591,32 @@ function ParticleField({ systems, weather, range = 1 }: { systems: System[]; wea
       // camera (standing in for the player) is within it.
       for (const e of s.emitters) {
         const sp = e.spawn
+        if (triggered) {
+          // One emission per post naming this generator, where it was posted,
+          // left in the world (a footstep stays where the foot fell).
+          for (let k = childEvents.length - 1; k >= 0; k--) {
+            const ev = childEvents[k]
+            if (ev.name !== sp.generator || ev.dir !== sp.dir) continue
+            childEvents.splice(k, 1)
+            for (let n = 0; n < e.perEmission; n++) {
+              const i = e.first + e.cursor
+              e.cursor = (e.cursor + 1) % e.capacity
+              spreadOffset(sp.spread, tmp.off)
+              s.pos[i * 3] = ev.at.x + sp.position[0] + tmp.off.x
+              s.pos[i * 3 + 1] = -ev.at.y + sp.position[1] + tmp.off.y
+              s.pos[i * 3 + 2] = -ev.at.z + sp.position[2] + tmp.off.z
+              for (let c = 0; c < 3; c++) {
+                s.vel[i * 3 + c] = sp.velocity[c] + sp.velocityVariance[c] * rand()
+                s.scl[i * 3 + c] = sp.scale[c] + sp.scaleVariance[c] * Math.random()
+                s.rot[i * 3 + c] = sp.rotation[c] + sp.rotationVariance[c] * rand()
+              }
+              s.born[i] = ev.frame
+              s.expired[i] = 0
+            }
+            for (const name of sp.children.birth) childEvents.push({ name, dir: sp.dir, frame: ev.frame, at: ev.at.clone() })
+          }
+          continue
+        }
         // A singleton (no life) is born once and stays.
         const forever = sp.life <= 0
         if (e.next < 0) e.next = frames
