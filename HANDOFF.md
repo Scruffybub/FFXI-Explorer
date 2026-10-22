@@ -188,6 +188,19 @@ sixteen times too bright); render state 0x0400 places a particle at birth at a
 base offset turned with the view (xim), so the snow falls in front of you;
 generator updater 0x0A culls emission beyond a range. Light snow is now faint
 specks (8 cm flakes, additive, alpha ≤ 0.44) — ask Ryan for a retail snow shot.
+Re-read 2026-10-21 in Uleguerand Range (`f_xa/weat/snow/snow`):
+- **The flakes:** `hit3` (a 2-unit quad x 0.03 = 6 cm, flipbook frame 32 px of
+  a 128 sheet), tint 98,128,128, additive.
+- **Life and fade:** each flake lives 60 frames, **one second**, with an alpha
+  curve peaking at 0.36 at 22% of its life.
+- **Movement:** velocity 0.03/0.02 per frame, born 10 ahead in a 2-12 unit
+  ball.
+- **Emission:** 249 every 10±8 frames before the 0.3 thinning, about 440
+  alive.
+- **Flurries:** the 19 placed `~1xx` flurries emit only within 30 units.
+
+We draw what the data says. White additive specks vanish against snow ground
+and show only against rock. Still needs a retail reference before any change.
 Not yet read: 0x08/0x41 relative velocity, 0x2C dampening, 0x90/0x91/0x69
 daylight colour (snow dims at night), sec3 0x2E draw distance, sec3 0x60
 screen flash (Thunder — likely the full-screen lightning flash), 0x54/0x34
@@ -580,7 +593,93 @@ x Scene -> Lamp brightness (0-3, Dynamic only). The per-vertex lamp term is
 skipped for MeshStandardMaterial (`lit`) so lamps are not counted twice; the
 game-sun Lambert and Original keep it. Cost, Castle Zvahl Keep, Moonlit Night,
 effects at Game range: 110 -> 84 fps with the 12 lights (`?nolamplights=1`
-times without them; `?lampint=<k>` overrides the intensity). No lamp shadows.
+times without them; `?lampint=<k>` overrides the intensity).
+**Lamp shadows (2026-10-21; the viewer's own, the game's lamps cast none).**
+Scene -> Lamp shadows (Off/1/2/4, `lampShadows`, default 2; Dynamic, Zone
+effects and Shadows on). The first N lights of the LampLights pool cast cube
+shadows (512 per face, bias -0.005). They take the nearest lamps and keep a lamp
+while it stays among the nearest. `shadow.autoUpdate = false`, with
+`needsUpdate` set only when a light moves to another lamp: the zone is static,
+so a map drawn once stays right. `shadow.camera.near` = 1.5 (`?lampnear=`) so a
+lantern's own housing is left out; Whitegate's wall lanterns keep their glow.
+Castle Zvahl Keep, Moonlit Night, vsync off: 118 fps without, 105/102/106 with
+1/2/4. Re-aiming between two lamp clusters every 0.9 s gives worst frames of
+about 30 ms against a 35 ms worst frame with shadows off, so no visible hitch.
+Moving models (the walk-mode avatar) are not re-shadowed until the lamp changes.
+
+**Graphics card choice (2026-10-21).** Chromium on a hybrid laptop renders on
+the power-saving chip unless asked. Measured on Ryan's laptop: the packaged app
+ran on the Intel Arc, not the RTX 4090. West Ronfaure gave 103 fps against 191
+on the RTX; every benchmark in §6 had passed `--force_high_performance_gpu`.
+How the fix works:
+- main `applyGpuPreference()` reads `gpuPreference` from settings.json
+  synchronously before `app.whenReady`, and appends `force_high_performance_gpu`
+  (the default) or `force_low_power_gpu`.
+- IPC `gpu:get` returns `{atLaunch, saved}`, `gpu:set` saves the choice, and
+  `app:relaunch` restarts the app.
+- `writeSettings` now merges, so saving the FFXI path cannot erase the GPU
+  choice.
+- Interface → Graphics card (ControlPanel `GraphicsCardField`) shows "Drawing
+  with: <card>" from WEBGL_debug_renderer_info, and "Restart now" after a
+  change.
+
+Verified in the packaged app: default → RTX; Power saving + relaunch → Intel;
+back → RTX. `powerPreference` on the WebGL context does nothing here, because
+one GPU process serves every context.
+
+**Event (triggered) effects, research 2026-10-21; stage 1 built.** Effects
+without auto-run, surveyed in 8 zones:
+- Mostly **footsteps**, in every zone:
+  - `fses/fefs` is the walking set. `fser/fefr` matches it, plus 0x19 curves.
+    Both have attach 1, actor.
+  - `fses` also holds 0x3D footstep **sounds** (`0111`..`0a33`).
+- **Doors**: Castle Zvahl's `door/_4i*` warp shimmer (`cntr` sprite plus
+  `dis2` distortion). Bastok's `door/_05*`: `toke`/`tobi`/`tome` meshes
+  `sit1`, `tam1`, `kabe`.
+- **One-offs**: La Theine's rainbow (`effe/niji`), Misareaux `effe/umi1`, and
+  Whitegate `effe/funs` and `effe/1pba`.
+- **How the game picks a footstep** (xim ZoneDrawer.emitFootSteps, format
+  reference only):
+  - The foot touching the ground on the walking movement set fires
+    `fses/fefs/0T00`, where T is the ground type in hex.
+  - Ground type = the top bit of each of a collision triangle's four uint16s
+    (vertex 0, 1, 2, then the normal index), lowest first: 1 path, 2 grass,
+    3 sand, 4 snow, 5 stone, 6 metal, 7 wood, 8 shallow water, 9 deep water.
+  - Sand and snow also leave a footprint: the shared `fmrk` effect.
+- **Stage 1 (built):**
+  - `ParsedCollision.terrain` (CollisionParser, merged in ZoneFile).
+  - CollisionWorld's BVH is now `indirect: true`, so a hit's faceIndex is the
+    parser's triangle; BVH build is still ~0.8 s for Uleguerand's 534k tris.
+  - `groundBelow()` returns `terrain`.
+  - Census (`?walkdebug=1`, `__collision.terrain`):
+
+    | Zone | Ground types |
+    |---|---|
+    | Uleguerand Range | snow 44%, stone 52% |
+    | La Theine Plateau | grass 37%, stone 47%, path 5% |
+    | Tavnazian Safehold | stone 59%, wood 16%, metal 6% |
+    | Bibiki Bay | sand 5%, deep water 8% |
+- **Blocker for stage 2:** half the footstep generators link *meshes* in the
+  shared effects file ROM/0/0.DAT `syst/effe`: `asi1`/`asi2` (footprints and
+  rings), `hit7`, `ei31`. Examples are `0300` sand, `0800`/`0900` water and
+  `0100` path. `parseSystemEffects` loads only sprites, and mesh links never
+  fall back to it, so these are dropped as unresolved (38 of Uleguerand's 46
+  unresolved spawns).
+  - Same cause elsewhere: Bastok Markets' door meshes, and Whitegate's
+    **auto-run** `effe/setr/1fir/lt05..lt16` (mesh `ei30`). Those lamp
+    flames probably never draw today.
+  - A universal shared-mesh fallback would therefore change what existing
+    zones show: sweep before turning it on everywhere.
+- **Stage 2 plan:**
+  1. Load the system D3Ms too.
+  2. Resolve triggered mesh links against them.
+  3. Detect foot contact from the avatar's foot bones: a local minimum of
+     height on the walk/run motions.
+  4. Post `0T00` at the foot as a child event into a ParticleField of the
+     fses/fser generators (with their birth children).
+  5. Optionally play the 0x3D sounds.
+  6. Then a "Triggered effects" list (doors, rainbow) with a Play button, as
+     Xim does.
 Scene -> Lamp lights (4/8/12/16/24/32, setting `lampCount`, default 12) sets
 the pool size; a change rebuilds the pool and recompiles the lit shaders (a
 brief pause). Measured 2026-10-10, same view: off 99, 4 = 92, 12 = 75,
@@ -3267,6 +3366,100 @@ rather than solved.
     Hennetiel water and the bloom white screen stay paused.
   - **Next up, in order:** competitor survey, then lamp shadows, light snow,
     event-triggered effects, and the remaining transparency faults.
+  - **Competitor survey, first pass 2026-10-21** (from web pages; nothing
+    downloaded or run yet):
+    - **XI Model Viewer** (vekien/xi-model-viewer; GPL-3.0; Tauri + WebGL2;
+      Windows and Linux; 1.0.1 on 2026-08-06 to 1.12.0 on 2026-09-29;
+      AI-assisted). The serious rival. It has:
+      - Zones with weather and time cross-fades, ambient sound effects, an
+        object browser with per-object visibility, click-select and a move
+        gizmo with undo, LOD, and NPC placement from CatsEyeXI's npc_list.
+      - Models: a Motion picker with a frame scrubber and speed, a skeleton
+        overlay, weapons and weapon-skill motions, gear grouped by set, and
+        character-creation models.
+      - A spell and ability effect browser that plays effects on actors.
+      - A camera keyframe sequencer, and "Scenes" (actors, gizmo, lights).
+      - DAT inspector, record database, image and sound browsers.
+      - glTF/FBX and batch export.
+      - Overlays: wireframe, unlit, skeleton, collision, navmesh, grid.
+      - HD/XIPivot roots; FOV, FPS-limit and resolution settings.
+      Users praise its speed. Reported faults include missing objects in
+      Heavens Tower, a stray building in Mhaura and off water; its audio needs
+      vgmstream on the PATH. No post-processing; its changelog says little
+      about water.
+    - **XI Tools / XI Zone Editor** (same author): a zone editor that writes
+      DATs back. Gizmo placement, GLB import, collision authoring, navmesh,
+      sound emitters, cutscene sequencer, zones from templates. No texture
+      painting. The author warns against using it on retail.
+    - **Xim** (xim.pages.dev; GPL-3.0; Kotlin/JS + WebGL): assets are hosted,
+      June 2024 data. Zone routines can be triggered by hand, plus spell
+      effects, lens flare and a copy-link-to-position button. It is mostly a
+      single-player game now, and the viewer is no longer developed.
+    - **Vanalytics** (our parent; MIT; browser): adds a minimap overlay and NPC
+      spawn points.
+    - **lotus-engine / lotus-ffxi** (Vulkan, Codeberg): rendering demo with
+      full ray tracing and a denoiser. Loads maps, NPCs, some
+      generators/particles and collision.
+    - **Project Kuluu**: GPL client emulator prototype, macOS/iOS only.
+    - **FFXI Mission Toolkit** (sarthax; MIT; Python): private-server
+      workbench with a 3D zone viewer. Out of scope.
+    - **Older or archived**: AltanaViewer/Listener (archived 2026-08-27 in
+      favour of XI Model Viewer), Noesis, POLUtils, RZN MapLib/MapViewer,
+      GalkaReeve MapViewer, AreaDemo, FFXI Tool.
+    - **Maps**: FFXI Atlas (Electron; Remapster maps plus live position via
+      Ashita), Mappy (vector maps from 3D lines), Remapster (hand-drawn HD
+      maps), xurion/ffxi-map-dats.
+    - **Where we lead**:
+      - The game's own lighting from the 0x2F records, generator water, sky
+        layers and the transparency rule.
+      - Post-processing.
+      - ATRAC3 decoded in-app.
+      - Walk mode on collision, with an animated third person.
+      - Area maps and UI looks.
+    - **Performance against XI Model Viewer 1.12.0, measured 2026-10-21.**
+      Setup:
+      - Both packaged apps, each zone's default view, warm load, RTX 4090
+        laptop.
+      - Both launched with `--disable-gpu-vsync --disable-frame-rate-limit`:
+        WebView2 via `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`, ours via argv.
+      - Measured through `--remote-debugging-port`, with a script injected
+        before page load that counts draws and triangles and times the rAF
+        callbacks. Scratch harness: bench.cjs / instrument.js.
+      - XMV's "Pause when unfocused" was switched off (localStorage
+        `pauseUnfocused=0`), or it stops drawing.
+      - Each app restarted per zone. Ours with panels hidden (F10): 2379x1370
+        canvas against XMV's 2250x1350.
+
+      | Zone | fps ours / XMV | draws ours / XMV | load s | memory GB |
+      |---|---|---|---|---|
+      | West Ronfaure 100 | **191** / 48 | 683 / 9,659 | 1.5 / 2.6 | 2.4 / 2.9 |
+      | Bastok Markets 235 | 74 / **127** | 1,770 / 3,038 | 1.7 / 1.4 | 2.1 / 1.2 |
+      | Aht Urhgan Whitegate 50 | **81** / 54 | 1,814 / 8,191 | 1.6 / 1.7 | 2.4 / 1.8 |
+      | Castle Zvahl Keep 162 | **222** / 137 | 665 / 2,916 | 1.2 / 1.1 | 1.7 / 1.4 |
+      | Reisenjima 291 | **73** / 43 | 1,864 / 8,996 | 1.6 / 1.7 | 1.9 / 1.7 |
+      | Outer Ra'Kaznar 274 | **225** / 23 | 720 / 19,549 | 1.8 / 3.4 | 1.8 / 2.4 |
+      | Tavnazian Safehold 26 | 118 / **228** | 1,141 / 1,772 | 1.2 / 0.7 | 2.3 / 0.9 |
+      | Lower Jeuno 245 | **179** / 150 | 788 / 2,593 | 1.1 / 1.3 | 1.6 / 1.2 |
+
+      - Intel Arc integrated GPU (`--force_low_power_gpu`), fps ours / XMV:
+        Ronfaure 91/27, Bastok Markets 69/102, Ra'Kaznar 109/22, Lower Jeuno
+        133/113.
+      - Ours with weather, water and effects all on: Ronfaure 146, Bastok 69,
+        Whitegate 60, Zvahl 209, Reisenjima 66, Ra'Kaznar 76, Safehold 78,
+        Jeuno 149.
+      - Both apps are CPU-bound: JS time per frame is about the whole frame.
+        XMV issues one draw per object, about 2.4 us each. Ours batches into
+        few draws, but each costs about 8 us. That is why we win big zones and
+        lose small towns.
+      - **Our three leads.**
+        1. A CPU profile in Bastok Markets puts about 22% of frame time in
+           three.js `setProgram` / `getProgram` / `getProgramCacheKey`.
+           Programs are being re-resolved per draw every frame: suspect a
+           material whose version, tone mapping or colour space differs
+           between our render passes.
+        2. Ours sits at 1.6–2.4 GB even in small zones; XMV uses 0.9 GB in
+           Safehold. Look for what is resident before any zone loads.
+        3. Effects, water and weather together cost Ra'Kaznar 225 → 76 fps.
   - **Map maker research, 2026-10-21.** A quick search found no tool
     that builds new FFXI zones. The developers once planned a player dungeon
     maker and never shipped it. What does exist is map *drawing*: Remapster

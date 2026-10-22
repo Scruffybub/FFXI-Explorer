@@ -2860,6 +2860,9 @@ export default function ZoneViewer({
 
   // A shadow-casting point light needs the shadow map enabled even when the
   // sun's own shadows are switched off.
+  // Lamp shadows ride on Dynamic's shadows switch, like the sun's.
+  const lampShadowsOn = lit && lighting.shadows && scene.zoneEffects && !scene.mapView &&
+    !NO_LAMP_LIGHTS && scene.lampShadows > 0 && scene.lampBrightness > 0
   const shadowsActive =
     lit && (lighting.shadows || pointLights.lights.some(l => l.castShadow))
 
@@ -4605,7 +4608,7 @@ export default function ZoneViewer({
 
       {/* Point lights only affect lit materials — the unlit ones ignore them. */}
       {lit && <PointLights settings={pointLights} selectedId={selectedLightId} />}
-      {lit && scene.zoneEffects && !scene.mapView && !NO_LAMP_LIGHTS && <LampLights zone={zoneData} brightness={scene.lampBrightness} count={scene.lampCount} />}
+      {lit && scene.zoneEffects && !scene.mapView && !NO_LAMP_LIGHTS && <LampLights zone={zoneData} brightness={scene.lampBrightness} count={scene.lampCount} shadows={lampShadowsOn ? scene.lampShadows : 0} />}
       <WeatherFollow meshes={instancedMeshes} enabled={scene.weatherFollowsCamera} cameraMode={scene.cameraMode} />
       {lit && onPlaceLight && (
         <LightPlacer meshes={instancedMeshes} active={placingLight} onPlace={onPlaceLight} />

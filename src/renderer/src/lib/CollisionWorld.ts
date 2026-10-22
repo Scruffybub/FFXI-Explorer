@@ -24,6 +24,8 @@ export class CollisionWorld {
   /** World-space collision geometry. Shared with the debug overlay. */
   readonly geometry: THREE.BufferGeometry
   private readonly bvh: MeshBVH
+  /** Each triangle's ground type (ParsedCollision.terrain), by original triangle index. */
+  readonly terrain: Uint8Array
 
   // Reused across queries — allocating a Ray per frame is how you get GC hitches.
   private readonly ray = new THREE.Ray()
@@ -54,7 +56,10 @@ export class CollisionWorld {
     this.geometry.setIndex(new THREE.BufferAttribute(idx, 1))
     this.geometry.computeBoundingSphere()
 
-    this.bvh = new MeshBVH(this.geometry)
+    // Indirect: the BVH keeps its own triangle order and leaves the index
+    // alone, so a hit's faceIndex still names the parser's triangle (terrain).
+    this.bvh = new MeshBVH(this.geometry, { indirect: true })
+    this.terrain = collision.terrain ?? new Uint8Array(idx.length / 3)
   }
 
   /**
@@ -67,7 +72,7 @@ export class CollisionWorld {
   groundBelow(
     from: THREE.Vector3,
     maxDrop: number,
-  ): { y: number; normal: THREE.Vector3 } | null {
+  ): { y: number; normal: THREE.Vector3; terrain: number } | null {
     this.ray.origin.copy(from)
     this.ray.direction.copy(this.down)
     const hit = this.bvh.raycastFirst(this.ray, THREE.DoubleSide, 0, maxDrop)
@@ -79,7 +84,7 @@ export class CollisionWorld {
     // Normals point either way for the same reason; we only ever want the
     // upward-facing interpretation of a floor.
     if (normal.y < 0) normal.negate()
-    return { y: hit.point.y, normal }
+    return { y: hit.point.y, normal, terrain: hit.faceIndex != null ? this.terrain[hit.faceIndex] ?? 0 : 0 }
   }
 
   /**

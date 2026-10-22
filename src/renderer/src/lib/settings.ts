@@ -300,6 +300,12 @@ export interface SceneSettings {
   lampCount: number
 
   /**
+   * Dynamic lighting: how many of the nearest lamps cast shadows (0 = none).
+   * The game's lamps cast none; this is the viewer's own.
+   */
+  lampShadows: number
+
+  /**
    * Heat shimmer: how far, in pixels, the picture behind a haze effect shifts
    * at full strength (lib/HazePass). 0 = off; 2 is Ryan's pick (8, then 4,
    * were too strong in the app, 2026-10-11).
@@ -500,6 +506,7 @@ export const DEFAULT_SCENE: SceneSettings = {
   effectRange: 0,
   lampBrightness: 1,
   lampCount: 12,
+  lampShadows: 2,
   hazeStrength: 2,
   gameSunMoon: true,
   moonPhase: -1,

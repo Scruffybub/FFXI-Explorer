@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { Label } from './Info'
 import type {
   LightingSettings, MusicSettings, PointLightSettings, PointLightSpec,
@@ -135,6 +135,7 @@ const EFFECT_RANGES = [1, 2, 5, 10, 0]
 const EFFECT_RANGE_NAMES = ['Game', '2×', '5×', '10×', 'Everywhere']
 /** Dynamic lamp light counts. */
 const LAMP_COUNTS = [4, 8, 12, 16, 24, 32]
+const LAMP_SHADOWS = [0, 1, 2, 4]
 
 function Slider({
   label, value, min, max, step, onChange, format, info,
@@ -213,6 +214,62 @@ function SelectField({
       <div className="control-row"><Label text={label} info={info} /></div>
       <select value={value} onChange={e => onChange(e.target.value)}>{children}</select>
     </label>
+  )
+}
+
+/**
+ * The graphics chip the app renders on, from WebGL: ANGLE reports
+ * "ANGLE (Vendor, Card name (0x…) Direct3D11 …)". Asked once; every context
+ * in the app shares one GPU process, so a throwaway canvas answers for all.
+ */
+let gpuName: string | null = null
+function currentGpuName(): string {
+  if (gpuName !== null) return gpuName
+  try {
+    const gl = document.createElement('canvas').getContext('webgl2')
+    const ext = gl?.getExtension('WEBGL_debug_renderer_info')
+    const raw = gl && ext ? String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)) : ''
+    gl?.getExtension('WEBGL_lose_context')?.loseContext()
+    gpuName = raw.match(/^ANGLE \([^,]+, (.+?)(?: \(0x[0-9a-f]+\))? Direct3D/i)?.[1] ?? raw
+  } catch {
+    gpuName = ''
+  }
+  return gpuName
+}
+
+/**
+ * Which graphics card to render on (main process: applyGpuPreference). A
+ * Chromium switch read at startup, so a change asks for a restart.
+ */
+function GraphicsCardField() {
+  const [pref, setPref] = useState<{ atLaunch: string; saved: string } | null>(null)
+  useEffect(() => { window.ffxi.gpu?.().then(setPref).catch(() => {}) }, [])
+  const name = useMemo(currentGpuName, [])
+  if (!pref) return null
+  const change = (v: string) => {
+    const next = v === 'low-power' ? 'low-power' : 'high-performance'
+    setPref({ ...pref, saved: next })
+    window.ffxi.setGpu(next).catch(() => {})
+  }
+  return (
+    <>
+      <SelectField
+        label="Graphics card"
+        value={pref.saved}
+        onChange={change}
+        info="On a laptop with two graphics chips, which one the app draws with. High performance uses the dedicated card (NVIDIA or AMD) for much higher frame rates; Power saving uses the built-in chip and is easier on the battery. Computers with one graphics card use it either way. The change applies when the app is next opened."
+      >
+        <option value="high-performance">High performance</option>
+        <option value="low-power">Power saving</option>
+      </SelectField>
+      {name && <p className="note small">Drawing with: {name}</p>}
+      {pref.saved !== pref.atLaunch && (
+        <p className="note small">
+          Applies when the app is next opened.{' '}
+          <button className="reset" onClick={() => { window.ffxi.relaunch().catch(() => {}) }}>Restart now</button>
+        </p>
+      )}
+    </>
   )
 }
 
@@ -1056,6 +1113,16 @@ export default function ControlPanel({
             info="How many of the nearest lamps Dynamic lighting turns into real lights. More lights the room further out, but each one costs frame rate: in Castle Zvahl, 12 lights cost about a quarter of it. The scene pauses briefly when this changes while the lighting is rebuilt."
           />
         )}
+        {scene.zoneEffects && lit && (
+          <Slider
+            label="Lamp shadows"
+            value={Math.max(0, LAMP_SHADOWS.indexOf(scene.lampShadows))}
+            min={0} max={LAMP_SHADOWS.length - 1} step={1}
+            format={i => (LAMP_SHADOWS[i] ? String(LAMP_SHADOWS[i]) : 'Off')}
+            onChange={i => onScene({ lampShadows: LAMP_SHADOWS[i] ?? 0 })}
+            info="How many of the nearest lamps cast shadows in Dynamic lighting, so pillars, railings and walls block their light. The game's own lamps never cast shadows; this is an addition. Needs Shadows on in the lighting panel. Each shadow is drawn when a lamp becomes one of the nearest, so moving around can cause a brief hitch; the scene pauses briefly when this changes."
+          />
+        )}
         {(scene.zoneEffects || scene.zoneWeather) && (
           <Slider
             label="Heat shimmer" value={scene.hazeStrength} min={0} max={10} step={0.5}
@@ -1109,6 +1176,7 @@ export default function ControlPanel({
             <option value="modern">Modern font</option>
           </SelectField>
         )}
+        <GraphicsCardField />
       </Section>
 
       <Section

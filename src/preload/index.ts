@@ -34,7 +34,18 @@ const api = {
     ipcRenderer.invoke('window:saveScreenshot', dataUrl, suggestedName),
 
   version: (): Promise<string> => ipcRenderer.invoke('app:version'),
+
+  /** Graphics card preference: the one this launch uses, and the saved one. */
+  gpu: (): Promise<{ atLaunch: GpuPreference; saved: GpuPreference }> => ipcRenderer.invoke('gpu:get'),
+
+  /** Saves the graphics card preference; it applies from the next launch. */
+  setGpu: (pref: GpuPreference): Promise<void> => ipcRenderer.invoke('gpu:set', pref),
+
+  /** Closes and reopens the app. */
+  relaunch: (): Promise<void> => ipcRenderer.invoke('app:relaunch'),
 }
+
+export type GpuPreference = 'high-performance' | 'low-power'
 
 export interface UpdateInfo {
   version: string

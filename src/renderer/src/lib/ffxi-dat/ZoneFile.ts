@@ -694,6 +694,7 @@ function mergeCollision(parts: ParsedCollision[]): ParsedCollision | null {
   const faceFlags = new Uint16Array(faceCount)
   const indexFlags = new Uint8Array(faceCount)
   const waterHeight = new Float32Array(faceCount)
+  const terrain = new Uint8Array(faceCount)
 
   let vOff = 0, iOff = 0, fOff = 0
   for (const part of parts) {
@@ -704,10 +705,11 @@ function mergeCollision(parts: ParsedCollision[]): ParsedCollision | null {
     faceFlags.set(part.faceFlags, fOff)
     indexFlags.set(part.indexFlags, fOff)
     waterHeight.set(part.waterHeight, fOff)
+    terrain.set(part.terrain, fOff)
     vOff += part.vertices.length
     iOff += part.indices.length
     fOff += part.faceFlags.length
   }
 
-  return { vertices, indices, faceFlags, indexFlags, waterHeight }
+  return { vertices, indices, faceFlags, indexFlags, waterHeight, terrain }
 }

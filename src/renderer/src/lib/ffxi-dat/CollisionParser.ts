@@ -72,6 +72,14 @@ export interface ParsedCollision {
   /** Per-triangle top-2-bit index flags, packed as (v0<<4)|(v1<<2)|v2. Meaning unknown. */
   indexFlags: Uint8Array
   /**
+   * Per-triangle ground type: the top bit of each of the triangle's four
+   * uint16s (three vertices, then the normal), lowest first. 1 path, 2 grass,
+   * 3 sand, 4 snow, 5 stone, 6 metal, 7 wood, 8 shallow water, 9 deep water,
+   * 0 none. It picks the footstep effect and sound (fses/fefs `0T00`). From
+   * xim's ZoneDefParser (TerrainType), read as a format reference.
+   */
+  terrain: Uint8Array
+  /**
    * Per-triangle water surface height in raw DAT space (Y down), NaN where the
    * collision object carries none. See WATER_HEIGHT_OFFSET.
    */
@@ -129,6 +137,7 @@ export function parseMzbCollision(data: Uint8Array): ParsedCollision | null {
   const faceFlags: number[] = []
   const indexFlags: number[] = []
   const waterHeight: number[] = []
+  const terrain: number[] = []
   const seen = new Set<number>()
   const hasWaterField = data[3] >= WATER_HEIGHT_MIN_VERSION
 
@@ -189,6 +198,7 @@ export function parseMzbCollision(data: Uint8Array): ParsedCollision | null {
       const raw0 = u16(base + 0)
       const raw1 = u16(base + 2)
       const raw2 = u16(base + 4)
+      const raw3 = u16(base + 6)
 
       const a = raw0 & 0x3fff
       const b = raw1 & 0x3fff
@@ -205,6 +215,7 @@ export function parseMzbCollision(data: Uint8Array): ParsedCollision | null {
         (((raw0 >> 14) & 3) << 4) | (((raw1 >> 14) & 3) << 2) | ((raw2 >> 14) & 3),
       )
       waterHeight.push(water)
+      terrain.push((raw0 >> 15) | ((raw1 >> 15) << 1) | ((raw2 >> 15) << 2) | ((raw3 >> 15) << 3))
     }
   }
 
@@ -269,5 +280,6 @@ export function parseMzbCollision(data: Uint8Array): ParsedCollision | null {
     faceFlags: new Uint16Array(faceFlags),
     indexFlags: new Uint8Array(indexFlags),
     waterHeight: new Float32Array(waterHeight),
+    terrain: new Uint8Array(terrain),
   }
 }

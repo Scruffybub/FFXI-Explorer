@@ -2,7 +2,7 @@
 
 **Water (beta)** - Scene → Generator water draws the game's own water, waves and foam. Most zones match the game; Foret de Hennetiel's sea and rivers do not yet. It is off by default.
 
-**Zone effects (beta)** - The game's lamps, fires, smoke and glows play, but effects the game triggers (footsteps, doors, hit sparks) do not, and lamps cast no shadows.
+**Zone effects (beta)** - The game's lamps, fires, smoke and glows play, and in Dynamic lighting the nearest lamps cast shadows. Effects the game triggers (footsteps, doors, hit sparks) do not play yet.
 
 **Weather** - Zone weather draws the game's skies, clouds, rain, snow, fog and lighting. The moon shows its phase (today's in Vana'diel, or any you pick) and the pole star rises at night. Lufaise's thunderstorms throw their lightning strikes. Light snow is still very faint.
 
@@ -140,6 +140,14 @@ view at window resolution with no UI in the frame. **Inspect** reports what a
 clicked surface actually is — texture, material, blend flags, UV range.
 
 Every setting has an ⓘ beside it explaining what it does.
+
+### Graphics card
+
+On a laptop with both built-in and dedicated graphics, the app draws with the
+dedicated card by default. **Interface → Graphics card** switches to the
+built-in chip to save battery, and shows which one is in use. The change
+applies the next time the app opens; a **Restart now** button does that for
+you.
 
 ---
 

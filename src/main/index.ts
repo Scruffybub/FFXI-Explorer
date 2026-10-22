@@ -1,6 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { join } from 'path'
-import { promises as fs } from 'fs'
+import { promises as fs, readFileSync } from 'fs'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { checkForUpdate, downloadUpdate, installUpdate, RELEASES_PAGE } from './updates'
@@ -17,7 +17,12 @@ function settingsPath(): string {
   return join(app.getPath('userData'), 'settings.json')
 }
 
-async function readSettings(): Promise<{ ffxiPath?: string }> {
+/** Which graphics card Chromium renders on; see applyGpuPreference. */
+type GpuPreference = 'high-performance' | 'low-power'
+
+interface Settings { ffxiPath?: string; gpuPreference?: GpuPreference }
+
+async function readSettings(): Promise<Settings> {
   try {
     return JSON.parse(await fs.readFile(settingsPath(), 'utf-8'))
   } catch {
@@ -25,13 +30,33 @@ async function readSettings(): Promise<{ ffxiPath?: string }> {
   }
 }
 
-async function writeSettings(settings: { ffxiPath?: string }): Promise<void> {
+/** Merges into what is saved, so one setting never erases another. */
+async function writeSettings(settings: Settings): Promise<void> {
   try {
-    await fs.writeFile(settingsPath(), JSON.stringify(settings, null, 2), 'utf-8')
+    const merged = { ...(await readSettings()), ...settings }
+    await fs.writeFile(settingsPath(), JSON.stringify(merged, null, 2), 'utf-8')
   } catch {
     /* non-fatal */
   }
 }
+
+/**
+ * On a laptop with two graphics chips, Windows and Chromium hand the app the
+ * power-saving one unless it asks: measured 2026-10-21, this app ran on the
+ * Intel Arc beside an RTX 4090 (West Ronfaure 103 fps, 191 on the RTX). The
+ * choice is a Chromium switch, read before the GPU process starts, so it takes
+ * effect on the next launch. Machines with one GPU are unaffected.
+ */
+function applyGpuPreference(): GpuPreference {
+  let pref: GpuPreference = 'high-performance'
+  try {
+    const saved = JSON.parse(readFileSync(settingsPath(), 'utf-8')) as Settings
+    if (saved.gpuPreference === 'low-power') pref = 'low-power'
+  } catch { /* no settings yet: the default */ }
+  app.commandLine.appendSwitch(pref === 'low-power' ? 'force_low_power_gpu' : 'force_high_performance_gpu')
+  return pref
+}
+const gpuAtLaunch = applyGpuPreference()
 
 /** True when the directory looks like an FFXI installation root. */
 async function isValidFfxiDir(dir: string): Promise<boolean> {
@@ -228,6 +253,16 @@ app.whenReady().then(() => {
   })
 
   ipcMain.handle('app:version', () => app.getVersion())
+
+  // The preference this launch started with, and the saved one (they differ
+  // after a change until the app is reopened).
+  ipcMain.handle('gpu:get', async () => ({
+    atLaunch: gpuAtLaunch,
+    saved: (await readSettings()).gpuPreference ?? 'high-performance',
+  }))
+  ipcMain.handle('gpu:set', (_evt, pref: GpuPreference) =>
+    writeSettings({ gpuPreference: pref === 'low-power' ? 'low-power' : 'high-performance' }))
+  ipcMain.handle('app:relaunch', () => { app.relaunch(); app.exit(0) })
 
   createWindow()
 
