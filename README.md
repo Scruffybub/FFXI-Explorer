@@ -149,6 +149,10 @@ built-in chip to save battery, and shows which one is in use. The change
 applies the next time the app opens; a **Restart now** button does that for
 you.
 
+**Interface → Render resolution** draws the 3D view at a share of your
+screen's resolution and scales it up: on built-in graphics, 67% nearly doubles
+the frame rate for a softer picture.
+
 ---
 
 ## Updates

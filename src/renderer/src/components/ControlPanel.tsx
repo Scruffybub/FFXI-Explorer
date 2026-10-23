@@ -11,6 +11,7 @@ import { WEATHER_TYPES, nativeWeather, weatherDir } from '../lib/weatherTypes'
 import { UI_LOOKS, type UiLook, type UiText } from '../lib/uiLook'
 import { MOON_FRAMES, moonPhase } from '../lib/vanaTime'
 import { goToTrigger, playTrigger, triggerStore } from '../lib/triggeredEffects'
+import { RENDER_SCALES, renderScaleStore, setRenderScale } from '../lib/renderScale'
 
 interface ControlPanelProps {
   lighting: LightingSettings
@@ -215,6 +216,21 @@ function SelectField({
       <div className="control-row"><Label text={label} info={info} /></div>
       <select value={value} onChange={e => onChange(e.target.value)}>{children}</select>
     </label>
+  )
+}
+
+/** Interface → Render resolution (lib/renderScale). */
+function RenderScaleField() {
+  const scale = useSyncExternalStore(renderScaleStore.subscribe, renderScaleStore.get)
+  return (
+    <SelectField
+      label="Render resolution"
+      value={String(scale)}
+      onChange={v => setRenderScale(Number(v))}
+      info="How sharply the 3D view is drawn, as a share of your screen's own resolution; the picture is scaled up to fill the window. Lower values are much faster on built-in graphics — on a laptop's Intel chip, 67% nearly doubled the frame rate in West Ronfaure — at the cost of a softer image. Screenshots are taken at this resolution too."
+    >
+      {RENDER_SCALES.map(s => <option key={s} value={String(s)}>{s === 1 ? 'Full (100%)' : `${Math.round(s * 100)}%`}</option>)}
+    </SelectField>
   )
 }
 
@@ -1219,6 +1235,7 @@ export default function ControlPanel({
           </SelectField>
         )}
         <GraphicsCardField />
+        <RenderScaleField />
       </Section>
 
       <Section

@@ -1,4 +1,4 @@
-import { useMemo, useRef, useEffect, useState } from 'react'
+import { useMemo, useRef, useEffect, useState, useSyncExternalStore } from 'react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
 import {
@@ -28,6 +28,7 @@ import { WeatherParticles, ZoneEffects, TriggeredEffects, footstepDir, zoneMeshP
 import { childEvents } from '../lib/weatherEvents'
 import { footstepSoundId, playSound } from '../lib/footstepSounds'
 import { curveStart, rotationOrder } from '../lib/ximRules'
+import { renderScaleStore } from '../lib/renderScale'
 import { LampLights } from './LampLights'
 import { zoneLamps, LAMP_VERTEX_PARS, LAMP_FRAGMENT_PARS, LAMP_VERTEX, buildLampTexture, lampSlots } from '../lib/zoneLamps'
 import { LensFlare } from './LensFlare'
@@ -1816,6 +1817,8 @@ const ALL_LAYERS = 0xffffffff | 0
  */
 const SHARE_MATERIALS = typeof window !== 'undefined' &&
   !new URLSearchParams(window.location.search).has('noshare') && !MAT_PROFILE && !BLEND_EXP && !(PICK && BLEND_MODE)
+/** Diagnostics for GPU cost tests: ?nologdepth=1, ?nopreserve=1, ?dpr=<n>. */
+const PERF_DIAG = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '')
 /** Diagnostic: ?norendertune=1 leaves RenderTuning and n8aoOpaqueOnly off, for before/after comparisons. */
 const NO_RENDER_TUNE = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('norendertune')
 
@@ -3051,6 +3054,7 @@ export default function ZoneViewer({
   // Dynamic lighting runs with zone weather too: the weather draws the sky,
   // fog, clouds, rain and sun, and colours Dynamic's lights (SunLight).
   const lit = lighting.mode === 'lit'
+  const renderScale = useSyncExternalStore(renderScaleStore.subscribe, renderScaleStore.get)
 
   // A shadow-casting point light needs the shadow map enabled even when the
   // sun's own shadows are switched off.
@@ -3872,6 +3876,16 @@ export default function ZoneViewer({
     }
 
     const instancedMeshes: THREE.InstancedMesh[] = []
+    // Placed pieces never move after this, so three can skip the ones off
+    // screen: their bounds cover every instance (computeBoundingSphere).
+    // Always-drawn since the start; culling took Bastok Markets' walk view from
+    // 1,337 draws and 126 fps to 386 and 337 (2026-10-23). Sky, weather and
+    // generator meshes, which are moved about later, keep drawing. ?nocull=1
+    // turns it off for comparisons.
+    const cullPlaced = (mesh: THREE.InstancedMesh) => {
+      mesh.frustumCulled = !PERF_DIAG.has('nocull')
+      if (mesh.frustumCulled) mesh.computeBoundingSphere()
+    }
 
     for (const [meshIdx, matrices] of normalGroups) {
       const geo = geoMap.get(meshIdx); const mat = matMap.get(meshIdx)
@@ -3879,9 +3893,9 @@ export default function ZoneViewer({
       geo.setAttribute('aLamps', lampAttr(matrices))
       const mesh = new THREE.InstancedMesh(geo, mat, matrices.length)
       mesh.userData.prefabIdx = meshIdx
-      mesh.frustumCulled = false
       for (let i = 0; i < matrices.length; i++) mesh.setMatrixAt(i, matrices[i])
       mesh.instanceMatrix.needsUpdate = true
+      cullPlaced(mesh)
       instancedMeshes.push(mesh)
     }
 
@@ -3893,9 +3907,9 @@ export default function ZoneViewer({
       geometries.push(flippedGeo)
       const mesh = new THREE.InstancedMesh(flippedGeo, mat, matrices.length)
       mesh.userData.prefabIdx = meshIdx
-      mesh.frustumCulled = false
       for (let i = 0; i < matrices.length; i++) mesh.setMatrixAt(i, matrices[i])
       mesh.instanceMatrix.needsUpdate = true
+      cullPlaced(mesh)
       instancedMeshes.push(mesh)
     }
 
@@ -4779,12 +4793,15 @@ export default function ZoneViewer({
       key={`canvas-${needsLinearDepth ? 'standard-depth' : 'log-depth'}`}
       gl={{
         antialias: false,
-        logarithmicDepthBuffer: !needsLinearDepth,
+        logarithmicDepthBuffer: !needsLinearDepth && !PERF_DIAG.has('nologdepth'),
         toneMappingExposure: post.exposure,
         // Keeps the rendered frame readable after the draw call so the
         // screenshot button can pull a PNG straight off the canvas.
-        preserveDrawingBuffer: true,
+        preserveDrawingBuffer: !PERF_DIAG.has('nopreserve'),
       }}
+      // Interface -> Render resolution scales the screen's own pixel ratio;
+      // ?dpr=<n> sets the ratio outright for tests.
+      dpr={PERF_DIAG.get('dpr') ? Number(PERF_DIAG.get('dpr')) : window.devicePixelRatio * renderScale}
       shadows={shadowsActive}
       className="viewer-canvas"
     >

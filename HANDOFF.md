@@ -3696,6 +3696,41 @@ rather than solved.
             frame fell 1.6 → 1.1 ms.
           - **Ahead of XMV in all 8.** Memory per zone fell from 1.6-2.5 GB
             to 1.1-1.25 GB (lead 2 above, largely).
+        - **Stage 3, 2026-10-23: culling and render resolution.**
+          - **Frustum culling for placed zone meshes** (`cullPlaced`). They
+            were all `frustumCulled = false`, for no recorded reason; three
+            now computes instance-covering bounds (`computeBoundingSphere`).
+            Sky, weather and generator meshes, which move later, still always
+            draw. `?nocull=1` turns it off.
+          - Walk view, RTX:
+
+            | Zone | Draws | fps |
+            |---|---|---|
+            | Bastok Markets | 1,337 → 386 | 126 → 337 |
+            | Whitegate | 1,462 → 869 | 118 → 171 |
+            | West Ronfaure | 400 → 321 | 313 → 336 |
+          - Image diffs culled vs not: overview, Castle Zvahl and map view
+            0.000. Walk views differ only on the avatar's outline (idle
+            animation; `diffmap.cjs` box).
+          - **Interface → Render resolution** (`lib/renderScale.ts`,
+            localStorage `ffxi-explorer.renderScale`): 100/85/75/67/50% of
+            the screen's pixel ratio, through `<Canvas dpr>`. `?dpr=<n>`
+            overrides it for tests.
+          - **What costs what on the Intel Arc** (West Ronfaure, vsync on;
+            vsync off gave 1.5 s stalls on the iGPU, so measure with it on):
+
+            | Setting | fps | p95 |
+            |---|---|---|
+            | Shipped | 103 | 20.7 ms |
+            | All post off | 237 | 4.3 ms |
+            | AO off | 133 | — |
+            | SMAA off | 121 | — |
+            | dpr 1 | 170 | — |
+
+            In Bastok the Intel chip is CPU-bound: post off only gave
+            136 → 155.
+          - **No measurable effect:** logarithmic depth (`?nologdepth=1`),
+            preserveDrawingBuffer (`?nopreserve=1`).
         - **Not done, if more is wanted:** merge single-instance prefabs that
           share a material into one static mesh. Watch the per-instance
           `aLamps` and the overlay order.
