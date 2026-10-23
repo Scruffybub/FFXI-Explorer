@@ -4815,7 +4815,7 @@ export default function ZoneViewer({
           footsteps={footsteps}
         />
       )}
-      {footsteps && <TriggeredEffects zone={zoneData} />}
+      {scene.zoneEffects && !scene.mapView && <TriggeredEffects zone={zoneData} range={scene.effectRange} />}
       {footsteps && !character && <FootstepCadence body={walkBody} footsteps={footsteps} />}
 
       {/* Already world space — deliberately outside the rotated group. */}

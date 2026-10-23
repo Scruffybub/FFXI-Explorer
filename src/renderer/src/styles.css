@@ -535,6 +535,12 @@ select {
 }
 .reset:hover { color: var(--text); }
 
+/* Scene → Triggered effects: a name, then Play/Stop and Go to. */
+.trigger-list { list-style: none; margin: 6px 0 0; padding: 0; max-height: 220px; overflow-y: auto; }
+.trigger-list li { display: flex; align-items: center; gap: 6px; padding: 3px 0; }
+.trigger-list .trigger-name { flex: 1; min-width: 0; font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trigger-list .reset { width: auto; margin-top: 0; padding: 3px 8px; flex: none; }
+
 .place-btn {
   width: 100%;
   background: var(--panel-2);

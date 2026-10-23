@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState, useMemo, useSyncExternalStore } from 'react'
 import { Label } from './Info'
 import type {
   LightingSettings, MusicSettings, PointLightSettings, PointLightSpec,
@@ -10,6 +10,7 @@ import type { MapScale } from './ZoneViewer'
 import { WEATHER_TYPES, nativeWeather, weatherDir } from '../lib/weatherTypes'
 import { UI_LOOKS, type UiLook, type UiText } from '../lib/uiLook'
 import { MOON_FRAMES, moonPhase } from '../lib/vanaTime'
+import { goToTrigger, playTrigger, triggerStore } from '../lib/triggeredEffects'
 
 interface ControlPanelProps {
   lighting: LightingSettings
@@ -214,6 +215,38 @@ function SelectField({
       <div className="control-row"><Label text={label} info={info} /></div>
       <select value={value} onChange={e => onChange(e.target.value)}>{children}</select>
     </label>
+  )
+}
+
+/**
+ * The zone's triggered effects (lib/triggeredEffects): the game plays these
+ * on events — a door opening, the weather clearing — so here they wait for
+ * Play. Go to moves the camera beside one.
+ */
+function TriggeredEffectsList() {
+  const { groups, running } = useSyncExternalStore(triggerStore.subscribe, triggerStore.get)
+  if (!groups.length) return null
+  return (
+    <div className="control">
+      <div className="control-row">
+        <Label
+          text="Triggered effects"
+          info="Effects the game plays when something happens rather than all the time: Castle Zvahl's door shimmers, La Theine Plateau's rainbow, and others, depending on the zone. Play runs one until you press Stop; Go to moves the camera to where it plays. Effects that only appear where an event puts them (on a character, in a cutscene) are not listed."
+        />
+      </div>
+      <ul className="trigger-list">
+        {groups.map(g => {
+          const on = running.has(g.dir)
+          return (
+            <li key={g.dir}>
+              <span className="trigger-name">{g.label}</span>
+              <button className="reset" onClick={() => playTrigger(g.dir, !on)}>{on ? 'Stop' : 'Play'}</button>
+              {g.at && <button className="reset" onClick={() => goToTrigger(g)}>Go to</button>}
+            </li>
+          )
+        })}
+      </ul>
+    </div>
   )
 }
 
@@ -1113,6 +1146,7 @@ export default function ControlPanel({
             info="How many of the nearest lamps Dynamic lighting turns into real lights. More lights the room further out, but each one costs frame rate: in Castle Zvahl, 12 lights cost about a quarter of it. The scene pauses briefly when this changes while the lighting is rebuilt."
           />
         )}
+        {scene.zoneEffects && <TriggeredEffectsList />}
         {scene.zoneEffects && (
           <Slider
             label="Footstep volume" value={scene.footstepVolume} min={0} max={1} step={0.05}

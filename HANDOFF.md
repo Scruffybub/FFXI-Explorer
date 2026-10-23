@@ -790,8 +790,43 @@ without auto-run, surveyed in 8 zones:
       0.60 s, peak 0.073. Castle Zvahl stone `0511` = se100005, 0.82 s, peak
       0.144. Same decoder as the music, which peaks near full scale, so these
       levels are the recordings'.
+- **Stage 4 built (2026-10-22): Scene → Triggered effects (Play / Stop /
+  Go to).**
+  - **What's listed:** the zone's placed triggered effects, `placedTrigger`:
+    not auto-run, and not fses/fser/weat/`<system>`. One entry per folder,
+    and only when a root generator sits more than 15 units from the zone
+    origin (`PLACED_MIN`). Whitegate's `effe/funs` (0,-10,0) and La Theine's
+    `effe/rott` (0,-2,0) are offsets from whatever event starts them; at
+    the origin they played inside a building, so they are left out.
+  - **The store:** `lib/triggeredEffects.ts`, read by the panel through
+    useSyncExternalStore. TriggeredEffects publishes the groups (centroid of
+    the root positions, size = the furthest model vertex x generator scale).
+  - **Play:** the folder's **roots** (generators no other in the folder
+    names as a birth/expire child) run on their own clock, as Zone effects
+    runs auto-run ones. ParticleField `running`/`roots` let them fall
+    through the triggered branch; children still start by events.
+  - **Stop:** clears the folder's particles; Play again restarts from the
+    first emission.
+  - **Go to:** stands back `max(14, size x 1.3)`, aims at `y + size x 0.4`,
+    and tries 8 directions for a clear line of sight. It raycasts **both
+    ways**: walls are one-sided, and the outward ray from Whitegate's
+    enclosed `effe/1pba` slipped through a wall's back face. With every
+    direction blocked, it looks down from high above.
+  - **Seen:**
+    - La Theine's rainbow (`effe/niji`): a 440 x 240 billboard arc, anchored
+      68 units below the ground. `nij1` fades in over 3000 frames, then
+      hands over to `nij2` (life 0, stays); `nij3` flashes. Additive 0x48,
+      tint 195. With Zone weather's sky the colour bands show; over the
+      default pale sky the top burns to white.
+    - Castle Zvahl's eight door shimmers (`door/_4i*`): `dis2` distortion
+      every 4 frames plus an invisible `cntr`. Only a heat-shimmer warp, so
+      it barely shows in stills.
+    - Misareaux `effe/umi1`: bright white smoke puffs (`kem1`).
+    - Whitegate `effe/1pba`: inside a closed building.
+  - **Bastok's door meshes** (`sit1`, `tam1`, `kabe`) still do not resolve,
+    so Bastok lists nothing.
 - **Still to do:** the footwear info block (boots vs sandals sound
-  different), and a "Triggered effects" Play list (doors, rainbow).
+  different).
 - **Stage 2 plan (as written before building):**
   1. Load the system D3Ms too.
   2. Resolve triggered mesh links against them.

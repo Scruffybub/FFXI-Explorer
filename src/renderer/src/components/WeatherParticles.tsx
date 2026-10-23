@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useRef, useSyncExternalStore } from 'react'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import type { ParsedZone } from '../lib/ffxi-dat'
@@ -10,6 +10,7 @@ import { HAZE_LAYER, HAZE_FRAGMENT, HAZE_PARS, hazeUniforms } from '../lib/HazeP
 import { spreadOffset } from './SkyLayers'
 import { childEvents, pruneChildEvents } from '../lib/weatherEvents'
 import { curveStart, rotationOrder } from '../lib/ximRules'
+import { setTriggerGroups, triggerCommands, triggerLabel, triggerStore } from '../lib/triggeredEffects'
 
 /**
  * The weather's sprite particles: rain, and the splashes and ripples that go
@@ -487,14 +488,21 @@ export function ZoneEffects({ zone, range }: {
 }
 
 /**
- * Effects the game starts on an event rather than on a clock: footsteps
- * (fses/fefs walking, fser/fefr running), fired by Footsteps below. Each post
+ * Effects the game starts on an event rather than on a clock.
+ *
+ * Footsteps (fses/fefs walking, fser/fefr running), fired by Avatar: each post
  * to `childEvents` naming one of these generators fires one emission there,
  * and its birth children with it.
+ *
+ * Placed ones (`placedTrigger`: doors, La Theine's rainbow, ...): listed in
+ * Scene → Triggered effects (lib/triggeredEffects). Play runs a folder's root
+ * generators — those no other generator in it starts — on their own clock, as
+ * Zone effects runs the auto-run ones, until Stop; their children start as
+ * their parents say (the rainbow's nij1 hands over to nij2 when it ends).
  */
-export function TriggeredEffects({ zone }: { zone: ParsedZone }) {
+export function TriggeredEffects({ zone, range }: { zone: ParsedZone; range: number }) {
   const systems = useMemo(() => {
-    const pick = (sp: GeneratorSpawn) => TRIGGERED.test(sp.dir) && !sp.emission.autoRun
+    const pick = (sp: GeneratorSpawn) => (TRIGGERED.test(sp.dir) || placedTrigger(sp)) && !sp.emission.autoRun
     const s = buildSystems(zone, pick, 1, pick, false, 6)
     if (new URLSearchParams(window.location.search).has('census')) {
       (window as unknown as { __tfx?: System[] }).__tfx = s
@@ -510,11 +518,45 @@ export function TriggeredEffects({ zone }: { zone: ParsedZone }) {
     const m = new Map<string, string[]>()
     for (const sp of zone.spawns ?? []) {
       const key = sp.dir + '|' + sp.generator
-      if (TRIGGERED.test(sp.dir) && !drawn.has(key) && sp.children.birth.length) m.set(key, sp.children.birth)
+      if ((TRIGGERED.test(sp.dir) || placedTrigger(sp)) && !drawn.has(key) && sp.children.birth.length) m.set(key, sp.children.birth)
     }
     return m
   }, [zone, systems])
-  useFrame(() => {
+  // The placed folders, for the panel, and each one's root generators.
+  const { roots, groups } = useMemo(() => {
+    const placed = (zone.spawns ?? []).filter(sp => placedTrigger(sp) && !sp.emission.autoRun)
+    const started = new Set(placed.flatMap(sp => [...sp.children.birth, ...sp.children.expire].map(k => sp.dir + '|' + k)))
+    const out = new Set<string>()
+    const groups = new Map<string, number[][]>()
+    const sizes = new Map<string, number>()
+    for (const sp of placed) {
+      const key = sp.dir + '|' + sp.generator
+      if (started.has(key)) continue
+      out.add(key)
+      const list = groups.get(sp.dir) ?? []
+      // Placed in the zone, not offsets from whatever starts it: Whitegate's
+      // effe/funs (0,-10,0) and La Theine's effe/rott (0,-2,0) play where an
+      // event puts them, and at the origin they sat inside a building.
+      if (Math.hypot(...sp.position) > PLACED_MIN) list.push([sp.position[0], -sp.position[1], -sp.position[2]])
+      groups.set(sp.dir, list)
+      // Reach: the model's furthest vertex times the generator's scale.
+      const v = zone.prefabs[sp.prefabIndices[0]]?.vertices ?? []
+      let r = 0
+      for (let i = 0; i < v.length; i++) r = Math.max(r, Math.abs(v[i]))
+      sizes.set(sp.dir, Math.max(sizes.get(sp.dir) ?? 0, r * Math.max(...sp.scale.map(Math.abs))))
+    }
+    const list = [...groups].filter(([, pts]) => pts.length).map(([dir, pts]) => ({
+      dir, label: triggerLabel(dir), size: sizes.get(dir) ?? 0,
+      at: [0, 1, 2].map(k => pts.reduce((a, p) => a + p[k], 0) / pts.length) as [number, number, number],
+    })).sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true }))
+    return { roots: out, groups: list }
+  }, [zone])
+  useEffect(() => {
+    setTriggerGroups(groups)
+    return () => setTriggerGroups([])
+  }, [groups])
+  const running = useSyncExternalStore(triggerStore.subscribe, () => triggerStore.get().running)
+  useFrame(({ camera, controls, scene }) => {
     for (let k = childEvents.length - 1; k >= 0; k--) {
       const ev = childEvents[k]
       const kids = relays.get(ev.dir + '|' + ev.name)
@@ -522,9 +564,54 @@ export function TriggeredEffects({ zone }: { zone: ParsedZone }) {
       childEvents.splice(k, 1)
       for (const name of kids) childEvents.push({ name, dir: ev.dir, frame: ev.frame, at: ev.at.clone() })
     }
+    // Go to: stand back by its size, a little above, looking at its middle
+    // (a billboard reaches up from its point: the rainbow rises 220 units).
+    // Eight directions round it, the first with a clear view: a fixed one put
+    // the camera inside a wall in Whitegate.
+    const g = triggerCommands.goTo
+    if (g?.at) {
+      triggerCommands.goTo = null
+      const [x, y0, z] = g.at
+      const y = y0 + g.size * 0.4
+      const d = Math.max(14, g.size * 1.3)
+      const lift = Math.max(6, g.size * 0.15)
+      const target = new THREE.Vector3(x, y, z)
+      const solid = scene.children.filter(o => o.type === 'Group')
+      const ray = new THREE.Raycaster()
+      let spot: THREE.Vector3 | null = null
+      for (let k = 0; k < 8 && !spot; k++) {
+        const a = Math.PI / 4 + (k * Math.PI) / 4
+        const p = new THREE.Vector3(x + Math.cos(a) * d, y + lift, z + Math.sin(a) * d)
+        // Both ways: walls are one-sided, and a ray leaving from inside a
+        // room passes out through their backs unseen.
+        const blocked = (from: THREE.Vector3, to: THREE.Vector3) => {
+          const dir = to.clone().sub(from)
+          ray.set(from, dir.clone().normalize())
+          ray.far = dir.length()
+          return ray.intersectObjects(solid, true).some(h => h.object.userData.prefabIdx !== undefined)
+        }
+        if (!blocked(target, p) && !blocked(p, target)) spot = p
+      }
+      // Walled in all round: look down on it from high above.
+      camera.position.copy(spot ?? new THREE.Vector3(x + 0.01, y + Math.max(40, d * 2), z + 0.01))
+      const orbit = controls as unknown as { target?: THREE.Vector3; update?: () => void } | null
+      orbit?.target?.set(x, y, z)
+      camera.lookAt(x, y, z)
+      orbit?.update?.()
+    }
   })
-  return <ParticleField systems={systems} weather={false} triggered />
+  return <ParticleField systems={systems} weather={false} range={range} triggered running={running} roots={roots} />
 }
+
+/**
+ * A triggered effect placed in the zone: not auto-run, not footsteps, weather
+ * (Lufaise's strikes have their own clock) or the shared footprint.
+ */
+/** How far from the zone origin a triggered effect must sit to count as placed. */
+const PLACED_MIN = 15
+
+export const placedTrigger = (sp: GeneratorSpawn) =>
+  !/(^|\/)(fses|fser|weat)(\/|$)/.test(sp.dir) && !sp.dir.startsWith('<system>')
 const TRIGGERED = /(^|\/)(fses\/fefs|fser\/fefr)$|^<system>\/fbib$/
 
 /** The folder holding a zone's footstep effects, walking or running. */
@@ -534,11 +621,17 @@ export function footstepDir(zone: ParsedZone, running: boolean): string | null {
 }
 
 /** Runs and draws a set of particle systems, and the screen flash they raise. */
-function ParticleField({ systems, weather, range = 1, triggered = false }: {
+function ParticleField({ systems, weather, range = 1, triggered = false, running, roots }: {
   systems: System[]; weather: boolean; range?: number
   /** Emit only when a child event names the generator (TriggeredEffects). */
   triggered?: boolean
+  /** Triggered folders playing now: their `roots` (dir|generator) run on their own clock. */
+  running?: ReadonlySet<string>
+  roots?: ReadonlySet<string>
 }) {
+  // Folders that were playing last frame: a folder that stops is cleared, and
+  // one that starts begins from its first emission.
+  const wasRunning = useRef(new Set<string>())
   const flash = useMemo(() => buildFlashQuad(), [])
   useEffect(() => () => { flash.mesh.geometry.dispose(); (flash.mesh.material as THREE.Material).dispose() }, [flash])
 
@@ -571,6 +664,20 @@ function ParticleField({ systems, weather, range = 1, triggered = false }: {
     last.frames = frames
     tmp.flash.set(0, 0, 0)
     pruneChildEvents(frames)
+    if (running) {
+      for (const dir of wasRunning.current) {
+        if (running.has(dir)) continue
+        for (const s of systems) for (const e of s.emitters) {
+          if (e.spawn.dir !== dir) continue
+          for (let i = e.first; i < e.first + e.capacity; i++) { s.born[i] = -Infinity; s.expired[i] = 1 }
+        }
+      }
+      for (const dir of running) {
+        if (wasRunning.current.has(dir)) continue
+        for (const s of systems) for (const e of s.emitters) if (e.spawn.dir === dir) e.next = -1
+      }
+      wasRunning.current = new Set(running)
+    }
 
     for (const s of systems) {
       // What every emitter in the system shares (the batch key).
@@ -598,7 +705,9 @@ function ParticleField({ systems, weather, range = 1, triggered = false }: {
       // camera (standing in for the player) is within it.
       for (const e of s.emitters) {
         const sp = e.spawn
-        if (triggered) {
+        // A playing folder's roots run on their clock below, like Zone effects.
+        const playing = !!running?.has(sp.dir) && !!roots?.has(sp.dir + '|' + sp.generator)
+        if (triggered && !playing) {
           // One emission per post naming this generator, where it was posted,
           // left in the world (a footstep stays where the foot fell).
           for (let k = childEvents.length - 1; k >= 0; k--) {
