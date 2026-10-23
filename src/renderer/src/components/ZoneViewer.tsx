@@ -1722,7 +1722,14 @@ function CameraOrientation() {
  * meshes themselves, so a harness can hide a class of them.
  */
 function ProbeHook({ meshes, zoneData }: { meshes: THREE.Object3D[]; zoneData: ParsedZone }) {
-  const { camera, controls } = useThree()
+  const { camera, controls, gl, scene } = useThree()
+  // window.__gl / __scene: the renderer and scene, for profiling harnesses.
+  useEffect(() => {
+    const g = window as unknown as { __gl?: THREE.WebGLRenderer; __scene?: THREE.Scene }
+    g.__gl = gl
+    g.__scene = scene
+    return () => { delete g.__gl; delete g.__scene }
+  }, [gl, scene])
   useEffect(() => {
     const w = window as unknown as { __probeAt?: (x: number, y: number) => unknown }
     w.__probeAt = (x: number, y: number) => {
@@ -1739,7 +1746,7 @@ function ProbeHook({ meshes, zoneData }: { meshes: THREE.Object3D[]; zoneData: P
         const lerp = (arr: number[], stride: number, k: number) =>
           f && bc ? arr[f.a * stride + k] * bc.x + arr[f.b * stride + k] * bc.y + arr[f.c * stride + k] * bc.z : NaN
         return {
-          prefab: idx, d: +h.distance.toFixed(2), inst: h.instanceId,
+          prefab: idx, d: +h.distance.toFixed(2), inst: h.instanceId, at: h.point.toArray().map(v => +v.toFixed(1)),
           name: p?.meshName, tex: (p?.textureName ?? '').trim(), rs: '0x' + ((p?.blending ?? 0) >>> 0).toString(16),
           va: p ? +lerp(p.colors, 4, 3).toFixed(3) : null,
           vc: p ? +lerp(p.colors, 4, 0).toFixed(3) : null,
@@ -1765,6 +1772,41 @@ function ProbeHook({ meshes, zoneData }: { meshes: THREE.Object3D[]; zoneData: P
   }, [camera, controls, meshes, zoneData])
   return null
 }
+
+/**
+ * Two things that made three re-resolve shader programs every frame
+ * (setProgram → getProgram → getProgramCacheKey) — about a fifth of the
+ * frame's CPU in Bastok Markets, where we lost to XI Model Viewer
+ * (benchmark, 2026-10-21). Checked once a second, so anything added later —
+ * a rebuilt zone, Lamp lights, effects — is caught too.
+ *
+ * 1. Single-pass transparency. three draws a transparent double-sided
+ *    material twice, back faces then front, setting `needsUpdate` before each
+ *    half (WebGLRenderer.renderObject) — so every terrain overlay, water layer
+ *    and effect re-resolved its program twice a draw. FFXI draws them once
+ *    with culling off; the two-pass trick is for closed glass shapes, which
+ *    the zones do not have. `forceSinglePass` turns it off.
+ * 2. Lights on every layer. three counts a light only when it shares a layer
+ *    with the camera; GammaBlendPass and HazePass draw their own layer alone,
+ *    so they saw a different light setup, and a changed setup re-resolves
+ *    every lit material too.
+ */
+function RenderTuning() {
+  const scene = useThree(s => s.scene)
+  const tick = useRef(0)
+  useFrame(() => {
+    if (NO_RENDER_TUNE || tick.current++ % 60 !== 0) return
+    scene.traverse(o => {
+      if ((o as THREE.Light).isLight && o.layers.mask !== ALL_LAYERS) o.layers.mask = ALL_LAYERS
+      const mat = (o as THREE.Mesh).material
+      if (mat) for (const m of Array.isArray(mat) ? mat : [mat]) m.forceSinglePass = true
+    })
+  })
+  return null
+}
+const ALL_LAYERS = 0xffffffff | 0
+/** Diagnostic: ?norendertune=1 leaves RenderTuning and n8aoOpaqueOnly off, for before/after comparisons. */
+const NO_RENDER_TUNE = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('norendertune')
 
 /** Applies renderer-level settings that R3F does not expose declaratively. */
 function RendererSettings({ post, shadows }: { post: PostSettings; shadows: boolean }) {
@@ -2712,6 +2754,21 @@ function Avatar({
   )
 }
 
+/**
+ * N8AO without its transparency mode. It switches the mode on by itself
+ * whenever any material is transparent — every zone, for the blended terrain
+ * overlays — and then each frame walks the scene four times and renders its
+ * transparent objects twice more. Bastok Markets, measured 2026-10-23: 588
+ * lit-program re-resolves a frame came from those extra renders, about a
+ * fifth of the frame. Not needed here: the overlays lie on their own ground,
+ * and effects and water draw in GammaBlendPass after AO.
+ */
+function n8aoOpaqueOnly(pass: { autoDetectTransparency?: boolean; configuration?: { transparencyAware?: boolean } } | null) {
+  if (!pass || NO_RENDER_TUNE) return
+  pass.autoDetectTransparency = false
+  if (pass.configuration) pass.configuration.transparencyAware = false
+}
+
 /** Post-processing stack. Rebuilt when the set of enabled effects changes. */
 function PostStack({ post, generatorLayer }: { post: PostSettings; generatorLayer: boolean }) {
   const { scene: world, camera } = useThree()
@@ -2726,7 +2783,7 @@ function PostStack({ post, generatorLayer }: { post: PostSettings; generatorLaye
   if (post.smaa) effects.push(<SMAA key="smaa" />)
   if (aoAllowed) {
     effects.push(
-      <N8AO key="ao" aoRadius={post.aoRadius} intensity={post.aoIntensity} distanceFalloff={0.5} halfRes />
+      <N8AO key="ao" ref={n8aoOpaqueOnly} aoRadius={post.aoRadius} intensity={post.aoIntensity} distanceFalloff={0.5} halfRes />
     )
   }
   if (post.bloom) {
@@ -4694,6 +4751,7 @@ export default function ZoneViewer({
     >
       <CameraPersistence store={cameraPose} />
       <RendererSettings post={post} shadows={shadowsActive} />
+      <RenderTuning />
       <SkyAnimator skyMaterial={skyMaterial} timeOfDayRef={timeOfDayRef} exposure={post.exposure} zoneWeather={zoneLight} />
       {zoneLight && (
         <SkyLayers

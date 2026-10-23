@@ -3617,6 +3617,54 @@ rather than solved.
         2. Ours sits at 1.6–2.4 GB even in small zones; XMV uses 0.9 GB in
            Safehold. Look for what is resident before any zone loads.
         3. Effects, water and weather together cost Ra'Kaznar 225 → 76 fps.
+      - **Lead 1 done, 2026-10-23: town speed, stage 1.**
+        - **Measuring it.** `?census=1` now exposes `window.__gl` /
+          `__scene`. Wrapping every material's `customProgramCacheKey`
+          counts program re-resolves; Bastok Markets had **588 a frame**.
+          Two causes. (A snapshot of `gl.properties.get(mat)` across calls
+          shows `__version` rising each frame. Checking
+          `material.version !== p.__version` at the key call misses it,
+          because setProgram has already copied the version.)
+        - **Cause 1: N8AO's transparency mode.** It turns itself on when any
+          material is transparent (every zone's 0x8000 overlays). Each frame
+          it then walks the scene four times and renders the transparent
+          objects twice more (`renderTransparency`). Off via a ref on
+          `<N8AO>` (`n8aoOpaqueOnly`: `autoDetectTransparency = false`,
+          `configuration.transparencyAware = false`). Not needed: overlays
+          lie on their own ground, and effects/water draw in GammaBlendPass.
+        - **Cause 2: three's two-pass transparency.** A transparent
+          DoubleSide material is drawn back faces then front, with
+          `needsUpdate = true` before each half (WebGLRenderer.renderObject),
+          so two re-resolves and two draws per transparent object.
+          `RenderTuning` sets `forceSinglePass` on every material once a
+          second; FFXI draws them once with culling off.
+        - **Also in RenderTuning:** lights go on all layers, so
+          GammaBlendPass and HazePass see the same light setup.
+        - **Image diffs before/after** (`?norendertune=1` turns both off),
+          full frame: Bastok 0.002 of 255, against 0.000 noise between two
+          captures of the same view; Gustaberg 0.143 (noise 0.110); Windurst
+          with effects 0.013 (0.012); Lufaise 0.007 (0.084). Draws fell
+          683 → 390 in West Ronfaure.
+        - **Packaged, same 8-zone run, fps** (old → new, XMV):
+
+          | Zone | Old | New | XMV |
+          |---|---|---|---|
+          | West Ronfaure | 191 | 424 | 48 |
+          | Bastok Markets | 74 | 91 | 127 |
+          | Whitegate | 81 | 105 | 54 |
+          | Castle Zvahl Keep | 222 | 343 | 137 |
+          | Reisenjima | 73 | 131 | 43 |
+          | Outer Ra'Kaznar | 225 | 223 | 23 |
+          | Tavnazian Safehold | 118 | 182 | 228 |
+          | Lower Jeuno | 179 | 277 | 150 |
+        - **Still behind in Bastok and Safehold.** The profile now has no
+          getProgram at all. setProgram 14%, renderBufferDirect,
+          refreshUniformsCommon, bindTexture and bindVertexArray dominate:
+          the per-draw cost of ~1,200 materials over ~1,300 draws.
+        - **Stage 2:** share one material between prefabs with the same
+          texture and flags, and merge single-instance prefabs that share a
+          material into one static mesh. Watch the per-instance `aLamps` and
+          the overlay order.
   - **Map maker research, 2026-10-21.** A quick search found no tool
     that builds new FFXI zones. The developers once planned a player dungeon
     maker and never shipped it. What does exist is map *drawing*: Remapster
