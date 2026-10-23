@@ -27,6 +27,7 @@ import { SkyLayers } from './SkyLayers'
 import { WeatherParticles, ZoneEffects, TriggeredEffects, footstepDir, zoneMeshPicker, waterFolders, colourSheet } from './WeatherParticles'
 import { childEvents } from '../lib/weatherEvents'
 import { footstepSoundId, playSound } from '../lib/footstepSounds'
+import { curveStart, rotationOrder } from '../lib/ximRules'
 import { LampLights } from './LampLights'
 import { zoneLamps, LAMP_VERTEX_PARS, LAMP_FRAGMENT_PARS, LAMP_VERTEX, buildLampTexture, lampSlots } from '../lib/zoneLamps'
 import { LensFlare } from './LensFlare'
@@ -543,10 +544,11 @@ function waterTone(dir: string, textureName: string | undefined): number {
  * The transform a generator gives its mesh, in DAT space. Composed exactly like
  * the MZB placements (MzbParser: T · Rz·Ry·Rx · S), which is Euler order ZYX.
  */
-function spawnMatrix(s: { position: number[]; rotation: number[]; scale: number[] }): THREE.Matrix4 {
+function spawnMatrix(s: { position: number[]; rotation: number[]; scale: number[]; billboard?: number }): THREE.Matrix4 {
   return new THREE.Matrix4().compose(
     new THREE.Vector3(s.position[0], s.position[1], s.position[2]),
-    new THREE.Quaternion().setFromEuler(new THREE.Euler(s.rotation[0], s.rotation[1], s.rotation[2], 'ZYX')),
+    // The particle's own rotation order (lib/ximRules).
+    new THREE.Quaternion().setFromEuler(new THREE.Euler(s.rotation[0], s.rotation[1], s.rotation[2], rotationOrder(s.billboard ?? 0x0200))),
     new THREE.Vector3(s.scale[0], s.scale[1], s.scale[2]),
   )
 }
@@ -941,7 +943,7 @@ function SpawnAnimator({ anims, timeOfDayRef }: { anims: SpawnAnim[]; timeOfDayR
         const progress = (frames % a.life) / a.life
         if (a.curves.u) ox += sampleKeyFrames(a.curves.u, progress)
         if (a.curves.v) oy += sampleKeyFrames(a.curves.v, progress)
-        if (a.curves.alpha) alpha = (sampleKeyFrames(a.curves.alpha, progress) * 255) / 128
+        if (a.curves.alpha) alpha = (sampleKeyFrames(a.curves.alpha, progress, curveStart(a.base[3])) * 255) / 128
       }
       const t = a.tod
       if (t.r) a.tint.x = decode(2 * sampleKeyFrames(t.r, day) * a.tone)

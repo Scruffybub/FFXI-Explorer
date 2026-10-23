@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef } from 'react'
+import { curveStart, rotationOrder } from '../lib/ximRules'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import type { ParsedZone } from '../lib/ffxi-dat'
@@ -500,7 +501,7 @@ function buildLayers(zone: ParsedZone, state: string, radius: number, gameSunMoo
         mesh, kind, spawn: sp, tint, map, scale, slot, posScale,
         ...(scheduled && { scheduled: true }),
         base: new THREE.Vector3(...sp.position),
-        rotation: new THREE.Euler(sp.rotation[0], sp.rotation[1], sp.rotation[2], 'ZYX'),
+        rotation: new THREE.Euler(sp.rotation[0], sp.rotation[1], sp.rotation[2], rotationOrder(sp.billboard)),
         spin: sp.spin ?? [0, 0, 0],
         order: mesh.renderOrder,
       })
@@ -658,7 +659,7 @@ export function SkyLayers({
         // tint alpha when present — Lufaise's wind streaks start at 0 and
         // pulse on one — then the time-of-day curve multiplies it.
         (sp.life > 0 && sp.curves.alpha
-          ? (sampleKeyFrames(sp.curves.alpha, progress) * 255) / 128
+          ? (sampleKeyFrames(sp.curves.alpha, progress, curveStart(sp.tint[3])) * 255) / 128
           : sp.tint[3] / 128) * (t.alpha ? sampleKeyFrames(t.alpha, day) : 1),
       )
       if (l.map && (sp.uvScroll[0] || sp.uvScroll[1])) {
@@ -671,7 +672,7 @@ export function SkyLayers({
         // as it strikes; its glow shrinks.
         const age = Math.max(0, frames - em.births[l.slot])
         tmp.spinE.set(
-          l.rotation.x + l.spin[0] * age, l.rotation.y + l.spin[1] * age, l.rotation.z + l.spin[2] * age, 'ZYX')
+          l.rotation.x + l.spin[0] * age, l.rotation.y + l.spin[1] * age, l.rotation.z + l.spin[2] * age, l.rotation.order)
         tmp.q.setFromEuler(tmp.spinE)
         tmp.p.set(
           l.scale.x + sp.scaleVelocity[0] * age, l.scale.y + sp.scaleVelocity[1] * age, l.scale.z + sp.scaleVelocity[2] * age)
@@ -685,7 +686,7 @@ export function SkyLayers({
       } else if (l.kind === 'world') {
         // flip(DAT → world) · base · rotation (+ spin) · scale, where it stands.
         tmp.spinE.set(
-          l.rotation.x + l.spin[0] * frames, l.rotation.y + l.spin[1] * frames, l.rotation.z + l.spin[2] * frames, 'ZYX')
+          l.rotation.x + l.spin[0] * frames, l.rotation.y + l.spin[1] * frames, l.rotation.z + l.spin[2] * frames, l.rotation.order)
         tmp.q.setFromEuler(tmp.spinE)
         tmp.at.copy(l.base)
         if (sp.spread) tmp.at.add(em.offsets[l.slot])
@@ -694,7 +695,7 @@ export function SkyLayers({
       } else if (l.kind === 'camera') {
         // camera · flip(DAT → world) · base · rotation (+ spin) · scale
         tmp.spinE.set(
-          l.rotation.x + l.spin[0] * frames, l.rotation.y + l.spin[1] * frames, l.rotation.z + l.spin[2] * frames, 'ZYX')
+          l.rotation.x + l.spin[0] * frames, l.rotation.y + l.spin[1] * frames, l.rotation.z + l.spin[2] * frames, l.rotation.order)
         tmp.q.setFromEuler(tmp.spinE)
         tmp.at.copy(l.base)
         if (sp.spread) tmp.at.add(em.offsets[l.slot])

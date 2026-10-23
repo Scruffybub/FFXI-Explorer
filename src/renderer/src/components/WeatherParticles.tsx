@@ -9,6 +9,7 @@ import { GAMMA_BLEND_LAYER } from '../lib/GammaBlendPass'
 import { HAZE_LAYER, HAZE_FRAGMENT, HAZE_PARS, hazeUniforms } from '../lib/HazePass'
 import { spreadOffset } from './SkyLayers'
 import { childEvents, pruneChildEvents } from '../lib/weatherEvents'
+import { curveStart, rotationOrder } from '../lib/ximRules'
 
 /**
  * The weather's sprite particles: rain, and the splashes and ripples that go
@@ -716,11 +717,11 @@ function ParticleField({ systems, weather, range = 1, triggered = false }: {
         // 0x0B: turns per frame (Bastok Markets' windmill).
         for (let c = 0; c < 3; c++) s.rot[i * 3 + c] += sp.spin[c] * dt
 
-        // Triggered effects start the curve from the tint's own alpha (xim's
-        // rule; see sampleKeyFrames). Not yet for the rest: it would change
-        // 190 of Castle Zvahl's lamp curves and Bastok's smoke — Ryan to judge.
+        // The curve starts from the tint's own alpha (xim's rule;
+        // lib/ximRules). Triggered effects keep it under ?ximrules=0 too:
+        // the footprint's curve is 0 to 0 and would never show.
         const a = sp.curves.alpha
-          ? (sampleKeyFrames(sp.curves.alpha, age / life, triggered ? sp.tint[3] / 255 : undefined) * 255) / 128
+          ? (sampleKeyFrames(sp.curves.alpha, age / life, curveStart(sp.tint[3], triggered || undefined)) * 255) / 128
           : sp.tint[3] / 128
         // DAT → world: x, -y, -z; camera followers ride the camera.
         tmp.p.set(s.pos[i * 3], -s.pos[i * 3 + 1], -s.pos[i * 3 + 2])
@@ -743,15 +744,14 @@ function ParticleField({ systems, weather, range = 1, triggered = false }: {
           // xim's XZ billboard: the authored mesh, turned about the vertical
           // to face the camera (Bastok Markets' fountain streams).
           tmp.yaw.setFromAxisAngle(tmp.up, Math.atan2(camera.position.x - tmp.p.x, camera.position.z - tmp.p.z))
-          tmp.e.set(s.rot[i * 3], s.rot[i * 3 + 1], s.rot[i * 3 + 2], 'ZYX')
+          tmp.e.set(s.rot[i * 3], s.rot[i * 3 + 1], s.rot[i * 3 + 2], rotationOrder(sp.billboard))
           tmp.q.setFromEuler(tmp.e)
           tmp.m.compose(tmp.zero, tmp.q, tmp.s).premultiply(FLIP).premultiply(tmp.rot.makeRotationFromQuaternion(tmp.yaw)).setPosition(tmp.p)
         } else {
-          // xim: setup flag 0x0200 rotates Z-Y-X, otherwise X-Y-Z. The
-          // footprint (no flag) lies flat only in X-Y-Z; Z-Y-X stood it on
-          // edge. Every effect still takes Z-Y-X except the triggered ones, so
-          // nothing already judged changes — the rest is Ryan's to see.
-          const order = triggered && !(sp.billboard & 0x0200) ? 'XYZ' : 'ZYX'
+          // xim: setup flag 0x0200 rotates Z-Y-X, otherwise X-Y-Z
+          // (lib/ximRules). The footprint (no flag) lies flat only in X-Y-Z;
+          // Z-Y-X stood it on edge.
+          const order = rotationOrder(sp.billboard, triggered || undefined)
           tmp.e.set(s.rot[i * 3], s.rot[i * 3 + 1], s.rot[i * 3 + 2], order)
           tmp.q.setFromEuler(tmp.e)
           // FLIP · R · S in DAT terms, placed at the world point — turned
@@ -775,7 +775,7 @@ function ParticleField({ systems, weather, range = 1, triggered = false }: {
             // every shipped flash and has no curve, so it is not applied —
             // taken literally the flash would never show.
             const t = age / life
-            const ch = (curve: number[] | undefined, byte: number) => (curve ? sampleKeyFrames(curve, t) : byte / 255) * 2 * k
+            const ch = (curve: number[] | undefined, byte: number) => (curve ? sampleKeyFrames(curve, t, curveStart(byte)) : byte / 255) * 2 * k
             tmp.flash.x += ch(sp.curves.r, sp.tint[0])
             tmp.flash.y += ch(sp.curves.g, sp.tint[1])
             tmp.flash.z += ch(sp.curves.b, sp.tint[2])

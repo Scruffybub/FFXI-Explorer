@@ -734,6 +734,42 @@ without auto-run, surveyed in 8 zones:
       which stood fmrk on edge.
     - **Next step:** a sweep with both rules applied everywhere, for Ryan to
       judge.
+    - **Before/after, 2026-10-22.** `?ximrules=1` (lib/ximRules.ts) applies
+      both rules everywhere: particle fields, SkyLayers, Generator water's
+      SpawnAnimator, and spawnMatrix. Time-of-day curves are untouched (xim's
+      clock updater has no start rule).
+      - **Census of affected spawns**, auto-run or weather (scratch
+        affected.js):
+
+        | Zone | Changed | What |
+        |---|---|---|
+        | Castle Zvahl Keep | 190 | `effe/ligt`, fade rule |
+        | Bastok Markets | 77 | 53 rotation (`effe/wind` glows), 24 smoke |
+        | Lower Jeuno | 57 | `effe/ligh`, rotation |
+        | South Gustaberg | 60 | `effe/sibu` 52, `effe/ligh` 8 |
+        | Windurst Waters | 41 | `effe/ligh`, `hasu` |
+        | Jugner Forest | 41 | weather 23, ponds |
+        | Southern San d'Oria | 25 | smoke |
+        | Misareaux Coast | 37 | mostly thunder strikes |
+        | Lufaise Meadows | 29 | mostly thunder strikes |
+        | Whitegate, Beaucedine | 0 | — |
+        | La Theine Plateau | 6 | `effe/z_wa` crag circle |
+      - **Visible in stills (scratch cmp/):**
+        - Castle Zvahl's torches lose most of their big soft halo, and the
+          flame shows inside it; consistent over three captures each.
+        - Bastok Markets' window glows (`effe/wind`) move: more slits light
+          along the wall.
+        - La Theine's crag circle (`z_wa/li01`) glows bright pink instead of
+          a dark print.
+        - No visible change in the framed views of Windurst's lotuses,
+          Gustaberg's shore or San d'Oria's smoke.
+        - Jeuno's and Jugner's views did not frame the affected effects.
+      - **Decided 2026-10-22: Ryan turned both rules on everywhere.**
+        `XIM_RULES` is now the default; `?ximrules=0` restores the old
+        behaviour, for comparisons.
+      - **Regression check:** whole-zone overviews with the rules off and on
+        are indistinguishable for South Gustaberg (Generator water with and
+        without weather) and Lufaise Thunder.
   - **Footstep sounds.**
     - Sound pointers are 0x3D blocks: `SeSep`, then a u32 id.
       `ParsedZone.sounds` keeps them all, about 900 per zone. The file is
