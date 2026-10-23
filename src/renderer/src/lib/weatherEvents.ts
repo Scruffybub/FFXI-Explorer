@@ -18,6 +18,8 @@ export interface ChildEvent {
   frame: number
   /** Where the parent particle was, in world space. */
   at: THREE.Vector3
+  /** A heading to turn the particles to, world radians (a footprint). */
+  yaw?: number
 }
 
 export const childEvents: ChildEvent[] = []

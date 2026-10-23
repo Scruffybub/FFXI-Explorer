@@ -2,7 +2,7 @@
 
 **Water (beta)** - Scene → Generator water draws the game's own water, waves and foam. Most zones match the game; Foret de Hennetiel's sea and rivers do not yet. It is off by default.
 
-**Zone effects (beta)** - The game's lamps, fires, smoke and glows play, and in Dynamic lighting the nearest lamps cast shadows. Effects the game triggers (footsteps, doors, hit sparks) do not play yet.
+**Zone effects (beta)** - The game's lamps, fires, smoke and glows play, and in Dynamic lighting the nearest lamps cast shadows. In Walk mode your footsteps kick up the game's own dust, splashes and footprints, with its footstep sounds; other triggered effects (doors, hit sparks) do not play yet.
 
 **Weather** - Zone weather draws the game's skies, clouds, rain, snow, fog and lighting. The moon shows its phase (today's in Vana'diel, or any you pick) and the pole star rises at night. Lufaise's thunderstorms throw their lightning strikes. Light snow is still very faint.
 

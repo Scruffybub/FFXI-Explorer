@@ -7,7 +7,7 @@ import {
 } from '@react-three/postprocessing'
 import * as THREE from 'three'
 import type { ParsedZone, ParsedDatFile, ZoneEnvRecord } from '../lib/ffxi-dat'
-import { sampleSkyGradient } from '../lib/ffxi-dat'
+import { sampleSkyGradient, SYSTEM_SPAWN_DIR } from '../lib/ffxi-dat'
 import { sampleKeyFrames } from '../lib/ffxi-dat/GeneratorParser'
 import { buildModel, type BuiltModel } from '../lib/modelBuild'
 import { invertRigidMatrix4, poseSkeleton, skinMeshes } from '../lib/skinning'
@@ -26,6 +26,7 @@ import { applySpawnStages, setSubtractive, untexturedTexel } from '../lib/spawnS
 import { SkyLayers } from './SkyLayers'
 import { WeatherParticles, ZoneEffects, TriggeredEffects, footstepDir, zoneMeshPicker, waterFolders, colourSheet } from './WeatherParticles'
 import { childEvents } from '../lib/weatherEvents'
+import { footstepSoundId, playSound } from '../lib/footstepSounds'
 import { LampLights } from './LampLights'
 import { zoneLamps, LAMP_VERTEX_PARS, LAMP_FRAGMENT_PARS, LAMP_VERTEX, buildLampTexture, lampSlots } from '../lib/zoneLamps'
 import { LensFlare } from './LensFlare'
@@ -2494,7 +2495,13 @@ function WalkCamera({
 }
 
 /** A zone's footstep effect folders: walking (fses/fefs) and running (fser/fefr). */
-interface FootstepDirs { walk: string | null; run: string | null }
+interface FootstepDirs {
+  walk: string | null
+  run: string | null
+  /** The zone's sound pointers, and the volume to play footsteps at. */
+  sounds?: ParsedZone['sounds']
+  volume: number
+}
 /** Foot lift and plant thresholds, as a share of the model's height. */
 const FOOT_LIFT = 0.03
 const FOOT_PLANT = 0.008
@@ -2507,6 +2514,10 @@ const EFFECT_CLOCK = 60
  * TerrainType.toFootEffectId). Stone, metal and wood have none.
  */
 const footstepEffect = (terrain: number) => `0${terrain.toString(16)}00`
+/** Ground that keeps a footprint: sand and snow (xim TerrainType.hasFootMark). */
+const FOOTPRINT_TERRAIN = new Set([3, 4])
+/** How far above the collision floor a footprint is laid, world units. */
+const FOOTPRINT_LIFT = Number(new URLSearchParams(window.location.search).get('printlift')) || 0.06
 
 /**
  * Footsteps without a character model to watch: a step every half second
@@ -2527,6 +2538,8 @@ function FootstepCadence({ body, footsteps }: { body: React.RefObject<WalkBodySt
     // Sideways from the facing (sin yaw, 0, cos yaw).
     at.set(b.x + Math.cos(b.yaw) * 0.15 * t.current.side, b.y, b.z - Math.sin(b.yaw) * 0.15 * t.current.side)
     childEvents.push({ name: footstepEffect(b.terrain), dir, frame: clock.getElapsedTime() * EFFECT_CLOCK, at: at.clone() })
+    const sound = footstepSoundId(footsteps.sounds, b.terrain)
+    if (sound !== null) playSound(sound, footsteps.volume)
   })
   return null
 }
@@ -2650,7 +2663,20 @@ function Avatar({
             const m = pose.worldMats[feet.bones[k]]
             footAt.set(m[12], m[13], m[14]).applyMatrix4(inner.current.matrixWorld)
             footAt.y = b.y
-            childEvents.push({ name: footstepEffect(b.terrain), dir, frame: clock.getElapsedTime() * EFFECT_CLOCK, at: footAt.clone() })
+            const frame = clock.getElapsedTime() * EFFECT_CLOCK
+            const sound = footstepSoundId(footsteps.sounds, b.terrain)
+            if (sound !== null) playSound(sound, footsteps.volume)
+            childEvents.push({ name: footstepEffect(b.terrain), dir, frame, at: footAt.clone() })
+            // Sand and snow keep a footprint too, walking only (xim
+            // emitFootSteps; the shared fbib/fmrk), turned to the facing.
+            if (!b.running && FOOTPRINT_TERRAIN.has(b.terrain)) {
+              // Lifted a little: the collision floor and the drawn ground
+              // differ by centimetres, and a print laid on the collision
+              // height was hidden under the art.
+              const at = footAt.clone()
+              at.y += FOOTPRINT_LIFT
+              childEvents.push({ name: 'fmrk', dir: SYSTEM_SPAWN_DIR, frame, at, yaw: b.yaw })
+            }
             // Census: every footfall, for the footstep harness.
             if (CENSUS) ((window as unknown as { __steps?: string[] }).__steps ??= []).push(`${state.current} ${k} ${dir}/${footstepEffect(b.terrain)}`)
           }
@@ -2960,7 +2986,8 @@ export default function ZoneViewer({
   // sun's own shadows are switched off.
   // Footsteps (Zone effects, walk mode): the zone's footstep effect folders.
   const footstepDirs = useMemo<FootstepDirs>(
-    () => ({ walk: footstepDir(zoneData, false), run: footstepDir(zoneData, true) }), [zoneData])
+    () => ({ walk: footstepDir(zoneData, false), run: footstepDir(zoneData, true), sounds: zoneData.sounds, volume: scene.footstepVolume }),
+    [zoneData, scene.footstepVolume])
   const footsteps = scene.zoneEffects && !scene.mapView && scene.cameraMode === 'walk' &&
     (footstepDirs.walk || footstepDirs.run) ? footstepDirs : null
 

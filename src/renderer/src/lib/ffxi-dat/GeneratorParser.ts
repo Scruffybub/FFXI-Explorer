@@ -395,12 +395,18 @@ export function parseKeyFrames(body: Uint8Array): number[] | null {
   return out.length >= 4 ? out : null
 }
 
-/** Linear interpolation into a curve from parseKeyFrames. */
-export function sampleKeyFrames(curve: number[], t: number): number {
-  if (t <= curve[0]) return curve[1]
+/**
+ * Linear interpolation into a curve from parseKeyFrames. `first`, when
+ * given, stands in for the first point's value: xim's colour and alpha
+ * updaters start from the particle's own value (its tint), not the curve's.
+ * The shared footprint fades from tint alpha 78 along a curve that reads 0 to
+ * 0; taken literally it never shows.
+ */
+export function sampleKeyFrames(curve: number[], t: number, first?: number): number {
+  if (t <= curve[0]) return first ?? curve[1]
   for (let i = 2; i < curve.length; i += 2) {
     if (t <= curve[i]) {
-      const t0 = curve[i - 2], v0 = curve[i - 1], t1 = curve[i], v1 = curve[i + 1]
+      const t0 = curve[i - 2], v0 = i === 2 && first !== undefined ? first : curve[i - 1], t1 = curve[i], v1 = curve[i + 1]
       return t1 > t0 ? v0 + ((t - t0) / (t1 - t0)) * (v1 - v0) : v1
     }
   }

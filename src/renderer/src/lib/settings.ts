@@ -305,6 +305,9 @@ export interface SceneSettings {
    */
   lampShadows: number
 
+  /** Walk mode, Zone effects: footstep sound volume, 0 = silent. */
+  footstepVolume: number
+
   /**
    * Heat shimmer: how far, in pixels, the picture behind a haze effect shifts
    * at full strength (lib/HazePass). 0 = off; 2 is Ryan's pick (8, then 4,
@@ -507,6 +510,7 @@ export const DEFAULT_SCENE: SceneSettings = {
   lampBrightness: 1,
   lampCount: 12,
   lampShadows: 2,
+  footstepVolume: 0.6,
   hazeStrength: 2,
   gameSunMoon: true,
   moonPhase: -1,

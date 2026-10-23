@@ -705,9 +705,57 @@ without auto-run, surveyed in 8 zones:
     38,38,28, alpha 16 (0.125), blend 0x48 additive, 0.4 units across.
     Snow's `0400` (alpha 58) is white on white. Same question as light snow:
     a retail reference is needed before any boost.
-- **Still to do:** the `fmrk` footprint effect (shared file generator, not
-  parsed: the system file's generators are not read at all), the footstep
-  sounds (0x3D), and a "Triggered effects" Play list (doors, rainbow).
+- **Stage 3 built (2026-10-22): footprints and footstep sounds.**
+  - **Footprint.**
+    - The data: `syst/effe/fbib/fmrk` in ROM/0/0.DAT, with its keyframe
+      `fmrk`. Sprite `fmk1`, a soft round 32 px blob; blend 0x44 (alpha, not
+      additive); tint 20,20,20,78; life 180 frames; scale 0.15 x 0.19.
+    - Loading: parseSystemEffects reads only SYSTEM_GENERATORS (this one)
+      plus its folder's curves. parseZoneFile adds it under `<system>/fbib`
+      (SYSTEM_SPAWN_DIR), and zonePick ignores `<system>` so it never
+      auto-runs.
+    - Firing: Avatar posts it at walking pace only, on sand and snow (xim
+      `hasFootMark`), 0.06 above the collision floor (`?printlift=`). The
+      drawn ground is a few centimetres off the collision surface, and a
+      print at floor height was hidden.
+    - Turning: the post carries the walker's yaw; `System.heading` turns the
+      particle about the vertical, +π/2 (`?headoff=`).
+  - **Two xim rules found here, applied to triggered effects only so far.**
+    Both would change effects Ryan has already judged:
+    - **Curve start:** colour/alpha curves start from the particle's own
+      value, not the curve's first point (`ProgressValueUpdater
+      initialValueFn`; `sampleKeyFrames(…, first)`). fmrk's curve is 0 → 0
+      and only shows this way. A census of 8 zones found the first point
+      differs from tint alpha in 15-205 curves per zone: Castle Zvahl's 190
+      `effe/ligt` lamps, Bastok's smoke, Jugner's rain ripples, the thunder
+      `lig1`/`thd1`.
+    - **Rotation order:** setup flag 0x0200 rotates Z-Y-X, otherwise X-Y-Z
+      (`StandardParticleConfiguration.rotationOrder`). We use Z-Y-X for all,
+      which stood fmrk on edge.
+    - **Next step:** a sweep with both rules applied everywhere, for Ryan to
+      judge.
+  - **Footstep sounds.**
+    - Sound pointers are 0x3D blocks: `SeSep`, then a u32 id.
+      `ParsedZone.sounds` keeps them all, about 900 per zone. The file is
+      `sound*/win/se/se{id/1000:03}/se{id:06}.spw`; the sound folders overlay
+      like the ROM folders.
+    - `.spw` is `SeWave` (vgmstream meta/bgw.c init_vgmstream_spw): fields at
+      the BGW offsets minus 4, but channels at 0x2A and block align at
+      **0x2C** (0x2B is unknown, 0x10 for ADPCM). Codec 0 is the music's
+      PSX_cfg ADPCM; codec 1 PCM16LE; codec 3 ATRAC3 (not handled).
+      `lib/bgw.ts decodeSpw`.
+    - The name is `0` + ground type (hex) + two digits from the feet
+      equipment's info block (movement char, shake factor + 1; xim
+      `playFootEffect`). That block is not read, so everyone uses `11`.
+    - `lib/footstepSounds.ts` decodes once, caches, and plays through its own
+      AudioContext at Scene → Footstep volume (`footstepVolume`, default
+      0.6). App passes the install path (`setSoundRoot`).
+    - Measured (`?census=1` → `__sfx`): Western Altepa sand `0311` = se100008,
+      0.60 s, peak 0.073. Castle Zvahl stone `0511` = se100005, 0.82 s, peak
+      0.144. Same decoder as the music, which peaks near full scale, so these
+      levels are the recordings'.
+- **Still to do:** the footwear info block (boots vs sandals sound
+  different), and a "Triggered effects" Play list (doors, rainbow).
 - **Stage 2 plan (as written before building):**
   1. Load the system D3Ms too.
   2. Resolve triggered mesh links against them.

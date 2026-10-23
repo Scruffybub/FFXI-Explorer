@@ -18,6 +18,7 @@ import {
   DEFAULT_MUSIC, type MusicSettings,
 } from './lib/settings'
 import { ZoneMusicPlayer, type MusicStatus } from './lib/zoneMusic'
+import { setSoundRoot } from './lib/footstepSounds'
 import type { UpdateInfo } from '../../preload/index'
 
 /** Where the 'check for updates on startup' preference is remembered. */
@@ -31,6 +32,8 @@ type LoadState =
 
 export default function App() {
   const [ffxiPath, setFfxiPath] = useState<string | null>(null)
+  // Sound effects (footsteps) read from the same install.
+  useEffect(() => { setSoundRoot(ffxiPath) }, [ffxiPath])
   const [detecting, setDetecting] = useState(true)
   const [pickError, setPickError] = useState<string | null>(null)
 

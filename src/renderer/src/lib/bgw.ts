@@ -72,7 +72,57 @@ export interface DecodedAudio {
  */
 export function decodeBgw(buf: Uint8Array): DecodedAudio | null {
   const h = readBgwHeader(buf)
-  if (!h || h.codec !== 0) return null
+  return h ? decodeCodec0(buf, h) : null
+}
+
+/**
+ * A sound effect (.spw, magic SeWave): the music header with most fields 4
+ * bytes earlier; channels at 0x2A, block align at 0x2C (0x2B is unknown, 0x10
+ * for ADPCM). se100005.spw (a footstep): 2448 frames x 9 bytes + the 0x30
+ * header = its 22,080 bytes; 48 kHz mono, codec 0. Layout from vgmstream
+ * meta/bgw.c (init_vgmstream_spw): codec 0 the same ADPCM as the music, 1
+ * PCM16LE, 3 ATRAC3.
+ */
+export function readSpwHeader(buf: Uint8Array): BgwHeader | null {
+  if (buf.length < 0x30) return null
+  for (let i = 0; i < 6; i++) {
+    if (buf[i] !== 'SeWave'.charCodeAt(i)) return null
+  }
+  const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength)
+  return {
+    fileSize: dv.getUint32(0x08, true),
+    codec: dv.getUint32(0x0c, true),
+    trackId: dv.getUint32(0x10, true),
+    blockSize: dv.getUint32(0x14, true),
+    loopStart: dv.getInt32(0x18, true),
+    sampleRate: ((dv.getUint32(0x1c, true) + dv.getUint32(0x20, true)) >>> 0) & 0x7fffffff,
+    dataOffset: dv.getUint32(0x24, true),
+    channels: dv.getInt8(0x2a),
+    blockAlign: dv.getUint8(0x2c),
+  }
+}
+
+export function decodeSpw(buf: Uint8Array): DecodedAudio | null {
+  const h = readSpwHeader(buf)
+  if (!h) return null
+  if (h.codec === 1) return decodePcm16(buf, h)
+  return decodeCodec0(buf, h)
+}
+
+/** Codec 1: plain 16-bit little-endian PCM, channels interleaved per sample. */
+function decodePcm16(buf: Uint8Array, h: BgwHeader): DecodedAudio | null {
+  if (h.channels < 1 || h.channels > 2) return null
+  const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength)
+  const total = Math.floor((buf.length - h.dataOffset) / (2 * h.channels))
+  const channels = Array.from({ length: h.channels }, () => new Float32Array(total))
+  for (let i = 0; i < total; i++) {
+    for (let c = 0; c < h.channels; c++) channels[c][i] = dv.getInt16(h.dataOffset + (i * h.channels + c) * 2, true) / 32768
+  }
+  return { channels, sampleRate: h.sampleRate, loopStartSample: null }
+}
+
+function decodeCodec0(buf: Uint8Array, h: BgwHeader): DecodedAudio | null {
+  if (h.codec !== 0) return null
   if (h.channels < 1 || h.channels > 2) return null
   if (h.blockAlign < 2) return null
 

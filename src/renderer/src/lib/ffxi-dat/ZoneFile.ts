@@ -37,6 +37,8 @@ const BLOCK_SPRITE = 0x21
 const BLOCK_KEYFRAME = 0x19
 /** Environment records: sky gradient, lighting and fog, per weather and hour. */
 const BLOCK_ENVIRONMENT = 0x2F
+/** A sound pointer: "SeSep", then a u32 sound effect number. */
+const BLOCK_SOUND = 0x3D
 
 interface DatBlock {
   name: string
@@ -133,7 +135,22 @@ export interface SystemEffects {
    * — see the mesh fallback in parseZoneFile.
    */
   meshes: { name: string; mesh: ParsedD3m }[]
+  /**
+   * The few shared generators the viewer starts itself (SYSTEM_GENERATORS),
+   * raw, with their folder's KeyFrame curves by name. Only these: the file
+   * holds hundreds, and an auto-run one joined to a zone would start drawing.
+   */
+  generators: { name: string; dir: string; body: Uint8Array }[]
+  keyframes: Map<string, number[]>
 }
+
+/**
+ * Shared generators read from ROM/0/0.DAT, by folder/name: the footprint
+ * sand and snow leave (xim emitFootSteps: `fmrk`, walking only).
+ */
+const SYSTEM_GENERATORS = new Set(['syst/effe/fbib/fmrk'])
+/** The directory shared generators are filed under in a zone's spawns. */
+export const SYSTEM_SPAWN_DIR = '<system>/fbib'
 
 export function parseSystemEffects(buffer: ArrayBuffer): SystemEffects {
   const reader = new DatReader(buffer)
@@ -152,7 +169,22 @@ export function parseSystemEffects(buffer: ArrayBuffer): SystemEffects {
     const d = parseD3m(new Uint8Array(buffer, block.dataOffset + BLOCK_PADDING, len))
     if (d) meshes.push({ name: block.name.trim(), mesh: d })
   }
-  return { textures: parseTexturesFromDat(buffer), sprites, meshes }
+  const generators: SystemEffects['generators'] = []
+  const keyframes = new Map<string, number[]>()
+  const wanted = new Set([...SYSTEM_GENERATORS].map(k => k.slice(0, k.lastIndexOf('/'))))
+  for (const block of blocks) {
+    if (!wanted.has(block.dir)) continue
+    const len = block.dataLength - BLOCK_PADDING
+    if (len <= 0) continue
+    const body = new Uint8Array(buffer, block.dataOffset + BLOCK_PADDING, len)
+    if (block.type === BLOCK_GENERATOR && SYSTEM_GENERATORS.has(block.dir + '/' + block.name.trim())) {
+      generators.push({ name: block.name.trim(), dir: block.dir, body: body.slice() })
+    } else if (block.type === BLOCK_KEYFRAME) {
+      const curve = parseKeyFrames(body)
+      if (curve) keyframes.set(block.name.trim(), curve)
+    }
+  }
+  return { textures: parseTexturesFromDat(buffer), sprites, meshes, generators, keyframes }
 }
 
 /** The directory system sprites are filed under, apart from any zone's. */
@@ -685,6 +717,23 @@ export function parseZoneFile(
     }
     spawns.push({ generator: block.name.trim(), dir: block.dir, prefabIndices, ...raw, curves, todCurves })
   }
+  // The shared generators the viewer starts itself (the footprint), resolved
+  // against the shared sprites and meshes, under SYSTEM_SPAWN_DIR.
+  for (const g of system?.generators ?? []) {
+    const raw = parseModelSpawn(g.body)
+    if (!raw || raw.link === 'light' || raw.link === 'distortion') continue
+    const prefabIndices: number[] = []
+    for (let p = 0; p < prefabChunk.length && !prefabIndices.length; p++) {
+      if (prefabChunk[p] === raw.model && prefabDir[p] === SYSTEM_DIR && !!prefabs[p].sprite === (raw.link !== 'mesh')) prefabIndices.push(p)
+    }
+    if (!prefabIndices.length) { unresolvedSpawns++; continue }
+    const curves: GeneratorSpawn['curves'] = {}
+    for (const ch of ['alpha', 'u', 'v', 'r', 'g', 'b'] as const) {
+      const curve = raw.tracks[ch] ? system!.keyframes.get(raw.tracks[ch]!) : undefined
+      if (curve) curves[ch] = curve
+    }
+    spawns.push({ generator: g.name, dir: SYSTEM_SPAWN_DIR, prefabIndices, ...raw, curves, todCurves: {} })
+  }
   if (spawns.length || unresolvedSpawns) {
     console.log(`[GENSPAWN] ${spawns.length} model spawns resolved, ${unresolvedSpawns} unresolved; ${d3mCount} D3M effect meshes, ${spriteCount} sprites loaded (${systemSprites} shared)`)
   }
@@ -716,8 +765,17 @@ export function parseZoneFile(
     if (m && prefabDir[p] !== SYSTEM_DIR) prefabs[p].weatherState = m[1]
   }
 
+  const sounds: NonNullable<ParsedZone['sounds']> = []
+  for (const block of blocks.filter(b => b.type === BLOCK_SOUND)) {
+    const at = block.dataOffset + BLOCK_PADDING
+    if (block.dataLength - BLOCK_PADDING < 12) continue
+    const tag = String.fromCharCode(...new Uint8Array(buffer, at, 5))
+    if (tag !== 'SeSep') continue
+    sounds.push({ dir: block.dir, name: block.name.trim(), id: new DataView(buffer).getUint32(at + 8, true) })
+  }
+
   return {
-    prefabs, instances, textures, textureNames, collision, spawns, environment,
+    prefabs, instances, textures, textureNames, collision, spawns, environment, sounds,
     shared: { prefabs: systemSprites, textures: systemTextures },
   }
 }

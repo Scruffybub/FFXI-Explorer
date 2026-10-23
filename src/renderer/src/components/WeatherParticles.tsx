@@ -59,6 +59,8 @@ const MIST_STRENGTH = (() => {
 const isMist = (sp: GeneratorSpawn) =>
   sp.link === 'sprite' && (sp.billboard & 1) !== 0 && Math.max(...sp.scale.map(Math.abs)) >= 2
 const FLIP = new THREE.Matrix4().makeRotationX(Math.PI)
+/** Turns a headed particle (the footprint) from its authored facing to the walker's. */
+const HEADING_OFFSET = Number(typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('headoff') : null) || Math.PI / 2
 
 const decode = (c: number) => (c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4))
 
@@ -94,6 +96,8 @@ interface System {
   scl: Float32Array
   rot: Float32Array
   born: Float32Array
+  /** A world heading a triggered post gave the particle (a footprint), NaN for none. */
+  heading: Float32Array
   /** 1 once a particle's expiry has been handled (its children started). */
   expired: Uint8Array
   /** A flipbook's frames, as uv offsets from frame 0; null for one frame. */
@@ -122,7 +126,8 @@ function weatherPick(state: string): (sp: GeneratorSpawn) => boolean {
  * door effects never set the auto-run flag; they wait to be triggered.
  */
 const zonePick = (sp: GeneratorSpawn) =>
-  sp.emission.autoRun && sp.attach === 0 && !sp.followCamera && !/(^|\/)weat(\/|$)/.test(sp.dir)
+  sp.emission.autoRun && sp.attach === 0 && !sp.followCamera && !/(^|\/)weat(\/|$)/.test(sp.dir) &&
+  !sp.dir.startsWith('<system>')
 
 /**
  * The zone's mesh effects that Zone effects draws: lamp glows and light cones,
@@ -398,6 +403,7 @@ function buildSystems(
       pos: new Float32Array(capacity * 3), vel: new Float32Array(capacity * 3),
       scl: new Float32Array(capacity * 3), rot: new Float32Array(capacity * 3),
       born: new Float32Array(capacity).fill(-Infinity),
+      heading: new Float32Array(capacity).fill(NaN),
       expired: new Uint8Array(capacity),
       frameOffsets, uvOffset, scrolls,
     })
@@ -518,7 +524,7 @@ export function TriggeredEffects({ zone }: { zone: ParsedZone }) {
   })
   return <ParticleField systems={systems} weather={false} triggered />
 }
-const TRIGGERED = /(^|\/)(fses\/fefs|fser\/fefr)$/
+const TRIGGERED = /(^|\/)(fses\/fefs|fser\/fefr)$|^<system>\/fbib$/
 
 /** The folder holding a zone's footstep effects, walking or running. */
 export function footstepDir(zone: ParsedZone, running: boolean): string | null {
@@ -612,6 +618,7 @@ function ParticleField({ systems, weather, range = 1, triggered = false }: {
               }
               s.born[i] = ev.frame
               s.expired[i] = 0
+              s.heading[i] = ev.yaw ?? NaN
             }
             for (const name of sp.children.birth) childEvents.push({ name, dir: sp.dir, frame: ev.frame, at: ev.at.clone() })
           }
@@ -709,8 +716,11 @@ function ParticleField({ systems, weather, range = 1, triggered = false }: {
         // 0x0B: turns per frame (Bastok Markets' windmill).
         for (let c = 0; c < 3; c++) s.rot[i * 3 + c] += sp.spin[c] * dt
 
+        // Triggered effects start the curve from the tint's own alpha (xim's
+        // rule; see sampleKeyFrames). Not yet for the rest: it would change
+        // 190 of Castle Zvahl's lamp curves and Bastok's smoke — Ryan to judge.
         const a = sp.curves.alpha
-          ? (sampleKeyFrames(sp.curves.alpha, age / life) * 255) / 128
+          ? (sampleKeyFrames(sp.curves.alpha, age / life, triggered ? sp.tint[3] / 255 : undefined) * 255) / 128
           : sp.tint[3] / 128
         // DAT → world: x, -y, -z; camera followers ride the camera.
         tmp.p.set(s.pos[i * 3], -s.pos[i * 3 + 1], -s.pos[i * 3 + 2])
@@ -737,10 +747,18 @@ function ParticleField({ systems, weather, range = 1, triggered = false }: {
           tmp.q.setFromEuler(tmp.e)
           tmp.m.compose(tmp.zero, tmp.q, tmp.s).premultiply(FLIP).premultiply(tmp.rot.makeRotationFromQuaternion(tmp.yaw)).setPosition(tmp.p)
         } else {
-          tmp.e.set(s.rot[i * 3], s.rot[i * 3 + 1], s.rot[i * 3 + 2], 'ZYX')
+          // xim: setup flag 0x0200 rotates Z-Y-X, otherwise X-Y-Z. The
+          // footprint (no flag) lies flat only in X-Y-Z; Z-Y-X stood it on
+          // edge. Every effect still takes Z-Y-X except the triggered ones, so
+          // nothing already judged changes — the rest is Ryan's to see.
+          const order = triggered && !(sp.billboard & 0x0200) ? 'XYZ' : 'ZYX'
+          tmp.e.set(s.rot[i * 3], s.rot[i * 3 + 1], s.rot[i * 3 + 2], order)
           tmp.q.setFromEuler(tmp.e)
-          // FLIP · R · S in DAT terms, placed at the world point.
-          tmp.m.compose(tmp.zero, tmp.q, tmp.s).premultiply(FLIP).setPosition(tmp.p)
+          // FLIP · R · S in DAT terms, placed at the world point — turned
+          // about the vertical first when a post gave it a heading.
+          tmp.m.compose(tmp.zero, tmp.q, tmp.s).premultiply(FLIP)
+          if (!Number.isNaN(s.heading[i])) tmp.m.premultiply(tmp.rot.makeRotationY(s.heading[i] + HEADING_OFFSET))
+          tmp.m.setPosition(tmp.p)
         }
         s.mesh.setMatrixAt(drawn, tmp.m)
         const sf = sp.screenFlash

@@ -236,6 +236,12 @@ export interface ParsedZone {
    */
   environment: ZoneEnvRecord[]
   collision: ParsedCollision | null // MZB collision mesh, raw DAT space
+  /**
+   * Sound pointers (block 0x3D, "SeSep"): a sound effect number by folder and
+   * name. The file is sound*\/win/se/se{id/1000}/se{id}.spw. The footsteps'
+   * are in fses (`0T11`..: ground type, then the footwear's two digits).
+   */
+  sounds?: { dir: string; name: string; id: number }[]
 }
 
 export interface AnimationBone {

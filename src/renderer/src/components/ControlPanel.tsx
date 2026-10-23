@@ -1113,6 +1113,14 @@ export default function ControlPanel({
             info="How many of the nearest lamps Dynamic lighting turns into real lights. More lights the room further out, but each one costs frame rate: in Castle Zvahl, 12 lights cost about a quarter of it. The scene pauses briefly when this changes while the lighting is rebuilt."
           />
         )}
+        {scene.zoneEffects && (
+          <Slider
+            label="Footstep volume" value={scene.footstepVolume} min={0} max={1} step={0.05}
+            format={v => (v === 0 ? 'Off' : `${Math.round(v * 100)}%`)}
+            onChange={v => onScene({ footstepVolume: v })}
+            info="In Walk mode, the zone's own footstep sounds as your feet land: sand, grass, stone, wood, metal, snow and water each sound different, as in game. 0 turns them off. The dust, splashes and footprints play whatever this is set to."
+          />
+        )}
         {scene.zoneEffects && lit && (
           <Slider
             label="Lamp shadows"
