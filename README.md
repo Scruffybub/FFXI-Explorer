@@ -1,4 +1,4 @@
-**Work in progress** — the rough edges as of 0.1.9:
+**Work in progress** — the rough edges as of 0.1.10:
 
 **Water (beta)** - Scene → Generator water draws the game's own water, waves and foam. Most zones match the game; Foret de Hennetiel's sea and rivers do not yet. It is off by default.
 
@@ -22,7 +22,7 @@ Everything is read straight out of your own local FFXI installation. Nothing is
 uploaded, and no server or account is involved. The only network request it ever
 makes is an optional check for a newer version — see [Updates](#updates).
 
-![Version](https://img.shields.io/badge/version-0.1.9-blue) ![Platform](https://img.shields.io/badge/platform-Windows-lightgrey)
+![Version](https://img.shields.io/badge/version-0.1.10-blue) ![Platform](https://img.shields.io/badge/platform-Windows-lightgrey)
 
 ---
 
