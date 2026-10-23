@@ -1805,6 +1805,17 @@ function RenderTuning() {
   return null
 }
 const ALL_LAYERS = 0xffffffff | 0
+/**
+ * Prefabs whose materials would come out identical share one: same texture,
+ * blend flag, overlay test and transparency-rule kind (cutout, blend, solid);
+ * everything else that shapes the material is zone-wide. three draws sorted by
+ * material, so a town's ~1,200 materials collapsing to a few hundred means far
+ * fewer uniform refreshes and texture binds per frame. Off under the per-mesh
+ * experiments (?matprofile, ?blendexp, ?pick with ?blend), which adjust each
+ * prefab's material, and with ?noshare=1 for comparisons.
+ */
+const SHARE_MATERIALS = typeof window !== 'undefined' &&
+  !new URLSearchParams(window.location.search).has('noshare') && !MAT_PROFILE && !BLEND_EXP && !(PICK && BLEND_MODE)
 /** Diagnostic: ?norendertune=1 leaves RenderTuning and n8aoOpaqueOnly off, for before/after comparisons. */
 const NO_RENDER_TUNE = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('norendertune')
 
@@ -3143,6 +3154,15 @@ export default function ZoneViewer({
       if (count > bestUsage) { bestUsage = count; fallbackTextureIndex = idx }
     }
 
+    const textureCache = new Map<object, THREE.DataTexture>()
+    const sharedMaterials = new Map<string, THREE.Material>()
+    const textureIds = new Map<object, number>()
+    const textureId = (t: object) => {
+      let id = textureIds.get(t)
+      if (id === undefined) { id = textureIds.size; textureIds.set(t, id) }
+      return id
+    }
+    let sharedHits = 0
     for (let prefabIdx = 0; prefabIdx < zoneData.prefabs.length; prefabIdx++) {
       const prefab = zoneData.prefabs[prefabIdx]
       // Weather geometry is now *built* rather than skipped, and tagged with
@@ -3387,9 +3407,12 @@ export default function ZoneViewer({
         unresolvedTextures++
         tex = zoneData.textures[fallbackTextureIndex]
       }
-      let texture: THREE.DataTexture | null = null
-      if (tex) {
+      // One GPU texture per zone texture. Each prefab used to build its own
+      // copy — Bastok Markets uploaded ~1,200 for its 85 sheets.
+      let texture: THREE.DataTexture | null = (tex && textureCache.get(tex)) ?? null
+      if (tex && !texture) {
         texture = new THREE.DataTexture(new Uint8Array(tex.rgba), tex.width, tex.height, THREE.RGBAFormat)
+        textureCache.set(tex, texture)
         // Repeat is correct. Clamping meshes whose UVs run past 0..1 was tried
         // for South Gustaberg's mismatched ground tiles and made things worse:
         // cliff faces smeared into long streaks, so that overflow is genuine
@@ -3779,6 +3802,21 @@ export default function ZoneViewer({
           blendApplied++
         }
 
+        // Shared: a prefab whose material would come out identical to one
+        // already built takes that one (see SHARE_MATERIALS). The new one has
+        // not been compiled yet, so dropping it costs nothing.
+        const ruleKind = !zoneRule ? '-' : (prefab.meshName ?? '').startsWith('_') ? 'cut'
+          : ((prefab.blending >>> 0) & 0x8000) ? 'blend' : 'solid'
+        const shareKey = SHARE_MATERIALS && tex
+          ? [textureId(tex), prefab.blending > 0, isOverlay, ruleKind].join('|') : ''
+        const shared = shareKey ? sharedMaterials.get(shareKey) : undefined
+        if (shared) {
+          mat.dispose()
+          matMap.set(prefabIdx, shared)
+          sharedHits++
+          continue
+        }
+        if (shareKey) sharedMaterials.set(shareKey, mat)
         if (lit) litMaterials.push(mat as THREE.MeshStandardMaterial)
         // Under the FFXI rule, meshes whose alpha is real must keep it.
         // patchZoneShader otherwise forces every texel that is not near-black to
@@ -3861,6 +3899,7 @@ export default function ZoneViewer({
       instancedMeshes.push(mesh)
     }
 
+    console.log(`[SHARE] ${textureCache.size} textures, ${sharedMaterials.size} shared materials, ${sharedHits} prefabs reused one`)
     if (alphaMode !== 'off') console.log('[VALPHA] mode=' + alphaMode + ' overlay meshes ' + overlayMeshes + ' of ' + zoneData.prefabs.length)
     if (UV_FIX) console.log('[UVFIX] slid ' + uvFixed + ' straddling meshes back inside 0..1')
     if (degenerateNormals > 0) {

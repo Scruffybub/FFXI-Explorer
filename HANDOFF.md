@@ -3661,10 +3661,44 @@ rather than solved.
           getProgram at all. setProgram 14%, renderBufferDirect,
           refreshUniformsCommon, bindTexture and bindVertexArray dominate:
           the per-draw cost of ~1,200 materials over ~1,300 draws.
-        - **Stage 2:** share one material between prefabs with the same
-          texture and flags, and merge single-instance prefabs that share a
-          material into one static mesh. Watch the per-instance `aLamps` and
-          the overlay order.
+        - **Stage 2 done, 2026-10-23: shared textures and materials.**
+          - **Textures:** every prefab used to build its own DataTexture, so
+            Bastok uploaded ~1,200 copies of its sheets. Now one per zone
+            texture (`textureCache`).
+          - **Materials:** prefabs whose material would be identical share one
+            (`SHARE_MATERIALS`). The key is texture, `blending > 0`, isOverlay,
+            and the rule kind (cut/blend/solid); everything else that shapes
+            the material is zone-wide. Off under ?matprofile, ?blendexp,
+            ?pick+?blend (per-mesh experiments), and with `?noshare=1`.
+            Bastok Markets: 1,165 of its prefabs reuse one of 142 materials
+            over 113 textures (`[SHARE]` log). No code mutates a prefab's
+            material after the build (checked); generator water builds its
+            own scrolling textures.
+          - **Image diffs** against `?noshare=1`, full frame: Bastok 0.000 of
+            255 (a few dozen single pixels where coplanar draw order
+            changed), Gustaberg 0.136 (noise 0.128), Windurst with effects
+            0.009 (0.012), Lufaise 0.012 (0.012), West Ronfaure in Dynamic
+            0.000.
+          - **Packaged, same 8 zones,** fps stage 1 → stage 2 (XMV):
+
+            | Zone | Stage 1 | Stage 2 | XMV |
+            |---|---|---|---|
+            | West Ronfaure | 424 | 350-369 | 48 |
+            | Bastok Markets | 91 | 145 | 127 |
+            | Whitegate | 105 | 177 | 54 |
+            | Castle Zvahl Keep | 343 | 429 | 137 |
+            | Reisenjima | 131 | 164 | 43 |
+            | Outer Ra'Kaznar | 223 | 299 | 23 |
+            | Tavnazian Safehold | 182 | 291 | 228 |
+            | Lower Jeuno | 277 | 316 | 150 |
+
+            West Ronfaure's ~1.4 ms frames vary run to run; its CPU per
+            frame fell 1.6 → 1.1 ms.
+          - **Ahead of XMV in all 8.** Memory per zone fell from 1.6-2.5 GB
+            to 1.1-1.25 GB (lead 2 above, largely).
+        - **Not done, if more is wanted:** merge single-instance prefabs that
+          share a material into one static mesh. Watch the per-instance
+          `aLamps` and the overlay order.
   - **Map maker research, 2026-10-21.** A quick search found no tool
     that builds new FFXI zones. The developers once planned a player dungeon
     maker and never shipped it. What does exist is map *drawing*: Remapster
