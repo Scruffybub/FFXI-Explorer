@@ -100,6 +100,9 @@ interface System {
   born: Float32Array
   /** A world heading a triggered post gave the particle (a footprint), NaN for none. */
   heading: Float32Array
+  /** A beam's frame from its post (ChildEvent basis): DAT yaw (NaN for none) and X stretch. */
+  basisYaw: Float32Array
+  stretch: Float32Array
   /** 1 once a particle's expiry has been handled (its children started). */
   expired: Uint8Array
   /** A flipbook's frames, as uv offsets from frame 0; null for one frame. */
@@ -408,6 +411,8 @@ function buildSystems(
       scl: new Float32Array(capacity * 3), rot: new Float32Array(capacity * 3),
       born: new Float32Array(capacity).fill(-Infinity),
       heading: new Float32Array(capacity).fill(NaN),
+      basisYaw: new Float32Array(capacity).fill(NaN),
+      stretch: new Float32Array(capacity).fill(1),
       expired: new Uint8Array(capacity),
       frameOffsets, uvOffset, scrolls,
     })
@@ -782,17 +787,28 @@ function ParticleField({ systems, weather, range = 1, triggered = false, running
               const i = e.first + e.cursor
               e.cursor = (e.cursor + 1) % e.capacity
               spreadOffset(sp.spread, tmp.off)
-              s.pos[i * 3] = ev.at.x + sp.position[0] + tmp.off.x
-              s.pos[i * 3 + 1] = -ev.at.y + sp.position[1] + tmp.off.y
-              s.pos[i * 3 + 2] = -ev.at.z + sp.position[2] + tmp.off.z
+              tmp.off.x += sp.position[0]; tmp.off.y += sp.position[1]; tmp.off.z += sp.position[2]
               for (let c = 0; c < 3; c++) {
                 s.vel[i * 3 + c] = sp.velocity[c] + sp.velocityVariance[c] * rand()
                 s.scl[i * 3 + c] = sp.scale[c] + sp.scaleVariance[c] * Math.random()
                 s.rot[i * 3 + c] = sp.rotation[c] + sp.rotationVariance[c] * rand()
               }
+              // A beam: offset and velocity in its stretched, turned frame.
+              const b = ev.basis
+              if (b) {
+                const c = Math.cos(b.yaw), sn = Math.sin(b.yaw)
+                const turn = (x: number, z: number): [number, number] => [x * b.length * c + z * sn, -x * b.length * sn + z * c]
+                ;[tmp.off.x, tmp.off.z] = turn(tmp.off.x, tmp.off.z)
+                ;[s.vel[i * 3], s.vel[i * 3 + 2]] = turn(s.vel[i * 3], s.vel[i * 3 + 2])
+              }
+              s.pos[i * 3] = ev.at.x + tmp.off.x
+              s.pos[i * 3 + 1] = -ev.at.y + tmp.off.y
+              s.pos[i * 3 + 2] = -ev.at.z + tmp.off.z
               s.born[i] = ev.frame
               s.expired[i] = 0
               s.heading[i] = ev.yaw ?? NaN
+              s.basisYaw[i] = b ? b.yaw : NaN
+              s.stretch[i] = b ? b.length : 1
             }
             for (const name of sp.children.birth) childEvents.push({ name, dir: sp.dir, frame: ev.frame, at: ev.at.clone() })
           }
@@ -907,6 +923,16 @@ function ParticleField({ systems, weather, range = 1, triggered = false, running
         const ddk = !dd || range === 0 ? 1 : fallOff(tmp.p.distanceTo(camera.position), dd.near * range, dd.far * range)
         if (ddk <= 0) continue
         tmp.s.set(s.scl[i * 3], s.scl[i * 3 + 1], s.scl[i * 3 + 2])
+        // Scale curves set the size outright over the particle's life, from
+        // its own scale (xim ProgressValueUpdater 0x15-0x17). The casting
+        // circle's light streaks are born 0.1 x 0 and grow by them. Triggered
+        // effects only: zone effects never had them, and a sweep comes first.
+        if (triggered && (sp.curves.scaleX || sp.curves.scaleY || sp.curves.scaleZ)) {
+          const k = Math.min(1, age / life)
+          if (sp.curves.scaleX) tmp.s.x = sampleKeyFrames(sp.curves.scaleX, k, tmp.s.x)
+          if (sp.curves.scaleY) tmp.s.y = sampleKeyFrames(sp.curves.scaleY, k, tmp.s.y)
+          if (sp.curves.scaleZ) tmp.s.z = sampleKeyFrames(sp.curves.scaleZ, k, tmp.s.z)
+        }
         if (sp.billboard & 1) {
           tmp.m.compose(tmp.p, camera.quaternion, tmp.s).multiply(FLIP)
         } else if (sp.emission.batched && camRel) {
@@ -929,7 +955,13 @@ function ParticleField({ systems, weather, range = 1, triggered = false, running
           tmp.q.setFromEuler(tmp.e)
           // FLIP · R · S in DAT terms, placed at the world point — turned
           // about the vertical first when a post gave it a heading.
-          tmp.m.compose(tmp.zero, tmp.q, tmp.s).premultiply(FLIP)
+          tmp.m.compose(tmp.zero, tmp.q, tmp.s)
+          // A beam's frame, in DAT terms before the flip: stretched along X,
+          // then turned about Y toward the other actor.
+          if (!Number.isNaN(s.basisYaw[i])) {
+            tmp.m.premultiply(tmp.rot.makeScale(s.stretch[i], 1, 1)).premultiply(tmp.rot.makeRotationY(s.basisYaw[i]))
+          }
+          tmp.m.premultiply(FLIP)
           if (!Number.isNaN(s.heading[i])) tmp.m.premultiply(tmp.rot.makeRotationY(s.heading[i] + HEADING_OFFSET))
           tmp.m.setPosition(tmp.p)
         }

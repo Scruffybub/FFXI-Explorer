@@ -3935,10 +3935,32 @@ rather than solved.
       `hit3`, green, scale 0.1 x 0) emits at the caster's feet but I could
       not see it; check scale curves and whether a y-scale of 0 flattens a
       mesh drawn in XY.
-  - **Stage 2, still to do:** facing (attach-source-oriented flag), beams
-    (attach 3 now starts at the caster, not yet stretched to the target),
-    the circle check above, songs' and geomancy's casts (op 0x76). Stage 3:
-    abilities, weapon skills, monster moves. Later: cast in zones.
+  - **Stage 2, third part (2026-10-24): circle, beams, facing.**
+    - **The casting circle was invisible for want of scale curves.** Its
+      streaks (`gn20`, D3M `hit3`: a quad 0.5 x 1) are born 0.1 x 0 and grow
+      by keyframes `kn20`/`kn21` (tracks scaleX/scaleY; xim
+      ProgressValueUpdater 0x15-0x17: the value is the scale, from the
+      particle's own). ZoneFile now keeps scaleX/Y/Z curves; ParticleField
+      applies them to **triggered** systems only (zone effects never had
+      them: sweep first). The chant's rising streaks, the release columns and
+      Fire's burst are much fuller for it.
+    - **Beams:** attach 3 (caster → target) and 6 (target → caster) post a
+      `basis` (ChildEvent): DAT yaw toward the other actor's joint and the
+      distance. Offsets and velocities are stretched along X and turned; the
+      mesh is too (Sx · then Ry, before the flip). Drain's energy crosses to
+      the caster; Cursed Sphere's dark ball crosses to the target.
+    - **Facing:** attach 1/4/5/9 take the caster's turn as a basis of length
+      1 (xim updateAssociatedFacing).
+    - **The caster faced away since stage 1.** Models face their own +X
+      once upright (joint 23, "in front", is 1.2 out along +X; the walking
+      Avatar says the same); a half turn judged by eye in stage 1 turned the
+      caster round. Caster yaw is 0, the target's π. Cursed Sphere's vortex
+      exposed it (it formed "behind").
+    - Checked: Cure, Fire, Drain, Cursed Sphere.
+  - **Stage 2, still to do:** songs' and geomancy's casts (op 0x76), pitch in
+    beams (yaw only now), accelerations in a beam's frame. Stage 3:
+    abilities, weapon skills, monster moves. Later: cast in zones; the
+    scale-curve and ring sweep for zone effects.
 
 - **Zone sounds — built 2026-10-24.** Panel → **Sound** (was Music) →
   *Zone sounds* (off by default, like the music) and *Sound volume*

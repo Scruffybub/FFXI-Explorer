@@ -33,14 +33,15 @@ import { GAMMA_BLEND_LAYER } from '../lib/GammaBlendPass'
  *              reaction `mdam`) are skipped.
  *   sound      play its sound pointer
  *
- * Before the script, the caster casts: its magic type's start motion, then
- * the loop for CAST_SECONDS, and the release as the script starts (motions
- * from the race file, characterModel loadCastClips). Joints are read from
- * the live pose. Rings (link 0x24) are built by ZoneFile.
+ * Before the script, the caster casts: the race file's cast routine for the
+ * magic type (chant motion, casting circle) runs for CAST_SECONDS; the
+ * spell's script then calls the release routines. Every motion is one a
+ * routine names (characterModel loadCastClips). Joints are read from the
+ * live pose. Rings (link 0x24) are built by ZoneFile.
  *
- * Not yet (2026-10-24): facing, caster-to-target beams (placed at the
- * target), the shared routines (damage reaction, cast circle), songs' and
- * geomancy's motions, distortion and weighted meshes.
+ * Beams (attach 3/6) are stretched between the actors and caster-attached
+ * effects turn with the caster (ChildEvent basis). Not yet (2026-10-24):
+ * songs' and geomancy's casts, pitch in beams, distortion and weighted meshes.
  */
 
 const EFFECT_FPS = 60
@@ -65,6 +66,8 @@ export interface EffectBundle {
 /** One placed actor: where its joints are in the world, and what it plays. */
 interface Stage {
   joint(index: number, out: THREE.Vector3): THREE.Vector3
+  /** How far the model is turned about the vertical, world radians. */
+  yaw: number
   /**
    * Plays a motion now: looping, held on its last frame until told otherwise,
    * or once and then back to idle.
@@ -119,6 +122,7 @@ function Actor({ model, idle, x, yaw, onStage }: {
       .multiply(new THREE.Matrix4().makeTranslation(0, -lift, 0))
     const refs = model.skeleton?.jointRefs ?? []
     onStage({
+      yaw,
       joint(index, out) {
         const ref = refs[index]
         const m = ref ? (pose.current ?? model.skeleton?.matrices)?.[ref.bone] : undefined
@@ -178,6 +182,8 @@ interface Sequence {
 interface Running {
   spawn: GeneratorSpawn
   at: THREE.Vector3
+  /** A beam's frame (attach 3 and 6), ChildEvent basis. */
+  basis?: { yaw: number; length: number }
   next: number
   until: number
 }
@@ -270,11 +276,25 @@ function EffectRunner({ sources, castRoutine, caster, target, playId, volume, ca
         for (const sp of found.hits) {
           // Attach (xim AttachType): 1 caster, 2 target, 3 caster-to-target
           // beam (from the caster), 5 caster facing the target, 6
-          // target-to-caster (at the target), 9 the caster's weapon.
+          // target-to-caster beam (from the target), 9 the caster's weapon.
           const onCaster = sp.attach === 1 || sp.attach === 3 || sp.attach === 5 || sp.attach === 9
           const actor = onCaster ? seq.caster : seq.target
           const where = actor.joint(onCaster ? sp.joints[0] : sp.joints[1], tmp).clone()
-          running.current.push({ spawn: sp, at: where, next: at, until: at + Math.max(cmd.duration, 0) })
+          // A beam runs from this joint to the other actor's: its frame's X
+          // axis spans the gap (world to DAT: x, -y, -z, so DAT yaw is
+          // atan2(world dz, world dx)).
+          let basis: Running['basis']
+          if (sp.attach === 3 || sp.attach === 6) {
+            const other = (onCaster ? seq.target : seq.caster).joint(onCaster ? sp.joints[1] : sp.joints[0], new THREE.Vector3())
+            const d = other.sub(where)
+            basis = { yaw: Math.atan2(d.z, d.x), length: Math.max(d.length(), 0.01) }
+          } else if (sp.attach === 1 || sp.attach === 4 || sp.attach === 5 || sp.attach === 9) {
+            // Turned with the caster (xim updateAssociatedFacing), so an effect
+            // authored in front of it stays in front however the model is
+            // turned. A world turn about Y is the opposite turn in DAT axes.
+            basis = { yaw: -seq.caster.yaw, length: 1 }
+          }
+          running.current.push({ spawn: sp, at: where, basis, next: at, until: at + Math.max(cmd.duration, 0) })
           log.current.started.push(cmd.ref)
         }
         const sounds = find.ambient(seq.src, seq.routine.dir, cmd.ref).hits
@@ -320,7 +340,7 @@ function EffectRunner({ sources, castRoutine, caster, target, playId, volume, ca
     // Emit: one post per interval while running (a zero duration, one post).
     for (const r of running.current) {
       while (r.next <= now && r.next <= r.until) {
-        childEvents.push({ name: r.spawn.generator, dir: r.spawn.dir, frame: r.next, at: r.at })
+        childEvents.push({ name: r.spawn.generator, dir: r.spawn.dir, frame: r.next, at: r.at, basis: r.basis })
         r.next += Math.max(1, r.spawn.emission.every)
       }
     }
@@ -373,9 +393,11 @@ export function EffectViewer({ caster, cast, target, effect, playId, settings, v
       />
       <directionalLight position={[-4, 2, -3]} intensity={settings.fillIntensity} />
       {settings.showGround && <gridHelper args={[24, 24, '#3a4152', '#242a36']} />}
-      {/* Both turned half round to face each other: player and monster
-          models face opposite ways as authored (checked by eye, 2026-10-24). */}
-      {caster && <Actor model={caster} idle={cast?.idle ?? NONE} x={-SPACING / 2} yaw={Math.PI} onStage={setCasterStage} />}
+      {/* Models face their own +X once upright (the skeleton's joint 23, "in
+          front", is 1.2 out along it): the caster as authored looks at the
+          target, and the target, turned half round, back at it. A half turn
+          on the caster too (judged by eye, stage 1) had it facing away. */}
+      {caster && <Actor model={caster} idle={cast?.idle ?? NONE} x={-SPACING / 2} yaw={0} onStage={setCasterStage} />}
       {target && <Actor model={target} idle={targetIdle} x={SPACING / 2} yaw={Math.PI} onStage={setTargetStage} />}
       {effect && (
         <>

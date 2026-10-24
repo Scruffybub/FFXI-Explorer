@@ -753,7 +753,7 @@ export function parseZoneFile(
     }
     if (prefabIndices.length === 0) { unresolvedSpawns++; continue }
     const curves: GeneratorSpawn['curves'] = {}
-    for (const ch of ['alpha', 'u', 'v', 'r', 'g', 'b'] as const) {
+    for (const ch of ['alpha', 'u', 'v', 'r', 'g', 'b', 'scaleX', 'scaleY', 'scaleZ'] as const) {
       const id = raw.tracks[ch]
       const curve = id ? findCurve(block.dir, id) : undefined
       if (curve) curves[ch] = curve
@@ -777,7 +777,7 @@ export function parseZoneFile(
     }
     if (!prefabIndices.length) { unresolvedSpawns++; continue }
     const curves: GeneratorSpawn['curves'] = {}
-    for (const ch of ['alpha', 'u', 'v', 'r', 'g', 'b'] as const) {
+    for (const ch of ['alpha', 'u', 'v', 'r', 'g', 'b', 'scaleX', 'scaleY', 'scaleZ'] as const) {
       const curve = raw.tracks[ch] ? system!.keyframes.get(raw.tracks[ch]!) : undefined
       if (curve) curves[ch] = curve
     }

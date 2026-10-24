@@ -168,7 +168,7 @@ export interface GeneratorSpawn {
    * progress. Only the channels the renderer uses are resolved. `alpha` is the
    * tint alpha on the 0..1 = byte/255 scale; `u`/`v` add to the texture offset.
    */
-  curves: { alpha?: number[]; u?: number[]; v?: number[]; r?: number[]; g?: number[]; b?: number[] }
+  curves: { alpha?: number[]; u?: number[]; v?: number[]; r?: number[]; g?: number[]; b?: number[]; scaleX?: number[]; scaleY?: number[]; scaleZ?: number[] }
   attach: number                          // 0xE sun, 0xF moon, 0 none (body[0] low nibble); 1 caster, 2 target
   /** Joint references on the caster and the target (GeneratorParser). */
   joints: [number, number]

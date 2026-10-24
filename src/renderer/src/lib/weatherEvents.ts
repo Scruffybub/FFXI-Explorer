@@ -20,6 +20,12 @@ export interface ChildEvent {
   at: THREE.Vector3
   /** A heading to turn the particles to, world radians (a footprint). */
   yaw?: number
+  /**
+   * A beam's frame (xim SourceToTargetBasis / TargetToSourceBasis): the
+   * particles' X axis stretched to `length` and turned to `yaw` (DAT space,
+   * about Y), so one crossing X from 0 to 1 travels from one actor to the other.
+   */
+  basis?: { yaw: number; length: number }
 }
 
 export const childEvents: ChildEvent[] = []
