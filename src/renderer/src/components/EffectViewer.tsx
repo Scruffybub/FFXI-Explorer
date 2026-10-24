@@ -59,8 +59,10 @@ export interface EffectBundle {
   /** The caster race's file (cast and release routines) and the shared ROM/0/0.DAT, read the same way. */
   race: ParsedZone | null
   shared: ParsedZone | null
-  /** The race's cast routine for the spell's magic type (spellList castRoutine). */
+  /** The race's cast routine for the spell's magic type (spellList castRoutine); none for skills. */
   castRoutine: string | null
+  /** Motions in the effect file itself: a weapon skill's own (Fast Blade b00?, b02?). */
+  motions: ParsedAnimation[]
 }
 
 /** One placed actor: where its joints are in the world, and what it plays. */
@@ -198,8 +200,10 @@ interface RunLog { started: string[]; skipped: string[]; sounds: number[]; routi
  * `eis?`, hit sparks). A routine's names are looked for in its own file
  * first, then in the others in that order.
  */
-function EffectRunner({ sources, castRoutine, caster, target, playId, volume, cast }: {
+function EffectRunner({ sources, castRoutine, ownMotions, caster, target, playId, volume, cast }: {
   sources: ParsedZone[]
+  /** Motions the effect file carries, looked for before the race file's. */
+  ownMotions: ParsedAnimation[]
   /** The race's cast routine for this magic type (`cawh`, `cabk`...), or null. */
   castRoutine: string | null
   caster: Stage | null
@@ -322,10 +326,11 @@ function EffectRunner({ sources, castRoutine, caster, target, playId, volume, ca
         // the next (white magic's raised hand waits for its recovery) — or
         // loops when the family has no stage 0 (singing is sk1, then sk2).
         const prefix = cmd.ref.replace(/\?$/, '')
-        const clips = cast?.motions.filter(c => c.name.startsWith(prefix)) ?? []
+        const pool = [...ownMotions, ...(cast?.motions ?? [])]
+        const clips = pool.filter(c => c.name.startsWith(prefix))
         if (!clips.length) { log.current.skipped.push('motion ' + cmd.ref); return }
         const stage = prefix[2]
-        const hasStart = !!cast?.motions.some(c => c.name.startsWith(prefix.slice(0, 2) + '0'))
+        const hasStart = pool.some(c => c.name.startsWith(prefix.slice(0, 2) + '0'))
         seq.caster.play(clips, stage === '0' || (stage === '1' && !hasStart) ? 'loop' : stage === '2' ? 'once' : 'hold')
       } else if (cmd.kind === 'sound') {
         const s = find.sound(seq.src, seq.routine.dir, cmd.ref).hits[0]
@@ -412,7 +417,7 @@ export function EffectViewer({ caster, cast, target, effect, playId, settings, v
           <EffectParticles key={effect.path} effect={effect.zone} />
           {effect.race && <EffectParticles effect={effect.race} />}
           {effect.shared && <EffectParticles effect={effect.shared} />}
-          <EffectRunner sources={sources!} castRoutine={effect.castRoutine} caster={casterStage} target={targetStage} playId={playId} volume={volume} cast={cast} />
+          <EffectRunner sources={sources!} castRoutine={effect.castRoutine} ownMotions={effect.motions} caster={casterStage} target={targetStage} playId={playId} volume={volume} cast={cast} />
         </>
       )}
       <OrbitControls makeDefault target={[0, 1, 0]} maxDistance={60} />

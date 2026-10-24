@@ -53,11 +53,12 @@ canals, fountains, birds, insects, machinery. Each carries only as far as the
 game lets it, so you hear what is around the point you orbit, or around you
 as you walk or fly (**Sound → Zone sounds**, off by default).
 
-**Spell effects** — in **Models → Effects**, pick any of 900-odd spells and
-your character casts it on a monster of your choice, played from the game's
-own effect files and scripts, with their sounds. (First stage: no casting
-motions yet, and a few effect kinds — the rings of Cure among them — are not
-drawn yet.)
+**Spells and skills** — in **Models → Effects**, pick any of 900-odd spells,
+or your character's weapon skills, abilities and dances, and your character
+uses it on a monster of your choice: the casting motions and circles, the
+release, the effect itself and its sounds, all played from the game's own
+effect files and scripts. (Instruments, handbells and weapons are not drawn in
+hand yet, and monster moves are still to come.)
 
 **Map view** — a top-down orthographic capture with no perspective distortion,
 for shaping a zone into a map.

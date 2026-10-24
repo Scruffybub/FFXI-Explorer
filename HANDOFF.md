@@ -3969,7 +3969,28 @@ rather than solved.
     rings on both), Indi-Regen (orb, red pillars). No instrument or bell is
     drawn: held items are not.
   - **Stage 2, still to do:** pitch in beams (yaw only now), accelerations in
-    a beam's frame; instruments and bells in hand. Stage 3:
+    a beam's frame; instruments and bells in hand.
+  - **Stage 3, first part (2026-10-24): weapon skills, abilities, dances.**
+    Models → Effects has **Magic | Skills**. Skills come from the caster
+    race's animation list (`lib/skillList.ts`: weapon categories, Ability,
+    Dancer — 200-odd for a Hume male), no outside table: each file is the
+    whole package — `main`, generators, and the caster's own motions for it
+    (Fast Blade ROM/76/30: `b00?`, `b02?`; Savage Blade: `ws1?`). The bundle
+    now carries the effect file's motions; the runner looks there before the
+    race file. No cast phase for skills. (The game's own route — xim
+    AbilityTable — is a per-race base read from FFXiMain.dll plus a
+    LandSandBoat id; the list spares both.)
+    - Checked: Fast Blade (lunge, dust, sparks), Savage Blade (leap, ring of
+      fire, blue burst), Steal (dash, white flash). Curing Waltz runs its
+      script (dance `dc1?`, `dc10` at frame 199, `cst0`, `tgt0`, sound) but
+      its effect pieces were hard to see — unjudged.
+    - **Not yet:** job abilities beyond the list's few (Provoke, Berserk..:
+      file 0x113C + an id from LandSandBoat's abilities.sql); **monster
+      moves** (file = animation id + 0xF3C / 0xC1EF / 0xE739 / 0x14B07 by
+      range; ids from LandSandBoat's mob_skills.sql; names in the client,
+      ROM/27/80.DAT; the user of a move is a monster, so the caster would be
+      a monster too). Both need a download Ryan approves.
+    - Census: `__playSkill(name)`. Stage 3:
     abilities, weapon skills, monster moves. Later: cast in zones; the
     scale-curve and ring sweep for zone effects.
 
