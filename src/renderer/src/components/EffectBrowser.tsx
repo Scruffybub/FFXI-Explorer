@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { parseDatFile, parseSystemEffects, parseZoneFile, type ParsedDatFile, type SystemEffects } from '../lib/ffxi-dat'
+import { parseDatFile, parseSystemEffects, parseZoneFile, SKELETON_PATHS, type ParsedDatFile, type ParsedZone, type SystemEffects } from '../lib/ffxi-dat'
 import { MODELS } from '../lib/modelList'
-import { SPELLS, SPELL_SKILLS, SPELL_EFFECT_BASE, type SpellEntry } from '../lib/spellList'
+import { SPELLS, SPELL_SKILLS, SPELL_EFFECT_BASE, castRoutine, type SpellEntry } from '../lib/spellList'
 import { fileIdPath } from '../lib/fileTable'
+import { loadCastClips, type CastClips } from '../lib/characterModel'
 import type { ModelSettings } from '../lib/settings'
 import { EffectViewer, type EffectBundle } from './EffectViewer'
 
@@ -19,12 +20,18 @@ const DEFAULT_TARGET = TARGETS.find(m => m.name === 'Goblin 1') ?? TARGETS[0]
 const EFFECT_VOLUME = 0.6
 
 let systemPromise: Promise<SystemEffects | undefined> | null = null
+/** The shared effects file read as a zone (its routines and generators: casting circles, release bursts), once. */
+let sharedPromise: Promise<ParsedZone | null> | null = null
+/** Each race's file read as a zone (its cast and release routines), once per race. */
+const racePromises = new Map<number, Promise<ParsedZone | null>>()
 
-export default function EffectBrowser({ ffxiPath, head, caster, settings, uiHidden }: {
+export default function EffectBrowser({ ffxiPath, head, caster, casterRace, settings, uiHidden }: {
   ffxiPath: string
   /** The view and mode switches, shown at the top of the sidebar. */
   head: ReactNode
   caster: ParsedDatFile | null
+  /** The caster's race, for its casting motions. */
+  casterRace: number
   settings: ModelSettings
   uiHidden: boolean
 }) {
@@ -36,6 +43,12 @@ export default function EffectBrowser({ ffxiPath, head, caster, settings, uiHidd
   const [playId, setPlayId] = useState(0)
   const [targetPath, setTargetPath] = useState(DEFAULT_TARGET?.path ?? '')
   const [target, setTarget] = useState<ParsedDatFile | null>(null)
+  const [cast, setCast] = useState<CastClips | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    loadCastClips(ffxiPath, casterRace).then(c => { if (!cancelled) setCast(c) }).catch(() => { if (!cancelled) setCast(null) })
+    return () => { cancelled = true }
+  }, [ffxiPath, casterRace])
 
   const list = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -60,13 +73,17 @@ export default function EffectBrowser({ ffxiPath, head, caster, settings, uiHidd
       const path = await fileIdPath(ffxiPath, SPELL_EFFECT_BASE + s.effect)
       if (!path) throw new Error(`No file for effect ${s.effect}`)
       const zone = parseZoneFile(await window.ffxi.readDat(ffxiPath, path), undefined, undefined, system)
-      setEffect({ zone, path })
+      sharedPromise ??= window.ffxi.readDat(ffxiPath, 'ROM/0/0.DAT').then(b => parseZoneFile(b)).catch(() => null)
+      const racePath = SKELETON_PATHS[casterRace]
+      if (racePath && !racePromises.has(casterRace)) racePromises.set(casterRace, window.ffxi.readDat(ffxiPath, racePath).then(b => parseZoneFile(b, undefined, undefined, system)).catch(() => null))
+      const [shared, race] = await Promise.all([sharedPromise, racePromises.get(casterRace) ?? null])
+      setEffect({ zone, path, race, shared, castRoutine: castRoutine(s) })
       setPlayId(n => n + 1)
     } catch (e) {
       setEffect(null)
       setError(e instanceof Error ? e.message : String(e))
     }
-  }, [ffxiPath])
+  }, [ffxiPath, casterRace])
 
   // ?census=1: __playSpell(name) picks a spell by name, as a click would.
   useEffect(() => {
@@ -111,7 +128,7 @@ export default function EffectBrowser({ ffxiPath, head, caster, settings, uiHidd
       </aside>
 
       <main className="viewport">
-        <EffectViewer caster={caster} target={target} effect={effect} playId={playId} settings={settings} volume={EFFECT_VOLUME} />
+        <EffectViewer caster={caster} cast={cast} target={target} effect={effect} playId={playId} settings={settings} volume={EFFECT_VOLUME} />
         {!uiHidden && (
           <div className="hud">
             <strong>{spell ? spell.name : 'Pick a spell'}</strong>

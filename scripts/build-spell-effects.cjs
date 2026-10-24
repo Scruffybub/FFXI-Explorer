@@ -24,9 +24,9 @@ for (const m of sql.matchAll(/INSERT INTO `spell_list` VALUES \((.*)\);/g)) {
   // Split on commas outside quotes.
   const f = m[1].match(/'(?:[^'\\]|\\.)*'|[^,]+/g).map(x => x.trim())
   const val = x => x.startsWith('@') ? vars[x.slice(1)] : x.startsWith("'") ? x.slice(1, -1) : Number(x)
-  const [id, name, , , , element, , targets, skill] = f.map(val)
+  const [id, name, , group, , element, , targets, skill] = f.map(val)
   const animation = val(f[14])
-  rows.push({ id, name: title(name), effect: animation, skill: skillNames[skill] ?? String(skill), element: elementNames[element] ?? String(element), targets })
+  rows.push({ id, name: title(name), effect: animation, group, skill: skillNames[skill] ?? String(skill), element: elementNames[element] ?? String(element), targets })
 }
 fs.writeFileSync(out, JSON.stringify(rows))
 console.log(rows.length, 'spells; sample', JSON.stringify(rows.slice(0, 3)), JSON.stringify(rows.find(r => r.id === 144)))

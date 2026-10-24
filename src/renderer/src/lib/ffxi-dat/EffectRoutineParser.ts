@@ -13,7 +13,8 @@
  * and runs until op 0x00. Delays are sequential: each command waits its delay
  * after the one before. Frames are 60 a second, the effect clock.
  *
- * Kept here: what stage 1 of the spell browser plays. Everything else is kept
+ * Kept here: what the spell browser plays (0x3B/0x3C are calls that block
+ * their caller in the game; here they run alongside). Everything else is kept
  * as `other` so its delay still counts.
  */
 
@@ -24,6 +25,12 @@ export type RoutineCommand =
   | { kind: 'routine'; delay: number; ref: string; onTarget: boolean }
   /** Play a sound pointer, heard from the caster or the target. */
   | { kind: 'sound'; delay: number; ref: string; onTarget: boolean; near: number; far: number }
+  /** Play a motion on the actor: `ma2?` is a spell's release, ? any body part. */
+  | { kind: 'motion'; delay: number; ref: string }
+  /** Stop a generator emitting (0x2D stop, 0x1E fade out: both end its emission here). */
+  | { kind: 'stop'; delay: number; ref: string }
+  /** Stop a running routine (0x5F): a release ends the casting circle's `ner2`. */
+  | { kind: 'stopRoutine'; delay: number; ref: string }
   | { kind: 'end'; delay: number }
   | { kind: 'other'; delay: number; op: number }
 
@@ -63,9 +70,15 @@ export function parseEffectRoutine(view: DataView, blockStart: number, blockEnd:
     const args = c + 8
     const argWords = words - 2
     if (op === 0x00) { commands.push({ kind: 'end', delay }); break }
-    if (op === 0x02 && argWords >= 1) {
+    if (op === 0x05 && argWords >= 1) {
+      commands.push({ kind: 'motion', delay, ref: readName(view, args) })
+    } else if (op === 0x02 && argWords >= 1) {
       commands.push({ kind: 'generator', delay, duration, ref: readName(view, args) })
-    } else if ((op === 0x03 || op === 0x09 || (op === 0x0a && argWords !== 6)) && argWords >= 1) {
+    } else if ((op === 0x1e || op === 0x2d) && argWords >= 1) {
+      commands.push({ kind: 'stop', delay, ref: readName(view, args) })
+    } else if (op === 0x5f && argWords >= 1) {
+      commands.push({ kind: 'stopRoutine', delay, ref: readName(view, args) })
+    } else if ((op === 0x03 || op === 0x09 || op === 0x3b || op === 0x3c || (op === 0x0a && argWords !== 6)) && argWords >= 1) {
       commands.push({ kind: 'routine', delay, ref: readName(view, args), onTarget: op === 0x09 })
     } else if ((op === 0x0a || op === 0x0b) && argWords >= 6) {
       commands.push({

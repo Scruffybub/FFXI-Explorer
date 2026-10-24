@@ -523,6 +523,8 @@ export function EffectParticles({ effect }: { effect: ParsedZone }) {
   useEffect(() => {
     if (new URLSearchParams(window.location.search).has('census')) {
       (window as unknown as { __efx?: System[] }).__efx = systems
+      // Every set at once (the spell's, the race's, the shared file's).
+      ;((window as unknown as { __efxAll?: Map<ParsedZone, System[]> }).__efxAll ??= new Map()).set(effect, systems)
     }
   }, [systems])
   useFrame(() => {

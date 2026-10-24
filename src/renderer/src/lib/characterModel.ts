@@ -184,6 +184,43 @@ export async function loadMovementClips(ffxiPath: string, race: number): Promise
   return out.idle.length || out.walk.length ? out : null
 }
 
+/**
+ * A caster's motions for spells, from the race's own file (SKELETON_PATHS —
+ * it is also the race config: 67 routines and 130 motions beside the
+ * skeleton). The routines name them, and the effect runner plays what they
+ * name: the cast routine `cawh` plays `mw0?` (white magic's chant), the
+ * release `sswh` plays `mw1?` (the raised hand) 60 frames after the spell
+ * goes off and `mw2?` (recovery) at 180; `?` is any body part. Black magic is
+ * `mb`, summoning `ms`, ninjutsu `mn`, blue `ma`. A `mot_` set first tried
+ * held the goblins' ma0..ma2 — kicks (2026-10-24). Idle comes from `def_`.
+ */
+export interface CastClips {
+  idle: ParsedAnimation[]
+  /** Every motion in the race file, by four-character name. */
+  motions: ParsedAnimation[]
+}
+
+const castClips = new Map<string, Promise<CastClips | null>>()
+
+/** Loads once per install and race. */
+export function loadCastClips(ffxiPath: string, race: number): Promise<CastClips | null> {
+  const key = ffxiPath + '|' + race
+  let p = castClips.get(key)
+  if (!p) {
+    p = (async () => {
+      const idle = (await loadMovementClips(ffxiPath, race))?.idle ?? []
+      const path = SKELETON_PATHS[race]
+      let motions: ParsedAnimation[] = []
+      if (path) {
+        try { motions = parseAnimationDat(await window.ffxi.readDat(ffxiPath, path)) } catch { /* idle only */ }
+      }
+      return { idle, motions }
+    })()
+    castClips.set(key, p)
+  }
+  return p
+}
+
 /** Which pieces the character is wearing. Slot id → model index. */
 export type Equipment = Record<number, number | null>
 

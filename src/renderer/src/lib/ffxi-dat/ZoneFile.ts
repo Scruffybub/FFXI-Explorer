@@ -674,6 +674,38 @@ export function parseZoneFile(
       spawns.push({ generator: block.name.trim(), dir: block.dir, prefabIndices: [], ...raw, curves: lightCurves(block.dir, raw), todCurves: {} })
       continue
     }
+    // A ring is built, not looked up: bands between circles in the XY plane,
+    // coloured per circle, untextured (xim RingMeshBuilder). Cure's rising
+    // rings are these. Triggered ones only, for now: an auto-run ring would
+    // start drawing in zones already judged (none were drawn before), so
+    // those wait for a sweep and are left out as before.
+    if (raw.ring && raw.emission.autoRun) continue
+    if (raw.ring) {
+      const { radii, colors, segments } = raw.ring
+      const mesh: ParsedZoneMesh = { vertices: [], normals: [], colors: [], uvs: [], indices: [], materialIndex: -1, blending: 1, d3m: true, untextured: true }
+      radii.forEach((r, layer) => {
+        for (let j = 0; j < segments; j++) {
+          const a = (2 * Math.PI * j) / segments
+          mesh.vertices.push(r * Math.cos(a), -r * Math.sin(a), 0)
+          mesh.normals.push(0, 0, 1)
+          mesh.colors.push(...colors[layer].map(c => c / 255))
+          mesh.uvs.push(0, 0)
+        }
+        if (layer === 0) return
+        for (let j = 0; j < segments; j++) {
+          const a = (layer - 1) * segments + j, b = (layer - 1) * segments + (j + 1) % segments
+          const c = layer * segments + j, d = layer * segments + (j + 1) % segments
+          mesh.indices.push(a, c, b, b, c, d)
+        }
+      })
+      const idx = prefabs.length
+      prefabs.push(mesh)
+      prefabChunk[idx] = ''
+      prefabDir[idx] = block.dir
+      prefabSource[idx] = block.name.trim()
+      spawns.push({ generator: block.name.trim(), dir: block.dir, prefabIndices: [idx], ...raw, curves: lightCurves(block.dir, raw), todCurves: {} })
+      continue
+    }
     let prefabIndices: number[] = []
     const parts = block.dir ? block.dir.split('/') : []
     for (let depth = parts.length; depth >= 0 && prefabIndices.length === 0; depth--) {

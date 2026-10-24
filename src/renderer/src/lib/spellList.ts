@@ -15,6 +15,8 @@ export interface SpellEntry {
   name: string
   /** The effect number: file 0xAF0 + this. */
   effect: number
+  /** Magic type (LandSandBoat SPELLGROUP): 1 song, 2 black, 3 blue, 4 ninjutsu, 5 summoning, 6 white, 7 geomancy, 8 trust. */
+  group: number
   /** Magic skill, as LandSandBoat names it: healing, elemental, ninjutsu... */
   skill: string
   element: string
@@ -32,6 +34,12 @@ export const SPELLS: SpellEntry[] = (rawSpells as SpellEntry[])
 const ORDER = ['healing', 'enhancing', 'enfeebling', 'divine', 'elemental', 'dark', 'singing', 'ninjutsu', 'summoning', 'blue', 'geomancy']
 export const SPELL_SKILLS: string[] = [...new Set(SPELLS.map(s => s.skill))]
   .sort((a, b) => ((ORDER.indexOf(a) + 1) || 99) - ((ORDER.indexOf(b) + 1) || 99))
+
+/** The race file's cast routine for a spell's magic type: 'cawh' white, 'cabk' black.. (it starts the casting circle). */
+export function castRoutine(s: SpellEntry): string | null {
+  const suffix = ({ 1: 'so', 2: 'bk', 3: 'bl', 4: 'nj', 5: 'sm', 6: 'wh', 7: 'ge' } as Record<number, string>)[s.group]
+  return suffix ? 'ca' + suffix : null
+}
 
 /** Offensive: castable on an enemy and not on yourself. */
 export const offensive = (s: SpellEntry) => (s.targets & 4) !== 0 && (s.targets & 1) === 0

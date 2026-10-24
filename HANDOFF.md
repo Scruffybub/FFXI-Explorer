@@ -3806,6 +3806,27 @@ rather than solved.
         - **Not done, if more is wanted:** merge single-instance prefabs that
           share a material into one static mesh. Watch the per-instance
           `aLamps` and the overlay order.
+  - **Roadmap additions, 2026-10-24 (Ryan).**
+    - **NPCs at their stations:** XI Model Viewer places NPCs from
+      CatsEyeXI's `npc_list` (a LandSandBoat fork). LandSandBoat's
+      `npc_list.sql` has each NPC's zone position, facing and look (the
+      appearance bytes: race and gear, or a model id). Needs the
+      look → model mapping and a download Ryan approves.
+    - **Roaming enemies, visual only (not a game):** LandSandBoat's
+      `mob_spawn_points.sql` (positions per spawn group) → `mob_groups` →
+      `mob_pools` (model). Most mobs roam at random near their spawn; some
+      follow scripted paths in the zone Lua. Plan: walk them on our collision
+      around their spawn points, with their own walk motions. Same download
+      question.
+    - **Renaming the app:** feasible. Keep `package.json` name
+      (`ffxi-zone-viewer`, which names the settings folder) and `appId`
+      (installer upgrades); change `productName`, artifact names, window
+      title, README; renaming the GitHub repo is redirected for old copies'
+      update check, but update `src/main/updates.ts` REPO and App.tsx's
+      releases link. Test an install over 0.1.11 before release.
+      **Decided 2026-10-24: keep "FFXI Explorer" for now** ("Vana'diel
+      Tools" was considered; it would be Vanadiel-Tools for the repo and
+      files, since GitHub names cannot hold an apostrophe).
   - **Map maker research, 2026-10-21.** A quick search found no tool
     that builds new FFXI zones. The developers once planned a player dungeon
     maker and never shipped it. What does exist is map *drawing*: Remapster
@@ -3862,9 +3883,62 @@ rather than solved.
     Protect, Haste, Bio, Katon Ichi, Foe Requiem, Firaga, Drain, Sleep, Raise
     all run with no errors. Skipped in most: the shared routines `mdam`
     (damage reaction) and `proc`, and `vib0`/`fls0` (screen shake and flash).
-  - **Stage 2:** casting motions and posed joints, facing, beams, ring
-    meshes, the shared routines (in a global file), the cast-start effect.
-    Stage 3: abilities, weapon skills, monster moves. Later: cast in zones.
+  - **Stage 2, first part (2026-10-24):**
+    - **Rings** (link 0x24): initializer 0x3A — four radii (floats), four RGBA
+      (0x80 = full), u8 segments, u8 layers − 2. GeneratorParser `ring`,
+      ZoneFile builds an untextured coloured mesh. Triggered generators only:
+      an auto-run ring would start drawing in zones (none ever did) — sweep
+      first. Cure's rings now rise round the target, faint blue.
+    - **Casting motions.** The race's skeleton file (SKELETON_PATHS) is its
+      race config too: 67 routines, 130 motions. Its cast routines: `cawh`
+      plays `mw0?` (93 frames), `cabk` `mb0?`, `casm` `ms0?`, `canj` `mn0?`,
+      `cabl` `ma0?`; `caso`/`cage` use op 0x76 (instrument / geo, not read).
+      Each family has 0 start, 1 loop, 2 release (`ma2?`, which 118 spell
+      routines call, is blue magic's release). Release routines (`shwh`:
+      `stwh`, `eis4`, `sswh`) and the cast routines' `hwmg`/`ner?` live in
+      another file — not found yet. The LSB spell `group` column is kept
+      now (1 song, 2 black, 3 blue, 4 ninjutsu, 5 summoning, 6 white, 7
+      geomancy, 8 trust; spellList `castMotion`).
+    - **Trap:** a `mot_` animation set holding `ma0..2` is the goblins' file
+      (ROM/6/…) — the first try played kicks.
+    - **Played:** start motion, loop for 1.2 s (`CAST_SECONDS`), release as
+      the script starts, then `def_` idle. Joints read from the live pose
+      (EffectViewer `Actor`). Checked: Fire (black), Cure (white), Katon:
+      Ichi (ninjutsu).
+    - **Harness trap:** a hidden or minimised test window stops drawing and
+      `Page.captureScreenshot` hangs; launch the test copy with
+      `--disable-renderer-backgrounding --disable-background-timer-throttling
+      --disable-backgrounding-occluded-windows`, and put `timeout` on shots.
+  - **Stage 2, second part (2026-10-24): the whole cast chain.**
+    - **Shared routines are in ROM/0/0.DAT** (xim GlobalDirectory = that
+      file): 132 routines — casting circles `ner1`..`ner5`, release starts
+      `stwh`/`stbk`.., bursts `eis1`..`eis6`, `mdam` (the target's flinch,
+      op 0x2B only), `proc`, `hwmg`, `wash`.
+    - **The runner now looks names up across three files**, the asking
+      routine's own first: the spell's, the caster race's (cast/release
+      routines and motions), the shared file. Each is parsed as a zone and
+      drawn by its own EffectParticles.
+    - **Ops added:** 0x3B/0x3C calls (blocking in the game, alongside here),
+      0x2D stop generator, 0x1E fade generator (treated as stop), 0x5F stop
+      routine.
+    - **A cast now runs as the game's:** Play starts the race's `ca<type>`
+      (spellList `castRoutine`: wh bk bl nj sm so ge) → chant motion and
+      `ner?` circle; after `CAST_SECONDS` (2.5) the spell's `main` → its
+      `sh<type>` call → `st<type>` stops the circle, `eis?` bursts at the
+      hand, `ss<type>` plays the release motions. Cure's log: cawh, hwmg,
+      ner2, main, shwh, hwmg, stwh, eis4, sswh, wash, tgt0.
+    - **Motions are the routines' own** (op 0x05 names from the race file):
+      stage 0 loops (chant), 2 plays once then idle, others hold. White
+      magic: `sswh` plays `mw1?` (raised hand) at +60, `mw2?` at +180 — my
+      first guess (1 = loop) was wrong.
+    - **Not confirmed on screen:** the casting circle `gn20` (shared mesh
+      `hit3`, green, scale 0.1 x 0) emits at the caster's feet but I could
+      not see it; check scale curves and whether a y-scale of 0 flattens a
+      mesh drawn in XY.
+  - **Stage 2, still to do:** facing (attach-source-oriented flag), beams
+    (attach 3 now starts at the caster, not yet stretched to the target),
+    the circle check above, songs' and geomancy's casts (op 0x76). Stage 3:
+    abilities, weapon skills, monster moves. Later: cast in zones.
 
 - **Zone sounds — built 2026-10-24.** Panel → **Sound** (was Music) →
   *Zone sounds* (off by default, like the music) and *Sound volume*

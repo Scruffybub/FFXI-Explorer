@@ -146,6 +146,7 @@ export default function ModelBrowser({
           ffxiPath={ffxiPath}
           head={<>{viewSwitch}{modeSwitch}</>}
           caster={character}
+          casterRace={spec.race}
           settings={settings}
           uiHidden={uiHidden}
         />

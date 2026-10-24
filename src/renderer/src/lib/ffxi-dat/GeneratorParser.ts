@@ -64,6 +64,12 @@ export interface RawModelSpawn {
    * source's, then the target's (SkeletonParser jointRefs).
    */
   joints: [number, number]
+  /**
+   * A ring (linked type 0x24, initializer 0x3A; xim RingMeshSetup): two to four
+   * circles round the generator, each a radius and an RGBA colour (0x80 =
+   * full), joined into bands. ZoneFile builds the mesh.
+   */
+  ring: { radii: number[]; colors: number[][]; segments: number } | null
   /** The 0x1E blend byte, or -1 when the generator carries none. */
   blend: number
   /** Time-of-day KeyFrame ids (0x60–0x63), sampled by the fraction of the day. */
@@ -203,6 +209,8 @@ const LINKED_FLARE = 0x39
 const LINKED_LIGHT = 0x47
 /** A screen distortion (xim LinkedDataType.Distortion): bends what is behind it. */
 const LINKED_DISTORTION = 0x22
+/** A ring built from radii and colours (xim LinkedDataType.RingMesh). */
+const LINKED_RING = 0x24
 /** xim's mapping for 0x58's multipliers: 2^x from 0 up, 1 + x down to -1, else 0. */
 const lightMultiplier = (x: number) => (x >= 0 ? Math.pow(2, x) : x >= -1 ? 1 + x : 0)
 const FLAG_FOLLOW_CAMERA = 0x4
@@ -307,6 +315,7 @@ export function parseModelSpawn(body: Uint8Array): RawModelSpawn | null {
   let blend = -1
   let spin: [number, number, number] = [0, 0, 0]
   let pointLight: RawModelSpawn['pointLight'] = null
+  let ring: RawModelSpawn['ring'] = null
   const flags1 = body[EMISSION_AT + 5]
   const emission: Emission = {
     every: view.getUint16(EMISSION_AT + 2, true) + 1,
@@ -377,6 +386,13 @@ export function parseModelSpawn(body: Uint8Array): RawModelSpawn | null {
       const range = f(p) * lightMultiplier(f(p + 8))
       const theta = f(p + 4) * lightMultiplier(f(p + 12))
       pointLight = { range, quad: theta > 0 ? 1 / theta : 0 }
+    } else if (op === 0x3a && p + 36 <= body.length) {
+      const layers = Math.min(4, 2 + body[p + 33])
+      ring = {
+        radii: [0, 1, 2, 3].slice(0, layers).map(k => f(p + k * 4)),
+        colors: [0, 1, 2, 3].slice(0, layers).map(k => [body[p + 16 + k * 4], body[p + 17 + k * 4], body[p + 18 + k * 4], body[p + 19 + k * 4]]),
+        segments: body[p + 32],
+      }
     } else if (op === 0x1e && p + 1 <= body.length) {
       blend = body[p]
     } else if (op in TOD_CHANNELS && p + 8 <= body.length) {
@@ -391,7 +407,8 @@ export function parseModelSpawn(body: Uint8Array): RawModelSpawn | null {
   }
   const isLight = linked === LINKED_LIGHT
   const isDistortion = linked === LINKED_DISTORTION
-  if (!isLight && !isDistortion && ((linked !== LINKED_MODEL && linked !== LINKED_SPRITE && linked !== LINKED_FLARE) || !model)) return null
+  const isRing = linked === LINKED_RING && !!ring && ring.segments > 0
+  if (!isLight && !isDistortion && !isRing && ((linked !== LINKED_MODEL && linked !== LINKED_SPRITE && linked !== LINKED_FLARE) || !model)) return null
 
   // Expiration handlers (section 4, header 0x7C).
   for (const { op, p } of records(view, body, 0x7c)) {
@@ -437,7 +454,7 @@ export function parseModelSpawn(body: Uint8Array): RawModelSpawn | null {
     renderState: flags >>> 16,
     emission, spread, velocity, velocityVariance, accel, moves, rotationVariance, scaleVariance,
     scaleVelocity: scales ? scaleVelocity : [0, 0, 0],
-    emitRange, flipbook, screenFlash, children, drawDistance, pointLight,
+    emitRange, flipbook, screenFlash, children, drawDistance, pointLight, ring: isRing ? ring : null,
   }
 }
 

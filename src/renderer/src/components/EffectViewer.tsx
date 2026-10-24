@@ -2,14 +2,17 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { OrbitControls } from '@react-three/drei'
 import * as THREE from 'three'
-import type { ParsedDatFile, ParsedZone } from '../lib/ffxi-dat'
+import type { ParsedAnimation, ParsedDatFile, ParsedZone } from '../lib/ffxi-dat'
 import type { RoutineCommand, EffectRoutine } from '../lib/ffxi-dat/EffectRoutineParser'
 import type { GeneratorSpawn } from '../lib/ffxi-dat/types'
 import type { ModelSettings } from '../lib/settings'
 import { buildModel, type BuiltModel } from '../lib/modelBuild'
 import { childEvents } from '../lib/weatherEvents'
 import { playSound } from '../lib/footstepSounds'
-import { Animator, RendererSettings } from './ModelViewer'
+import { RendererSettings } from './ModelViewer'
+import { clipsForMotion } from '../lib/motions'
+import type { CastClips } from '../lib/characterModel'
+import { invertRigidMatrix4, poseSkeleton, skinMeshes } from '../lib/skinning'
 import { EffectParticles } from './WeatherParticles'
 import { GAMMA_BLEND_LAYER } from '../lib/GammaBlendPass'
 
@@ -30,11 +33,21 @@ import { GAMMA_BLEND_LAYER } from '../lib/GammaBlendPass'
  *              reaction `mdam`) are skipped.
  *   sound      play its sound pointer
  *
- * Stage 1 (2026-10-24): joints from the bind pose, no casting motions, no
- * facing, ring meshes (link 0x24) and other link kinds not drawn.
+ * Before the script, the caster casts: its magic type's start motion, then
+ * the loop for CAST_SECONDS, and the release as the script starts (motions
+ * from the race file, characterModel loadCastClips). Joints are read from
+ * the live pose. Rings (link 0x24) are built by ZoneFile.
+ *
+ * Not yet (2026-10-24): facing, caster-to-target beams (placed at the
+ * target), the shared routines (damage reaction, cast circle), songs' and
+ * geomancy's motions, distortion and weighted meshes.
  */
 
 const EFFECT_FPS = 60
+/** How long the caster chants before the spell goes off, seconds (the game's cast times vary; Cure's is 2). */
+const CAST_SECONDS = 2.5
+const NONE: ParsedAnimation[] = []
+const EMPTY_ZONE: ParsedZone = { prefabs: [], instances: [], textures: [], textureNames: [], collision: null, environment: [], spawns: [] }
 /** Caster and target stand this far apart, world units (a little under casting range). */
 const SPACING = 4.5
 
@@ -42,19 +55,38 @@ export interface EffectBundle {
   zone: ParsedZone
   /** Install-relative path, for the readout. */
   path: string
+  /** The caster race's file (cast and release routines) and the shared ROM/0/0.DAT, read the same way. */
+  race: ParsedZone | null
+  shared: ParsedZone | null
+  /** The race's cast routine for the spell's magic type (spellList castRoutine). */
+  castRoutine: string | null
 }
 
-/** One placed actor: its model, and where its joints are in the world. */
+/** One placed actor: where its joints are in the world, and what it plays. */
 interface Stage {
   joint(index: number, out: THREE.Vector3): THREE.Vector3
+  /**
+   * Plays a motion now: looping, held on its last frame until told otherwise,
+   * or once and then back to idle.
+   */
+  play(clips: ParsedAnimation[], mode: 'loop' | 'hold' | 'once'): void
 }
 
+/** Seconds one pass of a motion takes: its longest part, 30 frames a second times its speed. */
+const motionSeconds = (clips: ParsedAnimation[]) =>
+  clips.reduce((m, c) => Math.max(m, Math.max(c.frameCount - 1, 0) / (30 * (c.speed || 1))), 0)
+
 /**
- * A model standing on the ground at `x`, turned to `yaw`. Reports where its
- * joint references are (bind pose; SkeletonParser jointRefs), world space.
+ * A model standing on the ground at `x`, turned to `yaw`, posed on the CPU
+ * like ModelViewer's Animator but driven from outside: idle by default,
+ * another motion when `play` is called. Its joint references (SkeletonParser
+ * jointRefs) are read from the live pose, so an effect on the hands follows
+ * the hands.
  */
-function Actor({ model, x, yaw, onStage }: {
+function Actor({ model, idle, x, yaw, onStage }: {
   model: ParsedDatFile
+  /** What it does when not told otherwise; none stands in bind pose. */
+  idle: ParsedAnimation[]
   x: number
   yaw: number
   onStage: (stage: Stage | null) => void
@@ -72,6 +104,10 @@ function Actor({ model, x, yaw, onStage }: {
       }
     }
   }, [model])
+  const inverseBind = useMemo(() => model.skeleton?.matrices.map(invertRigidMatrix4) ?? null, [model.skeleton])
+  const motion = useRef<{ clips: ParsedAnimation[]; mode: 'loop' | 'hold' | 'once'; t: number }>({ clips: idle, mode: 'loop', t: 0 })
+  useEffect(() => { motion.current = { clips: idle, mode: 'loop', t: 0 } }, [idle])
+  const pose = useRef<number[][] | null>(null)
   // Model space is Y down, so the lowest point is the largest y: lift by it.
   const lift = built ? built.bounds.max.y : 0
   useEffect(() => {
@@ -82,12 +118,11 @@ function Actor({ model, x, yaw, onStage }: {
       .multiply(new THREE.Matrix4().makeRotationX(Math.PI))
       .multiply(new THREE.Matrix4().makeTranslation(0, -lift, 0))
     const refs = model.skeleton?.jointRefs ?? []
-    const mats = model.skeleton?.matrices ?? []
     onStage({
       joint(index, out) {
         const ref = refs[index]
-        const m = ref ? mats[ref.bone] : undefined
-        if (!ref || !m) return out.set(0, -lift, 0).applyMatrix4(placed)
+        const m = ref ? (pose.current ?? model.skeleton?.matrices)?.[ref.bone] : undefined
+        if (!ref || !m) return out.set(0, lift, 0).applyMatrix4(placed)
         const [ox, oy, oz] = ref.offset
         out.set(
           ox * m[0] + oy * m[4] + oz * m[8] + m[12],
@@ -96,27 +131,42 @@ function Actor({ model, x, yaw, onStage }: {
         )
         return out.applyMatrix4(placed)
       },
+      play(clips, mode) { motion.current = clips.length ? { clips, mode, t: 0 } : { clips: idle, mode: 'loop', t: 0 } },
     })
     return () => onStage(null)
-  }, [built, model, x, yaw, lift, onStage])
+  }, [built, model, x, yaw, lift, onStage, idle])
+  useFrame((_, delta) => {
+    const skeleton = model.skeleton
+    if (!built || !skeleton || !inverseBind || built.skinTargets.length === 0) return
+    const m = motion.current
+    m.t += delta
+    // A one-off holds its last frame a moment, then goes back to idle.
+    const once = motionSeconds(m.clips)
+    if (m.mode === 'once' && m.t > once + 0.15) motion.current = { clips: idle, mode: 'loop', t: 0 }
+    const now = motion.current
+    const time = now.mode === 'loop' ? now.t : Math.min(now.t, Math.max(once - 1 / 60, 0))
+    const posed = poseSkeleton(skeleton, now.clips, inverseBind, time)
+    skinMeshes(built.skinTargets, posed)
+    for (const mesh of built.meshes) mesh.geometry.getAttribute('position').needsUpdate = true
+    pose.current = posed.worldMats
+  })
   if (!built) return null
   return (
-    <>
-      <Animator built={built} model={model} playing speed={1} motion={null} />
-      <group position={[x, 0, 0]} rotation={[0, yaw, 0]}>
-        <group rotation={[Math.PI, 0, 0]}>
-          <group position={[0, -lift, 0]}>
-            {built.meshes.map((mesh, i) => <primitive key={i} object={mesh} />)}
-          </group>
+    <group position={[x, 0, 0]} rotation={[0, yaw, 0]}>
+      <group rotation={[Math.PI, 0, 0]}>
+        <group position={[0, -lift, 0]}>
+          {built.meshes.map((mesh, i) => <primitive key={i} object={mesh} />)}
         </group>
       </group>
-    </>
+    </group>
   )
 }
 
-/** A routine running: where it is in its commands, and who it plays for. */
+/** A routine running: where it is in its commands, which file it came from, and who it plays for. */
 interface Sequence {
   routine: EffectRoutine
+  /** Index into the runner's sources: the file its generators and calls are looked up in first. */
+  src: number
   index: number
   /** Effect frame the previous command ran at; the next runs `delay` after. */
   cursor: number
@@ -133,68 +183,124 @@ interface Running {
 }
 
 /** Census (?census=1): what the last play did. */
-interface RunLog { started: string[]; skipped: string[]; sounds: number[] }
+interface RunLog { started: string[]; skipped: string[]; sounds: number[]; routines: string[] }
 
-function EffectRunner({ effect, caster, target, playId, volume }: {
-  effect: ParsedZone
+/**
+ * Runs the routines. `sources` are the files to look things up in, in order:
+ * the spell's own, the caster race's (its cast and release routines), and the
+ * shared effects file ROM/0/0.DAT (casting circles `ner?`, release bursts
+ * `eis?`, hit sparks). A routine's names are looked for in its own file
+ * first, then in the others in that order.
+ */
+function EffectRunner({ sources, castRoutine, caster, target, playId, volume, cast }: {
+  sources: ParsedZone[]
+  /** The race's cast routine for this magic type (`cawh`, `cabk`...), or null. */
+  castRoutine: string | null
   caster: Stage | null
   target: Stage | null
   playId: number
   volume: number
+  /** The caster's casting motions; null for a caster without them. */
+  cast: CastClips | null
 }) {
   const sequences = useRef<Sequence[]>([])
+  /** The effect frame the spell's script starts at, after the cast; -1 when none is waiting. */
+  const scriptAt = useRef(-1)
   const running = useRef<Running[]>([])
   const pending = useRef(-1)
-  const log = useRef<RunLog>({ started: [], skipped: [], sounds: [] })
+  const log = useRef<RunLog>({ started: [], skipped: [], sounds: [], routines: [] })
   useEffect(() => { pending.current = playId }, [playId])
 
-  // Look-ups by name: the routine's own folder first, then anywhere.
+  // Look-ups by name in one file: the asking folder first, then anywhere.
   const find = useMemo(() => {
-    const byName = <T extends { dir: string }>(list: T[], name: (t: T) => string) => (dir: string, want: string): T[] => {
+    const byName = <T extends { dir: string }>(list: T[], want: string, dir: string, name: (t: T) => string): T[] => {
       const all = list.filter(t => name(t) === want)
       const local = all.filter(t => t.dir === dir)
       return local.length ? local : all
     }
-    return {
-      routine: byName(effect.routines ?? [], r => r.name),
-      spawn: byName(effect.spawns ?? [], s => s.generator),
-      ambient: byName(effect.ambient ?? [], s => s.generator),
-      sound: byName(effect.sounds ?? [], s => s.name),
+    /** The first source, from `from` on and then the earlier ones, that has a match. */
+    const across = <T,>(from: number, pick: (z: ParsedZone) => T[]): { src: number; hits: T[] } => {
+      const order = [from, ...sources.map((_, i) => i).filter(i => i !== from)]
+      for (const i of order) {
+        const hits = pick(sources[i])
+        if (hits.length) return { src: i, hits }
+      }
+      return { src: from, hits: [] }
     }
-  }, [effect])
+    return {
+      routine: (from: number, dir: string, want: string) => across(from, z => byName(z.routines ?? [], want, dir, r => r.name)),
+      spawn: (from: number, dir: string, want: string) => across(from, z => byName(z.spawns ?? [], want, dir, sp => sp.generator)),
+      ambient: (from: number, dir: string, want: string) => across(from, z => byName(z.ambient ?? [], want, dir, a => a.generator)),
+      sound: (from: number, dir: string, want: string) => across(from, z => byName(z.sounds ?? [], want, dir, x => x.name)),
+    }
+  }, [sources])
 
   useFrame(({ clock }) => {
     const now = clock.getElapsedTime() * EFFECT_FPS
+    const startRoutine = (src: number, name: string, at: number, c: Stage, t: Stage) => {
+      const r = find.routine(src, '', name)
+      if (!r.hits.length) { log.current.skipped.push('routine ' + name); return false }
+      sequences.current.push({ routine: r.hits[0], src: r.src, index: 0, cursor: at, caster: c, target: t })
+      log.current.routines.push(name)
+      return true
+    }
     if (pending.current >= 0 && caster && target) {
       pending.current = -1
       running.current = []
-      log.current = { started: [], skipped: [], sounds: [] }
-      const main = find.routine('', 'main')[0] ?? effect.routines?.[0]
-      sequences.current = main ? [{ routine: main, index: 0, cursor: now, caster, target }] : []
+      sequences.current = []
+      log.current = { started: [], skipped: [], sounds: [], routines: [] }
+      // Cast first, as the game does before the spell's own script: the
+      // race's cast routine (the chant and the casting circle), for the cast
+      // time. Songs and geomancy have none (their op 0x76 is not read).
+      const casting = !!castRoutine && sources.length > 1 && startRoutine(1, castRoutine, now, caster, target)
+      scriptAt.current = now + (casting ? CAST_SECONDS * EFFECT_FPS : 0)
+    }
+    if (scriptAt.current >= 0 && now >= scriptAt.current && caster && target) {
+      const main = (sources[0].routines ?? []).find(r => r.name === 'main') ?? sources[0].routines?.[0]
+      if (main) {
+        sequences.current.push({ routine: main, src: 0, index: 0, cursor: scriptAt.current, caster, target })
+        log.current.routines.push(main.name)
+      }
+      scriptAt.current = -1
     }
     const tmp = new THREE.Vector3()
     const run = (seq: Sequence, cmd: RoutineCommand, at: number) => {
       if (cmd.kind === 'generator') {
-        const spawns = find.spawn(seq.routine.dir, cmd.ref)
-        for (const sp of spawns) {
-          const onCaster = sp.attach === 1 || sp.attach === 5 || sp.attach === 9
+        const found = find.spawn(seq.src, seq.routine.dir, cmd.ref)
+        for (const sp of found.hits) {
+          // Attach (xim AttachType): 1 caster, 2 target, 3 caster-to-target
+          // beam (from the caster), 5 caster facing the target, 6
+          // target-to-caster (at the target), 9 the caster's weapon.
+          const onCaster = sp.attach === 1 || sp.attach === 3 || sp.attach === 5 || sp.attach === 9
           const actor = onCaster ? seq.caster : seq.target
           const where = actor.joint(onCaster ? sp.joints[0] : sp.joints[1], tmp).clone()
           running.current.push({ spawn: sp, at: where, next: at, until: at + Math.max(cmd.duration, 0) })
           log.current.started.push(cmd.ref)
         }
-        for (const s of find.ambient(seq.routine.dir, cmd.ref)) {
+        const sounds = find.ambient(seq.src, seq.routine.dir, cmd.ref).hits
+        for (const s of sounds) {
           playSound(s.id, volume)
           log.current.sounds.push(s.id)
         }
-        if (!spawns.length && !find.ambient(seq.routine.dir, cmd.ref).length) log.current.skipped.push('gen ' + cmd.ref)
+        if (!found.hits.length && !sounds.length) log.current.skipped.push('gen ' + cmd.ref)
       } else if (cmd.kind === 'routine') {
-        const next = find.routine(seq.routine.dir, cmd.ref)[0]
-        if (!next) { log.current.skipped.push('routine ' + cmd.ref); return }
         const [c, t] = cmd.onTarget ? [seq.target, seq.caster] : [seq.caster, seq.target]
-        sequences.current.push({ routine: next, index: 0, cursor: at, caster: c, target: t })
+        startRoutine(seq.src, cmd.ref, at, c, t)
+      } else if (cmd.kind === 'stop') {
+        running.current = running.current.filter(r => r.spawn.generator !== cmd.ref)
+      } else if (cmd.kind === 'stopRoutine') {
+        sequences.current = sequences.current.filter(s => s.routine.name !== cmd.ref)
+      } else if (cmd.kind === 'motion') {
+        // A race-file motion by name, ? any body part: stage 0 (the chant)
+        // loops, a last stage 2 plays once, anything else holds its end
+        // until the next (white magic's raised hand waits for its recovery).
+        const prefix = cmd.ref.replace(/\?$/, '')
+        const clips = cast?.motions.filter(c => c.name.startsWith(prefix)) ?? []
+        if (!clips.length) { log.current.skipped.push('motion ' + cmd.ref); return }
+        const stage = prefix[2]
+        seq.caster.play(clips, stage === '0' ? 'loop' : stage === '2' ? 'once' : 'hold')
       } else if (cmd.kind === 'sound') {
-        const s = find.sound(seq.routine.dir, cmd.ref)[0]
+        const s = find.sound(seq.src, seq.routine.dir, cmd.ref).hits[0]
         if (s) { playSound(s.id, volume); log.current.sounds.push(s.id) } else log.current.skipped.push('sound ' + cmd.ref)
       }
     }
@@ -236,8 +342,10 @@ function ParticleLayer() {
 
 const CENSUS = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('census')
 
-export function EffectViewer({ caster, target, effect, playId, settings, volume }: {
+export function EffectViewer({ caster, cast, target, effect, playId, settings, volume }: {
   caster: ParsedDatFile | null
+  /** The caster race's casting and idle motions (characterModel loadCastClips). */
+  cast: CastClips | null
   target: ParsedDatFile | null
   effect: EffectBundle | null
   /** Bumped to play the effect (again). */
@@ -247,6 +355,9 @@ export function EffectViewer({ caster, target, effect, playId, settings, volume 
 }) {
   const [casterStage, setCasterStage] = useState<Stage | null>(null)
   const [targetStage, setTargetStage] = useState<Stage | null>(null)
+  // A monster's own first motion is its idle (ModelViewer's default).
+  const sources = useMemo(() => effect ? [effect.zone, effect.race ?? EMPTY_ZONE, effect.shared ?? EMPTY_ZONE] : null, [effect])
+  const targetIdle = useMemo(() => (target ? clipsForMotion(target.animations, null) : NONE), [target])
   return (
     <Canvas
       camera={{ fov: 45, near: 0.05, far: 500, position: [0, 2.2, 8.5] }}
@@ -264,12 +375,14 @@ export function EffectViewer({ caster, target, effect, playId, settings, volume 
       {settings.showGround && <gridHelper args={[24, 24, '#3a4152', '#242a36']} />}
       {/* Both turned half round to face each other: player and monster
           models face opposite ways as authored (checked by eye, 2026-10-24). */}
-      {caster && <Actor model={caster} x={-SPACING / 2} yaw={Math.PI} onStage={setCasterStage} />}
-      {target && <Actor model={target} x={SPACING / 2} yaw={Math.PI} onStage={setTargetStage} />}
+      {caster && <Actor model={caster} idle={cast?.idle ?? NONE} x={-SPACING / 2} yaw={Math.PI} onStage={setCasterStage} />}
+      {target && <Actor model={target} idle={targetIdle} x={SPACING / 2} yaw={Math.PI} onStage={setTargetStage} />}
       {effect && (
         <>
           <EffectParticles key={effect.path} effect={effect.zone} />
-          <EffectRunner effect={effect.zone} caster={casterStage} target={targetStage} playId={playId} volume={volume} />
+          {effect.race && <EffectParticles effect={effect.race} />}
+          {effect.shared && <EffectParticles effect={effect.shared} />}
+          <EffectRunner sources={sources!} castRoutine={effect.castRoutine} caster={casterStage} target={targetStage} playId={playId} volume={volume} cast={cast} />
         </>
       )}
       <OrbitControls makeDefault target={[0, 1, 0]} maxDistance={60} />
