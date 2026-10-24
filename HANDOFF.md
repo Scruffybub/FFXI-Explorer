@@ -4008,9 +4008,21 @@ rather than solved.
     - Checked: Mighty Strikes (fire aura, glowing fists), Goblin Rush (lunge,
       burst on the target), Bomb Toss (throw, explosion). Census:
       `__playMove(name)`.
-    - **Not yet:** which monster uses which move (LandSandBoat
-      mob_skill_lists — another download); pet abilities and dances by
-      number (actionType 13/14). Stage 3:
+    - **Which monster has which move (2026-10-24):** LandSandBoat
+      `mob_skill_lists.sql` downloaded with Ryan's OK → `resources/
+      mob-skill-lists.json` (1,003 lists by name, same-named merged).
+      skillList `movesForCreature`: catalogue name without its number and
+      "(S)", then its last word ("Lesser Bird" → Bird), then the longest list
+      name it starts with ("Antican" → Antica). Monster tab: "Only <family>'s
+      moves" (default on). Goblin → its six (Goblin Rush, Bomb Toss, Bomb
+      Toss Suicide, Smokebomb, Crispy Candle, Paralysis Shower); Behemoth 7,
+      Orc 6, Antica 8. Elementals have no list in LandSandBoat (they cast):
+      all moves, said so.
+    - **Spacing by size:** `modelReach` (98th-percentile forward reach and
+      height from the vertices) sets the gap (reach + reach + 2.5, at least
+      4.5) and `FrameStage` the camera. A behemoth stood on the caster.
+    - **Not yet:** pet abilities and dances by number (actionType 13/14);
+      a long monster's back can still leave the frame (front reach only). Stage 3:
     abilities, weapon skills, monster moves. Later: cast in zones; the
     scale-curve and ring sweep for zone effects.
 

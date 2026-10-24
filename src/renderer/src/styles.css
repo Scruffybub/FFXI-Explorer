@@ -705,6 +705,10 @@ select {
   color: #fff;
 }
 
+/* Models → Effects: a labelled picker, and the Monster tab's own-moves switch. */
+.target-pick { display: block; margin-top: 8px; font-size: 11px; color: var(--muted); }
+.toggle-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 11px; color: var(--muted); cursor: pointer; }
+
 .category-select {
   width: 100%;
   margin-top: 8px;

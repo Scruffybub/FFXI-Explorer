@@ -1,6 +1,7 @@
 import { animationOptions } from './characterModel'
 import rawAbilities from '../../../../resources/ability-effects.json'
 import rawMobSkills from '../../../../resources/mob-skill-effects.json'
+import rawSkillLists from '../../../../resources/mob-skill-lists.json'
 
 /**
  * Weapon skills, job abilities and dances for the effect browser, per race.
@@ -60,4 +61,28 @@ export const abilityFileId = (a: NumberedSkill) => 0x113c + a.animation
 export function monsterMoveFileId(m: NumberedSkill): number {
   const a = m.animation
   return a + (a < 0x200 ? 0x0f3c : a < 0x600 ? 0xc1ef : a < 0x800 ? 0xe739 : 0x14b07)
+}
+
+const SKILL_LISTS = rawSkillLists as Record<string, number[]>
+const norm = (s: string) => s.toLowerCase().replace(/[^a-z]/g, '')
+const LIST_BY_NORM = new Map(Object.keys(SKILL_LISTS).map(k => [norm(k), k]))
+
+/**
+ * The moves a creature's family has (LandSandBoat mob_skill_lists), matched
+ * by name: the catalogue name without its number and any "(S)", then its
+ * last word ("Lesser Bird" → Bird), then the longest list name it starts
+ * with ("Antican" → Antica). 116 of the catalogue's 152 creature families
+ * match exactly or by prefix; null when nothing does.
+ */
+export function movesForCreature(name: string): { family: string; ids: Set<number> } | null {
+  const base = name.replace(/\s*\([^)]*\)/g, '').replace(/(\s+\d+)+$/, '').trim()
+  const words = base.split(/\s+/)
+  const tries = [norm(base), norm(words[words.length - 1])]
+  let key = tries.map(t => LIST_BY_NORM.get(t)).find(Boolean)
+  if (!key) {
+    const b = norm(base)
+    const prefixes = [...LIST_BY_NORM.keys()].filter(k => k.length >= 4 && b.startsWith(k)).sort((x, y) => y.length - x.length)
+    key = prefixes.length ? LIST_BY_NORM.get(prefixes[0]) : undefined
+  }
+  return key ? { family: key, ids: new Set(SKILL_LISTS[key]) } : null
 }

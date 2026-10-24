@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 import { parseAnimationDat, parseDatFile, parseSystemEffects, parseZoneFile, SKELETON_PATHS, type ParsedAnimation, type ParsedDatFile, type ParsedZone, type SystemEffects } from '../lib/ffxi-dat'
 import { MODELS } from '../lib/modelList'
 import { SPELLS, SPELL_SKILLS, SPELL_EFFECT_BASE, castRoutine } from '../lib/spellList'
-import { JOB_ABILITIES, MONSTER_MOVES, SKILL_CATEGORIES, abilityFileId, monsterMoveFileId, skillOptions } from '../lib/skillList'
+import { JOB_ABILITIES, MONSTER_MOVES, SKILL_CATEGORIES, abilityFileId, monsterMoveFileId, movesForCreature, skillOptions } from '../lib/skillList'
 import { fileIdPath } from '../lib/fileTable'
 import { clipsForMotion } from '../lib/motions'
 import { loadCastClips, type CastClips } from '../lib/characterModel'
@@ -44,6 +44,8 @@ interface Entry {
   file: { id: number } | { path: string }
   /** The race's cast routine for a spell; null for the rest, which have none. */
   castRoutine: string | null
+  /** A monster move's id, for matching it to a creature's family. */
+  moveId?: number
 }
 
 type Kind = 'magic' | 'skills' | 'monster'
@@ -58,7 +60,7 @@ const abilityEntries: Entry[] = JOB_ABILITIES.map(a => ({
 }))
 const moveEntries: Entry[] = MONSTER_MOVES.map(m => ({
   key: 'move' + m.id, name: m.name, detail: 'monster move', group: '',
-  file: { id: monsterMoveFileId(m) }, castRoutine: null,
+  file: { id: monsterMoveFileId(m) }, castRoutine: null, moveId: m.id,
 }))
 
 export default function EffectBrowser({ ffxiPath, head, caster, casterRace, settings, uiHidden }: {
@@ -84,6 +86,10 @@ export default function EffectBrowser({ ffxiPath, head, caster, casterRace, sett
   const [cast, setCast] = useState<CastClips | null>(null)
   /** Monster moves whose effect file exists in this install (about 84%). */
   const [movesHere, setMovesHere] = useState<Set<string> | null>(null)
+  /** Monster moves: only the picked creature's family's (LandSandBoat mob_skill_lists). */
+  const [ownMoves, setOwnMoves] = useState(true)
+  const creatureName = CREATURES.find(m => m.path === creaturePath)?.name ?? ''
+  const family = useMemo(() => movesForCreature(creatureName), [creatureName])
   useEffect(() => {
     let cancelled = false
     loadCastClips(ffxiPath, casterRace).then(c => { if (!cancelled) setCast(c) }).catch(() => { if (!cancelled) setCast(null) })
@@ -100,14 +106,18 @@ export default function EffectBrowser({ ffxiPath, head, caster, casterRace, sett
 
   const entries = useMemo<Entry[]>(() => {
     if (kind === 'magic') return spellEntries
-    if (kind === 'monster') return movesHere ? moveEntries.filter(e => movesHere.has(e.key)) : []
+    if (kind === 'monster') {
+      if (!movesHere) return []
+      const here = moveEntries.filter(e => movesHere.has(e.key))
+      return ownMoves && family ? here.filter(e => e.moveId !== undefined && family.ids.has(e.moveId)) : here
+    }
     // Weapon skills and the race's few listed abilities, then every job ability.
     const listed = skillOptions(casterRace).map(s => ({
       key: s.category + '/' + s.name, name: s.name, detail: s.category, group: s.category, file: { path: s.path }, castRoutine: null,
     }))
     const names = new Set(listed.map(e => e.name.toLowerCase()))
     return [...listed, ...abilityEntries.filter(e => !names.has(e.name.toLowerCase()))]
-  }, [kind, casterRace, movesHere])
+  }, [kind, casterRace, movesHere, ownMoves, family])
   const groups = kind === 'magic' ? SPELL_SKILLS
     : kind === 'skills' ? [...SKILL_CATEGORIES, ...new Set(abilityEntries.map(e => e.group))].filter(g => entries.some(e => e.group === g))
     : []
@@ -201,6 +211,12 @@ export default function EffectBrowser({ ffxiPath, head, caster, casterRace, sett
               <option value="">All ({entries.length})</option>
               {groups.map(k => <option key={k} value={k}>{k[0].toUpperCase() + k.slice(1)}</option>)}
             </select>
+          )}
+          {monster && (
+            <label className="toggle-row">
+              <input type="checkbox" checked={ownMoves} onChange={e => setOwnMoves(e.target.checked)} />
+              <span>{family ? `Only ${family.family}'s moves` : 'No move list for this creature: all moves'}</span>
+            </label>
           )}
           <label className="target-pick">
             <span>{monster ? 'User' : 'Target'}</span>

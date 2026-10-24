@@ -49,6 +49,35 @@ const EMPTY_ZONE: ParsedZone = { prefabs: [], instances: [], textures: [], textu
 /** Caster and target stand this far apart, world units (a little under casting range). */
 const SPACING = 4.5
 
+/**
+ * How far a model reaches ahead of its origin (its +X, the way it faces) and
+ * how tall it is, from its vertices: the 98th percentile, since some models
+ * park hidden parts thousands of units away. A behemoth stood on top of the
+ * caster at a fixed spacing.
+ */
+function modelReach(model: ParsedDatFile): { front: number; height: number } {
+  const xs: number[] = [], ys: number[] = []
+  for (const m of model.meshes) {
+    for (let i = 0; i < m.vertices.length; i += 9) { xs.push(m.vertices[i]); ys.push(-m.vertices[i + 1]) }
+  }
+  if (!xs.length) return { front: 0.5, height: 2 }
+  const at = (v: number[], q: number) => v.sort((a, b) => a - b)[Math.min(v.length - 1, Math.floor(v.length * q))]
+  return { front: Math.max(0.3, at(xs, 0.98)), height: Math.max(0.5, at(ys, 0.98) - at(ys, 0.02)) }
+}
+
+/** Puts the camera back far enough for both actors, looking at their middle. */
+function FrameStage({ gap, height }: { gap: number; height: number }) {
+  const camera = useThree(st => st.camera)
+  const controls = useThree(st => st.controls) as unknown as { target?: THREE.Vector3; update?: () => void } | null
+  useEffect(() => {
+    const look = Math.min(height * 0.45, 4)
+    camera.position.set(0, look + 1.2, Math.max(8.5, gap * 1.2 + height * 0.8))
+    controls?.target?.set(0, look, 0)
+    controls?.update?.()
+  }, [camera, controls, gap, height])
+  return null
+}
+
 export interface EffectBundle {
   zone: ParsedZone
   /** Install-relative path, for the readout. */
@@ -388,6 +417,12 @@ export function EffectViewer({ caster, casterIdle, casterMotions, target, target
 }) {
   const [casterStage, setCasterStage] = useState<Stage | null>(null)
   const [targetStage, setTargetStage] = useState<Stage | null>(null)
+  // Apart by size: each one's reach toward the other, plus room between.
+  const { gap, height } = useMemo(() => {
+    const a = caster ? modelReach(caster) : { front: 0.5, height: 2 }
+    const b = target ? modelReach(target) : { front: 0.5, height: 2 }
+    return { gap: Math.max(SPACING, a.front + b.front + 2.5), height: Math.max(a.height, b.height) }
+  }, [caster, target])
   const sources = useMemo(() => effect ? [effect.zone, effect.race ?? EMPTY_ZONE, effect.shared ?? EMPTY_ZONE] : null, [effect])
   return (
     <Canvas
@@ -408,8 +443,8 @@ export function EffectViewer({ caster, casterIdle, casterMotions, target, target
           front", is 1.2 out along it): the caster as authored looks at the
           target, and the target, turned half round, back at it. A half turn
           on the caster too (judged by eye, stage 1) had it facing away. */}
-      {caster && <Actor model={caster} idle={casterIdle} x={-SPACING / 2} yaw={0} onStage={setCasterStage} />}
-      {target && <Actor model={target} idle={targetIdle} x={SPACING / 2} yaw={Math.PI} onStage={setTargetStage} />}
+      {caster && <Actor model={caster} idle={casterIdle} x={-gap / 2} yaw={0} onStage={setCasterStage} />}
+      {target && <Actor model={target} idle={targetIdle} x={gap / 2} yaw={Math.PI} onStage={setTargetStage} />}
       {effect && (
         <>
           <EffectParticles key={effect.path} effect={effect.zone} />
@@ -418,7 +453,8 @@ export function EffectViewer({ caster, casterIdle, casterMotions, target, target
           <EffectRunner sources={sources!} castRoutine={effect.castRoutine} ownMotions={effect.motions} caster={casterStage} target={targetStage} playId={playId} volume={volume} casterMotions={casterMotions} />
         </>
       )}
-      <OrbitControls makeDefault target={[0, 1, 0]} maxDistance={60} />
+      <OrbitControls makeDefault target={[0, 1, 0]} maxDistance={120} />
+      <FrameStage gap={gap} height={height} />
     </Canvas>
   )
 }

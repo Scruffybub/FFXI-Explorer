@@ -1,5 +1,6 @@
 /**
- * Builds resources/ability-effects.json and resources/mob-skill-effects.json:
+ * Builds resources/ability-effects.json, resources/mob-skill-effects.json and
+ * resources/mob-skill-lists.json:
  * each job ability's and monster move's id, name and animation number (its
  * effect file: lib/skillList.ts).
  *
@@ -7,7 +8,8 @@
  *
  * The client never says which effect an ability or a monster move plays (the
  * server sends it), so the numbers come from LandSandBoat's abilities.sql and
- * mob_skills.sql (GPL-3.0; see THIRD-PARTY-NOTICES.md). Only those facts are
+ * mob_skills.sql, and which family has which from mob_skill_lists.sql
+ * (GPL-3.0; see THIRD-PARTY-NOTICES.md). Only those facts are
  * kept, not the SQL. Abilities: job abilities only (actionType 6); weapon
  * skills and dances come from the animation list per race instead.
  */
@@ -42,3 +44,19 @@ fs.writeFileSync(path.join(out, 'mob-skill-effects.json'), JSON.stringify(mobSki
 
 console.log(abilities.length, 'job abilities;', mobSkills.length, 'monster moves')
 console.log(JSON.stringify(abilities.slice(0, 2)), JSON.stringify(mobSkills.slice(0, 2)))
+
+// Which moves each monster family has (mob_skill_lists.sql), by list name;
+// lists sharing a name (two "Goblin") are merged. The browser matches a
+// creature to a list by name (lib/skillList.ts movesForCreature).
+const listsSql = path.join(dir, 'mob_skill_lists.sql')
+if (fs.existsSync(listsSql)) {
+  const lists = {}
+  for (const f of rows(fs.readFileSync(listsSql, 'utf8'), 'mob_skill_lists')) {
+    const name = str(f[0])
+    if (!name || name === 'NULL') continue
+    ;(lists[name] ??= new Set()).add(num(f[2]))
+  }
+  const out2 = Object.fromEntries(Object.entries(lists).map(([k, v]) => [k, [...v].sort((a, b) => a - b)]))
+  fs.writeFileSync(path.join(out, 'mob-skill-lists.json'), JSON.stringify(out2))
+  console.log(Object.keys(out2).length, 'monster skill lists')
+}
