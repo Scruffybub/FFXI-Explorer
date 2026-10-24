@@ -28,7 +28,7 @@ import { buildModel, MODEL_DEBUG, type BuiltModel } from '../lib/modelBuild'
  * Inverse bind matrices are computed once per model — they depend only on the
  * skeleton, and inverting 69 matrices every frame is pure waste.
  */
-function Animator({
+export function Animator({
   built, model, playing, speed, motion, onFrame, onPosed,
 }: {
   built: BuiltModel
@@ -137,7 +137,7 @@ const TONE_MAPPING: Record<ToneMappingMode, THREE.ToneMapping> = {
 }
 
 /** Applies renderer-level settings that are not React props on the Canvas. */
-function RendererSettings({ settings }: { settings: ModelSettings }) {
+export function RendererSettings({ settings }: { settings: ModelSettings }) {
   const { gl, invalidate } = useThree()
   useEffect(() => {
     gl.toneMapping = TONE_MAPPING[settings.toneMapping]

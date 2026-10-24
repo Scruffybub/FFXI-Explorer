@@ -1,3 +1,4 @@
+import type { EffectRoutine } from './EffectRoutineParser'
 import type { ParsedCollision } from './CollisionParser'
 import type { Emission, Spread } from './GeneratorParser'
 import type { SpriteMesh } from './SpriteParser'
@@ -77,6 +78,11 @@ export interface ParsedSkeleton {
   bones: ParsedBone[]
   /** Pre-computed world-space 4x4 matrices (row-major, 16 floats each) */
   matrices: number[][]
+  /**
+   * Reference points effects attach to, by number (SkeletonParser): a bone
+   * and an offset in its space. 2 is above the head, 8/9 the feet.
+   */
+  jointRefs?: { bone: number; offset: [number, number, number] }[]
 }
 
 export interface ParsedDatFile {
@@ -163,7 +169,9 @@ export interface GeneratorSpawn {
    * tint alpha on the 0..1 = byte/255 scale; `u`/`v` add to the texture offset.
    */
   curves: { alpha?: number[]; u?: number[]; v?: number[]; r?: number[]; g?: number[]; b?: number[] }
-  attach: number                          // 0xE sun, 0xF moon, 0 none (body[0] low nibble)
+  attach: number                          // 0xE sun, 0xF moon, 0 none (body[0] low nibble); 1 caster, 2 target
+  /** Joint references on the caster and the target (GeneratorParser). */
+  joints: [number, number]
   blend: number                           // 0x1E blend byte, -1 when absent
   /** Time-of-day curves (0x60–0x63), resolved like `curves`. */
   todCurves: { r?: number[]; g?: number[]; b?: number[]; alpha?: number[] }
@@ -247,6 +255,8 @@ export interface ParsedZone {
    * machinery. Resolved to sound effect numbers; see ZoneSound.
    */
   ambient?: ZoneSound[]
+  /** Effect routines (block 0x07): spell and door scripts (EffectRoutineParser). */
+  routines?: EffectRoutine[]
 }
 
 /** A sound a zone generator plays (GeneratorParser RawSoundSpawn, resolved). */

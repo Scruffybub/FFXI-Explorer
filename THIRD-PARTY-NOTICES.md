@@ -60,14 +60,16 @@ attribution of the format research.
 ## Zone and item tables — LandSandBoat (GPL-3.0 source data)
 
 **Files:** `resources/item-names.json`, `resources/zone-music.json`,
-`resources/zone-weather.json`
+`resources/zone-weather.json`, `resources/spell-effects.json`
 
-Built by `scripts/build-item-names.cjs`, `scripts/build-zone-music.cjs` and
-`scripts/build-zone-weather.cjs` from LandSandBoat's `item_equipment.sql`,
-`zone_settings.sql`, `zone_weather.sql` and zone data files. Those sources are
-fetched at build time and are **not vendored** in this repository; the generated
-JSON contains item names, zone→music-id mappings, and each zone's list of
-native weather types in order (no frequencies) extracted from them.
+Built by `scripts/build-item-names.cjs`, `scripts/build-zone-music.cjs`,
+`scripts/build-zone-weather.cjs` and `scripts/build-spell-effects.cjs` from
+LandSandBoat's `item_equipment.sql`, `zone_settings.sql`, `zone_weather.sql`,
+`spell_list.sql` and zone data files. Those sources are fetched at build time
+and are **not vendored** in this repository; the generated JSON contains item
+names, zone→music-id mappings, each zone's list of native weather types in
+order (no frequencies), and each spell's id, name, effect number, magic skill,
+element and valid targets, extracted from them.
 
 The underlying facts are Square Enix's game data rather than LandSandBoat's
 creative work, but the extraction came from a GPL-3.0 project and is recorded
@@ -81,13 +83,18 @@ here so anyone relying on it can make their own assessment.
 `zoneLamps.ts`, `spawnStages.ts`, `GammaBlendPass.ts`, `HazePass.ts`,
 `src/renderer/src/components/SkyLayers.tsx`, `WeatherParticles.tsx`,
 `LampLights.tsx`, `LensFlare.tsx`, the zone transparency rule in
-`ZoneViewer.tsx`, and `src/renderer/src/lib/uiLook.ts` (the game's menu art)
+`ZoneViewer.tsx`, `src/renderer/src/lib/uiLook.ts` (the game's menu art),
+`EffectRoutineParser.ts`, `SkeletonParser.ts` (joint references),
+`DatFile.ts` (footwear info block), `ZoneFile.ts` (sound paths, mesh look-up
+order), `ambientSounds.ts`, `spellList.ts` and `EffectViewer.tsx`
 
 The layouts of generator chunks, D3M effect meshes, KeyFrame curves and
 environment (weather) records, the zone's point lights (generator light links
 and the MZB light table), particle setup flags (billboards, depth writes,
-haze), FFXI's texture-stage and lighting maths, its zone transparency rule, and
-where the game keeps its menu window styles and font were worked out with
+haze), FFXI's texture-stage and lighting maths, its zone transparency rule,
+where the game keeps its menu window styles and font, effect routines, skeleton
+joint references, footwear info, sound generators and paths, and where spell
+effect files sit were worked out with
 reference to
 [kuluu-ffxi](https://github.com/jondwillis/kuluu-ffxi) and to xim in
 [Heyrio/FFXI-BROWSER-GAME](https://github.com/Heyrio/FFXI-BROWSER-GAME), both

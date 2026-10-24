@@ -54,8 +54,16 @@ export interface RawModelSpawn {
    * the channel they drive. See KEYFRAME_CHANNELS.
    */
   tracks: Partial<Record<KeyFrameChannel, string>>
-  /** Attach type, the low nibble of body[0]: 0xE sun, 0xF moon, 0 none. */
+  /**
+   * Attach type, the low nibble of body[0]: 0xE sun, 0xF moon, 0 none; on
+   * actors (xim AttachType) 1 the source, 2 the target.
+   */
   attach: number
+  /**
+   * The joint references it sits on (bits 4-9 and 10-15 of body[0..1]): the
+   * source's, then the target's (SkeletonParser jointRefs).
+   */
+  joints: [number, number]
   /** The 0x1E blend byte, or -1 when the generator carries none. */
   blend: number
   /** Time-of-day KeyFrame ids (0x60–0x63), sampled by the fraction of the day. */
@@ -422,6 +430,7 @@ export function parseModelSpawn(body: Uint8Array): RawModelSpawn | null {
   return {
     model, position, rotation, scale, tint, uvScroll, life, tracks, blend, todTracks, spin,
     attach: view.getUint16(0, true) & 0xf,
+    joints: [(view.getUint16(0, true) >> 4) & 0x3f, (view.getUint16(0, true) >> 10) & 0x3f],
     followCamera: (flags & FLAG_FOLLOW_CAMERA) !== 0,
     link: isLight ? 'light' : isDistortion ? 'distortion' : linked === LINKED_SPRITE ? 'sprite' : linked === LINKED_FLARE ? 'flare' : 'mesh',
     billboard: flags & 0xffff & ~FLAG_FOLLOW_CAMERA,

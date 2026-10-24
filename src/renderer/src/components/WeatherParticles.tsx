@@ -502,6 +502,41 @@ export function ZoneEffects({ zone, range }: {
  * Zone effects runs the auto-run ones, until Stop; their children start as
  * their parents say (the rainbow's nij1 hands over to nij2 when it ends).
  */
+/**
+ * A spell's or ability's effect file, read as a small zone (parseZoneFile):
+ * every generator in it waits to be started by a post in `childEvents`, which
+ * the effect runner (EffectViewer) sends as its routine says, at the caster's
+ * or the target's joint. Starters that draw nothing pass the post on to their
+ * birth children, as with TriggeredEffects.
+ */
+export function EffectParticles({ effect }: { effect: ParsedZone }) {
+  const systems = useMemo(() => buildSystems(effect, () => true, 1, () => true, false, 8), [effect])
+  const relays = useMemo(() => {
+    const drawn = new Set(systems.flatMap(s => s.emitters.map(e => e.spawn.dir + '|' + e.spawn.generator)))
+    const m = new Map<string, string[]>()
+    for (const sp of effect.spawns ?? []) {
+      const key = sp.dir + '|' + sp.generator
+      if (!drawn.has(key) && sp.children.birth.length) m.set(key, sp.children.birth)
+    }
+    return m
+  }, [effect, systems])
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).has('census')) {
+      (window as unknown as { __efx?: System[] }).__efx = systems
+    }
+  }, [systems])
+  useFrame(() => {
+    for (let k = childEvents.length - 1; k >= 0; k--) {
+      const ev = childEvents[k]
+      const kids = relays.get(ev.dir + '|' + ev.name)
+      if (!kids) continue
+      childEvents.splice(k, 1)
+      for (const name of kids) childEvents.push({ name, dir: ev.dir, frame: ev.frame, at: ev.at.clone() })
+    }
+  })
+  return <ParticleField systems={systems} weather={false} range={0} triggered />
+}
+
 export function TriggeredEffects({ zone, range }: { zone: ParsedZone; range: number }) {
   const systems = useMemo(() => {
     const pick = (sp: GeneratorSpawn) => (TRIGGERED.test(sp.dir) || placedTrigger(sp)) && !sp.emission.autoRun

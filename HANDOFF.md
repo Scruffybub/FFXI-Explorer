@@ -3822,6 +3822,50 @@ rather than solved.
        real game-loadable DATs is a much larger and riskier step. Saved layouts
        must never contain game assets, only references to the user's install.
 
+- **Spell effect browser — stage 1 built 2026-10-24.** Models → **Effects**:
+  pick a spell, your Character-tab character casts it on a target monster
+  (picker; default Goblin 1).
+  - **Ryan's choices:** spell names from LandSandBoat (downloaded with his OK;
+    `scripts/build-spell-effects.cjs` → `resources/spell-effects.json`, ids,
+    names, effect numbers, skill, element, targets; credited); in the Models
+    tab first, in zones later; a monster target.
+  - **Where effects are:** file number **0xAF0 + effect** (lib/fileTable
+    `fileIdPath`, VTABLE + FTABLE; moved out of uiLook). All 928 spells
+    resolve; 717 distinct files, each one folder (`care` Cure, `fai0` Fire)
+    holding generators, D3Ms, textures, keyframes, sound pointers and 1-4
+    routines.
+  - **Routines** (block 0x07, `EffectRoutineParser.ts`; xim
+    EffectRoutineParser): section 2 commands `op, words, delay, duration,
+    args`, delays sequential, 60 frames a second. Kept: 0x02 start generator
+    for `duration`, 0x03/0x09 call routine (0x09 swaps caster and target),
+    0x0A (6 args)/0x0B sound, 0x00 end. ~80 other ops counted for timing only.
+    A cast runs `main` (xim EffectDisplayer). ParsedZone.routines now holds
+    every file's routines (zones too: doors' open/clos).
+  - **Placement:** generator header u16 0: attach type (low 4 bits; 1
+    caster, 2 target, 3/6 caster-to-target beams, ...) and two 6-bit joint
+    numbers. Joints index the skeleton's **joint reference table** after the
+    bones (SkeletonParser `jointRefs`: count, word, then 26 bytes — bone,
+    unused vec3, offset). Hume male: 0 ground, 1 waist, 2 above head, 3 chest,
+    8/9 toes, 21 body centre, 126/127 hands.
+  - **Played by** `EffectViewer.tsx` (stage, `Actor`, `EffectRunner`) and
+    `EffectParticles` (WeatherParticles): a started generator posts one
+    childEvent per its emission interval until its duration ends, at the
+    actor's joint (bind pose); relays as TriggeredEffects. Particles need
+    GAMMA_BLEND_LAYER on the camera. Caster and target both yawed π (player
+    and monster models face opposite ways as authored).
+  - **Coverage** (all 717 files, 11,487 generators): 81% D3M meshes and 8%
+    sprites (drawn), 5% null timekeepers; not drawn: ring meshes 0x24 (83, in
+    58 files — Cure's rings), distortion 0x22 (318), weighted meshes 0x1D
+    (105). Attach: 84% target, 12% caster, ~3% beams (placed at the target).
+  - **Checked** (`?census=1`: `__playSpell(name)`, `__fxrun`, `__efx`,
+    `__fxCamera`): Fire, Cure, Blizzard, Stone, Thunder, Banish, Poison,
+    Protect, Haste, Bio, Katon Ichi, Foe Requiem, Firaga, Drain, Sleep, Raise
+    all run with no errors. Skipped in most: the shared routines `mdam`
+    (damage reaction) and `proc`, and `vib0`/`fls0` (screen shake and flash).
+  - **Stage 2:** casting motions and posed joints, facing, beams, ring
+    meshes, the shared routines (in a global file), the cast-start effect.
+    Stage 3: abilities, weapon skills, monster moves. Later: cast in zones.
+
 - **Zone sounds — built 2026-10-24.** Panel → **Sound** (was Music) →
   *Zone sounds* (off by default, like the music) and *Sound volume*
   (`MusicSettings.sounds` / `soundsVolume`; `?sounds=1` turns it on).

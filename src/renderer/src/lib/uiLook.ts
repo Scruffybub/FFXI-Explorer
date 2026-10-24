@@ -1,6 +1,7 @@
 import { DatReader } from './ffxi-dat/DatReader'
 import { parseTextureBlock } from './ffxi-dat/TextureParser'
 import { buildBitmapFont } from './bitmapFont'
+import { fileIdPath } from './fileTable'
 
 /**
  * The app's look: the game's own menu art in any of its 8 window styles
@@ -210,25 +211,14 @@ function controlArt(tex: Map<string, Texture>): Record<string, string> {
   }
 }
 
-/** File id -> path, from VTABLE (which ROM) and FTABLE (folder << 7 | file). */
-async function fileIdPath(root: string, id: number, tables: { v?: Uint8Array; f?: DataView }): Promise<string | null> {
-  tables.v ??= new Uint8Array(await window.ffxi.readDat(root, 'VTABLE.DAT'))
-  tables.f ??= new DataView(await window.ffxi.readDat(root, 'FTABLE.DAT'))
-  const rom = tables.v[id]
-  if (!rom || id * 2 + 2 > tables.f.byteLength) return null
-  const entry = tables.f.getUint16(id * 2, true)
-  return `${rom === 1 ? 'ROM' : 'ROM' + rom}/${entry >> 7}/${entry & 0x7f}.DAT`
-}
-
 let kitPromise: Promise<ClassicKit> | null = null
 
 /** Reads the 8 window styles and the menu font once; later calls share the result. */
 export function loadClassicKit(root: string): Promise<ClassicKit> {
   kitPromise ??= (async () => {
-    const tables = {}
     const styles: ClassicStyle[] = []
     for (let n = 1; n <= 8; n++) {
-      const path = (await fileIdPath(root, 13 + n, tables).catch(() => null)) ?? `ROM/0/${13 + n}.DAT`
+      const path = (await fileIdPath(root, 13 + n).catch(() => null)) ?? `ROM/0/${13 + n}.DAT`
       const tex = texturesOf(await window.ffxi.readDat(root, path))
       const get = (name: string) => {
         const t = tex.get('menu ' + name)

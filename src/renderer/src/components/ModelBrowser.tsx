@@ -8,6 +8,7 @@ import CharacterBuilder from './CharacterBuilder'
 import { RACES, type CharacterSpec, type ComposedCharacter } from '../lib/characterModel'
 import MapViewer from './MapViewer'
 import { ZONES, type ZoneEntry } from '../lib/zoneList'
+import EffectBrowser from './EffectBrowser'
 
 /**
  * The model viewer half of the app: its own sidebar and its own viewport,
@@ -44,7 +45,7 @@ export default function ModelBrowser({
   const [speed, setSpeed] = useState(1)
   const [settings, setSettings] = useState<ModelSettings>(DEFAULT_MODEL)
 
-  const [mode, setMode] = useState<'browse' | 'character' | 'maps'>('browse')
+  const [mode, setMode] = useState<'browse' | 'character' | 'maps' | 'effects'>('browse')
 
   // Only zones the table actually lists map pages for; 'unknown' rows and a
   // handful of instanced areas carry none.
@@ -109,11 +110,7 @@ export default function ModelBrowser({
     ? (character)
     : (load.status === 'ready' ? load.model : null)
 
-  return (
-    <>
-      <aside className="sidebar">
-        <div className="sidebar-head">
-          {viewSwitch}
+  const modeSwitch = (
           <div className="mode-switch">
             <button
               className={mode === 'browse' ? 'active' : ''}
@@ -133,7 +130,48 @@ export default function ModelBrowser({
             >
               Maps
             </button>
+            <button
+              className={mode === 'effects' ? 'active' : ''}
+              onClick={() => setMode('effects')}
+            >
+              Effects
+            </button>
           </div>
+  )
+
+  if (mode === 'effects') {
+    return (
+      <>
+        <EffectBrowser
+          ffxiPath={ffxiPath}
+          head={<>{viewSwitch}{modeSwitch}</>}
+          caster={character}
+          settings={settings}
+          uiHidden={uiHidden}
+        />
+        {!uiHidden && (
+          <ModelPanel
+            settings={settings}
+            onChange={patch => setSettings(s => ({ ...s, ...patch }))}
+            animations={[]}
+            motion={null}
+            onMotionChange={() => {}}
+            playing={playing}
+            onPlayingChange={setPlaying}
+            speed={speed}
+            onSpeedChange={setSpeed}
+          />
+        )}
+      </>
+    )
+  }
+
+  return (
+    <>
+      <aside className="sidebar">
+        <div className="sidebar-head">
+          {viewSwitch}
+          {modeSwitch}
           {mode === 'maps' && (
             <input
               className="search"

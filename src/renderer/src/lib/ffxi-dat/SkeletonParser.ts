@@ -117,7 +117,27 @@ export function parseSkeleton(reader: DatReader): ParsedSkeleton | null {
         }
       }
 
-      return { bones, matrices }
+      // The joint references after the bones (xim SkeletonSection): a count,
+      // a word, then 26 bytes each — bone index, a vector nobody reads, and an
+      // offset in that bone's space. Effects name them by number: Fire's
+      // flames sit on the target's reference 1, Cure's rings on 21.
+      const jointRefs: NonNullable<ParsedSkeleton['jointRefs']> = []
+      const refsAt = dataStart + 4 + noBone * BONE_SIZE
+      const blockEnd = offset + next * 16
+      if (refsAt + 4 <= Math.min(blockEnd || reader.length, reader.length)) {
+        reader.seek(refsAt)
+        const count = reader.readUint16()
+        reader.skip(2)
+        for (let i = 0; i < count && refsAt + 4 + (i + 1) * 26 <= reader.length; i++) {
+          reader.seek(refsAt + 4 + i * 26)
+          const bone = reader.readUint16()
+          reader.skip(12)
+          const offsetXyz: [number, number, number] = [reader.readFloat32(), reader.readFloat32(), reader.readFloat32()]
+          jointRefs.push({ bone: bone < noBone ? bone : 0, offset: offsetXyz })
+        }
+      }
+
+      return { bones, matrices, jointRefs }
     }
 
     if (next === 0) break

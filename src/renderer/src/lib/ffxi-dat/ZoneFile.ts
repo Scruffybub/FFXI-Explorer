@@ -1,6 +1,7 @@
 import { DatReader } from './DatReader'
 import { parseTextureBlock } from './TextureParser'
 import { parseModelSpawn, parseKeyFrames, parseSoundSpawn } from './GeneratorParser'
+import { parseEffectRoutine, type EffectRoutine } from './EffectRoutineParser'
 import { parseD3m, type ParsedD3m } from './D3mParser'
 import { parseSprite, type ParsedSprite } from './SpriteParser'
 import { parseEnvironmentRecord } from './EnvironmentParser'
@@ -31,6 +32,8 @@ const BLOCK_MMB = 0x2E
 const BLOCK_GENERATOR = 0x05
 /** A line a sound runs along: "RAB", points with a radius, segments (xim PathSection). */
 const BLOCK_PATH = 0x4A
+/** An effect routine: a timed script of generators, sounds and calls (EffectRoutineParser). */
+const BLOCK_ROUTINE = 0x07
 /** Effect meshes, spawned by generators — the sea foam is one. */
 const BLOCK_D3M = 0x1F
 /** Sprite quads, spawned by particle generators — the rain is one. */
@@ -788,6 +791,18 @@ export function parseZoneFile(
     sounds.push({ dir: block.dir, name: block.name.trim(), id: new DataView(buffer).getUint32(at + 8, true) })
   }
 
+  // Effect routines (block 0x07): the scripts that time spell and ability
+  // effects, and doors' open and close.
+  const routines: EffectRoutine[] = []
+  {
+    const view = new DataView(buffer)
+    for (const block of blocks.filter(b => b.type === BLOCK_ROUTINE)) {
+      const start = block.dataOffset - 8
+      const r = parseEffectRoutine(view, start, block.dataOffset + block.dataLength, block.dir, block.name.trim())
+      if (r) routines.push(r)
+    }
+  }
+
   // Ambient sounds: generators linking a sound pointer (waterfalls, rivers,
   // birds, machinery). The pointer is looked for in the generator's folder and
   // its parents, then anywhere in the zone (xim AudioEmitter).
@@ -822,7 +837,7 @@ export function parseZoneFile(
   }
 
   return {
-    prefabs, instances, textures, textureNames, collision, spawns, environment, sounds, ambient,
+    prefabs, instances, textures, textureNames, collision, spawns, environment, sounds, ambient, routines,
     shared: { prefabs: systemSprites, textures: systemTextures },
   }
 }
