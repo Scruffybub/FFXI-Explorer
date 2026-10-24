@@ -306,19 +306,27 @@ function EffectRunner({ sources, castRoutine, caster, target, playId, volume, ca
       } else if (cmd.kind === 'routine') {
         const [c, t] = cmd.onTarget ? [seq.target, seq.caster] : [seq.caster, seq.target]
         startRoutine(seq.src, cmd.ref, at, c, t)
+      } else if (cmd.kind === 'ranged') {
+        // The race file's lc<type> / ls<type> (xim resolveRangedEffectId): a
+        // song with no instrument sings (00), geomancy rings its handbell
+        // (11, RangeType.HandbellGeo), anything else throws (05).
+        const code = cmd.subtype === 1 ? '00' : cmd.subtype === 2 ? '11' : '05'
+        startRoutine(seq.src, (cmd.start ? 'lc' : 'ls') + code, at, seq.caster, seq.target)
       } else if (cmd.kind === 'stop') {
         running.current = running.current.filter(r => r.spawn.generator !== cmd.ref)
       } else if (cmd.kind === 'stopRoutine') {
         sequences.current = sequences.current.filter(s => s.routine.name !== cmd.ref)
       } else if (cmd.kind === 'motion') {
         // A race-file motion by name, ? any body part: stage 0 (the chant)
-        // loops, a last stage 2 plays once, anything else holds its end
-        // until the next (white magic's raised hand waits for its recovery).
+        // loops, a last stage 2 plays once, and stage 1 holds its end until
+        // the next (white magic's raised hand waits for its recovery) — or
+        // loops when the family has no stage 0 (singing is sk1, then sk2).
         const prefix = cmd.ref.replace(/\?$/, '')
         const clips = cast?.motions.filter(c => c.name.startsWith(prefix)) ?? []
         if (!clips.length) { log.current.skipped.push('motion ' + cmd.ref); return }
         const stage = prefix[2]
-        seq.caster.play(clips, stage === '0' ? 'loop' : stage === '2' ? 'once' : 'hold')
+        const hasStart = !!cast?.motions.some(c => c.name.startsWith(prefix.slice(0, 2) + '0'))
+        seq.caster.play(clips, stage === '0' || (stage === '1' && !hasStart) ? 'loop' : stage === '2' ? 'once' : 'hold')
       } else if (cmd.kind === 'sound') {
         const s = find.sound(seq.src, seq.routine.dir, cmd.ref).hits[0]
         if (s) { playSound(s.id, volume); log.current.sounds.push(s.id) } else log.current.skipped.push('sound ' + cmd.ref)

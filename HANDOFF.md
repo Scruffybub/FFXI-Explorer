@@ -3957,8 +3957,19 @@ rather than solved.
       caster round. Caster yaw is 0, the target's π. Cursed Sphere's vortex
       exposed it (it formed "behind").
     - Checked: Cure, Fire, Drain, Cursed Sphere.
-  - **Stage 2, still to do:** songs' and geomancy's casts (op 0x76), pitch in
-    beams (yaw only now), accelerations in a beam's frame. Stage 3:
+  - **Songs and geomancy (2026-10-24).** Their cast routines (`caso`,
+    `cage`) and releases (`shso`, `shge`) use **0x76/0x77** start/finish
+    ranged animation, by subtype (1 songs, 2 geomancy, 0 throwing; xim
+    resolveRangedEffectId): a player's equipped ranged item picks the
+    race-file routine `lc<type>`/`ls<type>`; with none, songs sing (`lc00`
+    plays `sk1?`, `ls00` stops it and plays `sk2?`), geomancy always rings
+    the handbell (`lc11`: `negc` circle and `gc0?`; `ls11`: `eigc` burst and
+    `gc2?`), else throwing (`05`). Motion rule: stage 1 loops when its
+    family has no stage 0 (singing). Checked: Foe Requiem (music notes,
+    rings on both), Indi-Regen (orb, red pillars). No instrument or bell is
+    drawn: held items are not.
+  - **Stage 2, still to do:** pitch in beams (yaw only now), accelerations in
+    a beam's frame; instruments and bells in hand. Stage 3:
     abilities, weapon skills, monster moves. Later: cast in zones; the
     scale-curve and ring sweep for zone effects.
 

@@ -31,6 +31,12 @@ export type RoutineCommand =
   | { kind: 'stop'; delay: number; ref: string }
   /** Stop a running routine (0x5F): a release ends the casting circle's `ner2`. */
   | { kind: 'stopRoutine'; delay: number; ref: string }
+  /**
+   * Start (0x76) or finish (0x77) the ranged animation, by subtype: 1 songs, 2
+   * geomancy, 0 throwing and shooting (xim StartRangedAnimationRoutine). The
+   * runner turns it into the race file's lc../ls.. routine.
+   */
+  | { kind: 'ranged'; delay: number; start: boolean; subtype: number }
   | { kind: 'end'; delay: number }
   | { kind: 'other'; delay: number; op: number }
 
@@ -76,6 +82,8 @@ export function parseEffectRoutine(view: DataView, blockStart: number, blockEnd:
       commands.push({ kind: 'generator', delay, duration, ref: readName(view, args) })
     } else if ((op === 0x1e || op === 0x2d) && argWords >= 1) {
       commands.push({ kind: 'stop', delay, ref: readName(view, args) })
+    } else if ((op === 0x76 || op === 0x77) && argWords >= 1) {
+      commands.push({ kind: 'ranged', delay, start: op === 0x76, subtype: view.getUint32(args, true) })
     } else if (op === 0x5f && argWords >= 1) {
       commands.push({ kind: 'stopRoutine', delay, ref: readName(view, args) })
     } else if ((op === 0x03 || op === 0x09 || op === 0x3b || op === 0x3c || (op === 0x0a && argWords !== 6)) && argWords >= 1) {
