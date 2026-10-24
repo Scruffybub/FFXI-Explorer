@@ -22,6 +22,8 @@ const BLOCK_IMG = 0x20
 const BLOCK_BONE = 0x29
 const BLOCK_VERTEX = 0x2A
 export const BLOCK_ANIM = 0x2B
+/** Model info: movement type, movement character, shake factor, weapon type.. */
+const BLOCK_INFO = 0x45
 
 const DATHEAD_SIZE = 8
 const BLOCK_PADDING = 8
@@ -141,6 +143,23 @@ export function parseDatFile(
 /** True if this DAT carries animation blocks, even though we cannot decode them yet. */
 export function hasAnimations(buffer: ArrayBuffer): boolean {
   return parseBlockChain(new DatReader(buffer)).some(b => b.type === BLOCK_ANIM)
+}
+
+/**
+ * The footstep sound suffix from a feet model's info block (0x45): the
+ * movement character (base 36; 0xFF reads '0') then the shake factor + 1, as
+ * xim's playFootEffect builds it. Surveyed over every race (2026-10-24): the
+ * character is 1 for boots and shoes, 2 for sandals and the like; the shake
+ * is 0 on Tarutaru, 2 on Galka, 1 on the rest. Null with no info block.
+ */
+export function readFootSound(buffer: ArrayBuffer): string | null {
+  const reader = new DatReader(buffer)
+  const block = parseBlockChain(reader).find(b => b.type === BLOCK_INFO)
+  if (!block || block.dataLength < BLOCK_PADDING + 3) return null
+  reader.seek(block.dataOffset + BLOCK_PADDING + 1)
+  const movement = reader.readUint8()
+  const shake = reader.readUint8()
+  return (movement === 0xFF ? '0' : movement.toString(36)) + (shake + 1).toString(36)
 }
 
 /** Parse a standalone skeleton DAT (the per-race files in SKELETON_PATHS). */

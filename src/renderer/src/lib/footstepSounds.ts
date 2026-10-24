@@ -4,9 +4,10 @@ import { decodeSpw } from './bgw'
  * Footstep sounds: the zone's own, from its fses folder (sound pointers
  * `0T11`.., block 0x3D), played as a foot lands.
  *
- * The name is "0", the ground type in hex, then two digits xim takes from the
- * feet equipment's info block (movement character, shake factor + 1). That
- * block is not read yet, so every character wears "11", the first set.
+ * The name is "0", the ground type in hex, then two digits from the feet
+ * equipment's info block (movement character, shake factor + 1; xim
+ * playFootEffect), read by DatFile readFootSound: sandals sound unlike boots,
+ * and a Galka treads heavier than a Tarutaru.
  *
  * Sound effects are .spw files (lib/bgw.ts decodeSpw) in the sound folders,
  * which overlay like the ROM folders: the first that has the file wins.
@@ -52,9 +53,17 @@ function load(id: number): Promise<AudioBuffer | null> {
   return p
 }
 
-/** The sound for a footfall on this ground, if the zone has one. */
-export function footstepSoundId(sounds: { dir: string; name: string; id: number }[] | undefined, terrain: number): number | null {
-  const name = `0${terrain.toString(16)}11`
+/**
+ * The sound for a footfall on this ground, if the zone has one. `feet` is the
+ * character's footwear suffix (characterModel footSound); without a character
+ * it is '12', boots at the Hume, Elvaan and Mithra weight.
+ */
+export function footstepSoundId(
+  sounds: { dir: string; name: string; id: number }[] | undefined,
+  terrain: number,
+  feet: string | null = '12',
+): number | null {
+  const name = `0${terrain.toString(16)}${feet ?? '12'}`
   return sounds?.find(s => /(^|\/)fses$/.test(s.dir) && s.name === name)?.id ?? null
 }
 

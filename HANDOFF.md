@@ -634,8 +634,8 @@ without auto-run, surveyed in 8 zones:
     Both have attach 1, actor.
   - `fses` also holds 0x3D footstep **sounds** (`0111`..`0a33`).
 - **Doors**: Castle Zvahl's `door/_4i*` warp shimmer (`cntr` sprite plus
-  `dis2` distortion). Bastok's `door/_05*`: `toke`/`tobi`/`tome` meshes
-  `sit1`, `tam1`, `kabe`.
+  `dis2` distortion). Uleguerand Range's `f_xa/door/_05*` (first written
+  here as Bastok's): `toke`/`tobi`/`tome` meshes `sit1`, `tam1`, `kabe`.
 - **One-offs**: La Theine's rainbow (`effe/niji`), Misareaux `effe/umi1`, and
   Whitegate `effe/funs` and `effe/1pba`.
 - **How the game picks a footstep** (xim ZoneDrawer.emitFootSteps, format
@@ -782,7 +782,24 @@ without auto-run, surveyed in 8 zones:
       `lib/bgw.ts decodeSpw`.
     - The name is `0` + ground type (hex) + two digits from the feet
       equipment's info block (movement char, shake factor + 1; xim
-      `playFootEffect`). That block is not read, so everyone uses `11`.
+      `playFootEffect`). **Read since 2026-10-24** (DatFile
+      `readFootSound`, block **0x45** "info": byte 1 movement character, byte
+      2 shake factor; characterModel `footSound`). Surveyed over every race's
+      feet models: movement 1 for boots and shoes, 2 for sandals and the
+      like; shake 0 Tarutaru, 2 Galka, 1 the rest (a few exceptions). Bare
+      feet take the race's first feet model; with no character, `12`.
+      Verified in Western Altepa (`?census=1&walkdebug=1`, `__setChar`): Hume
+      boots 0312 se101008, sandals 0322 se107008; Galka 0313/0323; Tarutaru
+      0311/0321.
+    - **Foot finder fixed the same day.** It took the lowest bone on each
+      side, which found helper bones parked on the ground plane and Galka's
+      off-centre bone 105: only Tarutaru and Elvaan males stepped with both
+      feet (Hume female never; Mithra, Galka, Elvaan female one foot). Now
+      the lowest mirrored pair (same x and height, opposite z), skipping the
+      ground plane: the toes on all eight races, which now alternate walking
+      and running. `__footScan()` (census) lists every bone's walk range.
+      Key events need `walkdebug=1` without pointer lock, and the race's
+      motions take ~20 s to load: a harness missing either sees no steps.
     - `lib/footstepSounds.ts` decodes once, caches, and plays through its own
       AudioContext at Scene → Footstep volume (`footstepVolume`, default
       0.6). App passes the install path (`setSoundRoot`).
@@ -823,10 +840,29 @@ without auto-run, surveyed in 8 zones:
       it barely shows in stills.
     - Misareaux `effe/umi1`: bright white smoke puffs (`kem1`).
     - Whitegate `effe/1pba`: inside a closed building.
-  - **Bastok's door meshes** (`sit1`, `tam1`, `kabe`) still do not resolve,
-    so Bastok lists nothing.
-- **Still to do:** the footwear info block (boots vs sandals sound
-  different).
+  - **Uleguerand Range's ice doors (2026-10-24).** These were misfiled as
+    Bastok's: `f_xa` is the Xarcabard family's folder, and the doors
+    (`f_xa/door/_05*`) are in Uleguerand Range (ROM3/0/4.DAT; also Abyssea -
+    Uleguerand and Xarcabard [S]). Bastok Markets has no door effects. Their
+    meshes are siblings, not ancestors: `sit1`/`tam1`/`tome` D3Ms and the
+    zone mesh (0x2E) `kabe` in `f_xa/effe`. Retail looks for a mesh in the
+    generator's folders, then anywhere in the zone file (D3M before zone
+    mesh), then the shared file (xim resolveStaticMeshLink); ZoneFile now
+    does the middle step too, for triggered generators only. `_058/tobi`
+    raises an ice wall (`kabe`) across a cave mouth, `_058/toke` drips;
+    `_051`/`_055` sit at the origin and are not listed. The wall reads flat
+    and bright beside the cave ice: Ryan to judge. Also newly listed: La
+    Theine `door/_2u0/niji` (a second rainbow), Xarcabard's `effe/orla`
+    (aurora curtains standing on the snow; unjudged) and Bearclaw
+    Pinnacle's `effe/kira`.
+  - **Go to, same day.** Stands inside the group's nearest draw-distance
+    fade (x Effect distance x 0.6): at 39 units the door had faded out.
+    Tries rings at 60% and 35% before looking down from above (inside the
+    cave every full-distance spot hit rock). Aims 40% up only for
+    billboards. A mesh group aims at its vertices' middle, with their
+    half-diagonal as size: `kabe` sits 22-27 units off its point, so Go to
+    framed bare canyon.
+- **Footwear sounds: done 2026-10-24** (above).
 - **Stage 2 plan (as written before building):**
   1. Load the system D3Ms too.
   2. Resolve triggered mesh links against them.
@@ -3756,9 +3792,17 @@ rather than solved.
             matrix updates (`matrixAutoUpdate = false`). The upload cost left
             the CPU profile; fps unchanged (~145 in Outer Ra'Kaznar, partly
             GPU-bound).
-          - **Seen, not fixed (also in 0.1.10):** Outer Ra'Kaznar's overview
-            camera sits inside its weather fog and shows a flat purple screen.
-            Walking in looks right.
+          - **Fixed 2026-10-24: Outer Ra'Kaznar's purple overview.** Zone
+            weather starts its fog at the orbit target, and SmartOrbitControls
+            put the target 200 units straight ahead, in mid-air; the zone's
+            fog is opaque ~130 units in, so everything was purple. The target
+            is now the first collision hit along the view. The default view
+            looks level over the collision, so a miss takes the point on the
+            line of sight nearest the zone centre; only looking away from the
+            zone keeps the 200-unit guess. Fog start 200 -> 1090 there, -> 754
+            in West Ronfaure (was mostly grey), -> 1105 in South Gustaberg (was
+            half fogged). The framing is unchanged; orbiting now circles the
+            ground looked at.
         - **Not done, if more is wanted:** merge single-instance prefabs that
           share a material into one static mesh. Watch the per-instance
           `aLamps` and the overlay order.

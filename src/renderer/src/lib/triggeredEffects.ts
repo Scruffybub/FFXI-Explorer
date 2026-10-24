@@ -24,6 +24,14 @@ export interface TriggerGroup {
    * La Theine's rainbow is a 440-unit billboard; a door shimmer a few units.
    */
   size: number
+  /**
+   * The nearest distance its generators fade out at (their draw distance's
+   * far edge, before Effect distance), or null if none fades: Go to stands
+   * inside it.
+   */
+  fade: number | null
+  /** A billboard reaches up from its point (the rainbow): Go to aims higher. */
+  rises: boolean
 }
 
 interface State { groups: TriggerGroup[]; running: ReadonlySet<string> }

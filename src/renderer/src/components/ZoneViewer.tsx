@@ -2021,7 +2021,12 @@ function MapCamera({
   return null
 }
 
-function SmartOrbitControls({ size, lookAt }: { size: number; lookAt?: THREE.Vector3 }) {
+function SmartOrbitControls({ size, lookAt, world, center }: {
+  size: number
+  lookAt?: THREE.Vector3
+  world?: CollisionWorld | null
+  center?: THREE.Vector3
+}) {
   const { camera } = useThree()
   const target = useMemo(() => {
     // Isolation mode aims at the picked geometry directly. The usual guess —
@@ -2032,9 +2037,17 @@ function SmartOrbitControls({ size, lookAt }: { size: number; lookAt?: THREE.Vec
       return lookAt.clone()
     }
     const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion)
-    const dist = Math.min(size * 0.5, 200)
+    // Orbit the ground being looked at. Zone weather starts its fog at the
+    // orbit target, so a target in mid-air left the zone itself deep in the
+    // fog: Outer Ra'Kaznar, whose fog is opaque ~130 units in, opened as a
+    // flat purple screen (2026-10-24). The default view looks level, over the
+    // collision, so a miss falls back to the point on the line of sight
+    // nearest the zone centre; looking away from the zone, a guess ahead.
+    const hit = world?.castRay(camera.position, dir, size * 5)
+    const along = center ? center.clone().sub(camera.position).dot(dir) : 0
+    const dist = hit ? hit.distance : along > 0 ? along : Math.min(size * 0.5, 200)
     return camera.position.clone().add(dir.multiplyScalar(dist))
-  }, [camera, size, lookAt])
+  }, [camera, size, lookAt, world, center])
   return <OrbitControls target={target} maxDistance={size * 5} makeDefault />
 }
 
@@ -2654,7 +2667,8 @@ function FootstepCadence({ body, footsteps }: { body: React.RefObject<WalkBodySt
 function Avatar({
   character, body, playing, speed, motion, moves, footsteps,
 }: {
-  character: ParsedDatFile
+  /** footSound: the feet's footstep sound suffix (characterModel). */
+  character: ParsedDatFile & { footSound?: string | null }
   body: React.RefObject<WalkBodyState>
   playing: boolean
   speed: number
@@ -2692,7 +2706,7 @@ function Avatar({
   const state = useRef<'idle' | 'walk' | 'run' | null>(null)
 
   // Footsteps: the game fires one as a foot touches down (xim
-  // emitFootSteps). The feet are the lowest bone on each side in the bind
+  // emitFootSteps). The feet are the lowest mirrored pair of bones in the bind
   // pose (model space is Y down, so the largest y; the model faces +X, so
   // the sides are ±z). A foot lands when its height above its own lowest
   // point in the clip drops from over FOOT_LIFT to under FOOT_PLANT of the
@@ -2700,17 +2714,45 @@ function Avatar({
   const feet = useMemo(() => {
     if (!character.skeleton || !inverseBind || !built) return null
     const rest = poseSkeleton(character.skeleton, [], inverseBind, 0).worldMats
-    const reach = Math.max(built.bounds.max.y - built.bounds.min.y, 0.5) * 2
+    const height = built.bounds.max.y - built.bounds.min.y
+    // The lowest mirrored pair: same x and height, opposite sides. Taking the
+    // lowest bone per side picked helper bones parked on the ground plane at
+    // the origin, and Galka's off-centre bone 105, so only Tarutaru and Elvaan
+    // males stepped with both feet (2026-10-24). The pairs found are the toes
+    // on every race, lifting 8-17% of the height through the walk.
+    const tol = 0.01 * Math.max(height, 0.5)
     let left = -1, right = -1
-    rest.forEach((m, i) => {
-      if (Math.hypot(m[12], m[13], m[14]) > reach) return
-      if (m[14] > 0 && (left < 0 || m[13] > rest[left][13])) left = i
-      if (m[14] < 0 && (right < 0 || m[13] > rest[right][13])) right = i
+    rest.forEach((a, i) => {
+      if (a[14] <= tol || a[13] > -0.2 * tol) return
+      rest.forEach((b, j) => {
+        if (b[14] >= -tol || Math.abs(a[12] - b[12]) > tol || Math.abs(a[13] - b[13]) > tol || Math.abs(a[14] + b[14]) > tol) return
+        if (left < 0 || a[13] > rest[left][13]) { left = i; right = j }
+      })
     })
-    return left >= 0 && right >= 0
-      ? { bones: [left, right] as const, height: built.bounds.max.y - built.bounds.min.y, lifted: [false, false], base: [-Infinity, -Infinity], clip: null as string | null }
+    return left >= 0
+      ? { bones: [left, right] as const, height, lifted: [false, false], base: [-Infinity, -Infinity], clip: null as string | null }
       : null
   }, [character.skeleton, inverseBind, built])
+  // ?census=1: each bone's rest side and height range over the walk cycle,
+  // for checking which bones the foot finder should take.
+  useEffect(() => {
+    if (!CENSUS || !moves?.walk.length || !character.skeleton || !inverseBind) return
+    const skeleton = character.skeleton
+    const walk = moves.walk
+    ;(window as unknown as Record<string, unknown>).__footScan = () => {
+      const rest = poseSkeleton(skeleton, [], inverseBind, 0).worldMats
+      const a = walk[0]
+      const period = Math.max(a.frameCount - 1, 1) / (a.speed * 30)
+      const ys: number[][] = rest.map(() => [])
+      for (let s = 0; s < 48; s++) {
+        poseSkeleton(skeleton, walk, inverseBind, (s / 48) * period).worldMats.forEach((m, i) => ys[i].push(m[13]))
+      }
+      return {
+        chosen: feet?.bones, height: feet?.height, period,
+        bones: rest.map((m, i) => ({ i, z: +m[14].toFixed(3), x: +m[12].toFixed(3), y: +m[13].toFixed(3), lo: +Math.max(...ys[i]).toFixed(3), hi: +Math.min(...ys[i]).toFixed(3) })),
+      }
+    }
+  }, [moves, character.skeleton, inverseBind, feet])
   const footAt = useMemo(() => new THREE.Vector3(), [])
 
   useFrame(({ clock }, delta) => {
@@ -2761,7 +2803,7 @@ function Avatar({
             footAt.set(m[12], m[13], m[14]).applyMatrix4(inner.current.matrixWorld)
             footAt.y = b.y
             const frame = clock.getElapsedTime() * EFFECT_CLOCK
-            const sound = footstepSoundId(footsteps.sounds, b.terrain)
+            const sound = footstepSoundId(footsteps.sounds, b.terrain, character.footSound ?? null)
             if (sound !== null) playSound(sound, footsteps.volume)
             childEvents.push({ name: footstepEffect(b.terrain), dir, frame, at: footAt.clone() })
             // Sand and snow keep a footprint too, walking only (xim
@@ -4947,7 +4989,7 @@ export default function ZoneViewer({
       ) : hasCameraOverride ? (
         <CameraOrientation />
       ) : scene.cameraMode === 'orbit' ? (
-        <SmartOrbitControls size={size} lookAt={PICK || PICK_PREFAB.size > 0 ? center : undefined} />
+        <SmartOrbitControls size={size} lookAt={PICK || PICK_PREFAB.size > 0 ? center : undefined} world={collisionWorld} center={center} />
       ) : scene.cameraMode === 'walk' ? (
         <WalkCamera world={collisionWorld} center={center} size={size} scene={scene} body={walkBody} />
       ) : (

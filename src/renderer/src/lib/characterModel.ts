@@ -3,7 +3,7 @@ import rawFaces from '../../../../resources/face-paths.json'
 import rawItemNames from '../../../../resources/item-names.json'
 import rawAnims from '../../../../resources/animation-paths.json'
 import {
-  parseDatFile, parseSkeletonDat, SKELETON_PATHS,
+  parseDatFile, parseSkeletonDat, readFootSound, SKELETON_PATHS,
   parseAnimationDat,
   type ParsedDatFile, type ParsedMesh, type ParsedTexture, type ParsedAnimation,
 } from './ffxi-dat'
@@ -200,6 +200,11 @@ export interface ComposedCharacter extends ParsedDatFile {
   /** What actually loaded, for reporting failures without failing the build. */
   loaded: { label: string; path: string; meshes: number }[]
   failed: { label: string; path: string; reason: string }[]
+  /**
+   * The last two characters of the footstep sound names this character's
+   * feet play (readFootSound): '12' is boots on a Hume. Null without feet.
+   */
+  footSound: string | null
 }
 
 /**
@@ -237,10 +242,12 @@ export async function composeCharacter(
   const textures: ParsedTexture[] = []
   const loaded: ComposedCharacter['loaded'] = []
   const failed: ComposedCharacter['failed'] = []
+  let footSound: string | null = null
 
   for (const piece of pieces) {
     try {
       const buffer = await window.ffxi.readDat(ffxiPath, piece.path)
+      if (piece.label === 'Feet') footSound = readFootSound(buffer)
       const part = parseDatFile(buffer, skeleton.matrices)
       if (part.meshes.length === 0) {
         failed.push({ ...piece, reason: 'no mesh blocks' })
@@ -259,9 +266,16 @@ export async function composeCharacter(
     }
   }
 
+  // Bare feet still tread at the race's weight: take the step from its first
+  // feet model (boots), read for the info block only.
+  if (footSound === null) {
+    const first = EQUIP[`${spec.race}:6`]?.['0']
+    if (first) footSound = await window.ffxi.readDat(ffxiPath, first).then(readFootSound, () => null)
+  }
+
   const animations = spec.animation === null
     ? []
     : await loadAnimationSet(ffxiPath, spec.race, spec.animation)
 
-  return { meshes, textures, skeleton, animations, loaded, failed }
+  return { meshes, textures, skeleton, animations, loaded, failed, footSound }
 }

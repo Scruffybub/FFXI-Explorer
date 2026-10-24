@@ -344,6 +344,9 @@ export default function App() {
     if (new URLSearchParams(window.location.search).has('census')) {
       ;(window as unknown as Record<string, unknown>).__setScene =
         (patch: Partial<SceneSettings>) => setScene(s => ({ ...s, ...patch }))
+      // Redresses the walking character in place (footwear sounds by race and feet).
+      ;(window as unknown as Record<string, unknown>).__setChar =
+        (patch: Partial<CharacterSpec>) => setCharSpec(s => ({ ...s, ...patch }))
     }
     ;(window as unknown as Record<string, unknown>).__probeDat = async (rel: string) => {
       try {

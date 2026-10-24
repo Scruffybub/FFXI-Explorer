@@ -693,6 +693,18 @@ export function parseZoneFile(
       prefabIndices = anywhere(false)
       if (prefabIndices.length === 0) prefabIndices = anywhere(true)
     }
+    // Retail then looks for a mesh anywhere in the zone file, effect meshes
+    // before zone meshes (xim resolveStaticMeshLink): Uleguerand Range's doors
+    // (f_xa/door/_05*) link sit1, tam1 and tome in f_xa/effe, and the zone
+    // mesh kabe beside them. Triggered generators only, as below.
+    if (prefabIndices.length === 0 && raw.link === 'mesh' && !raw.emission.autoRun) {
+      for (const d3m of [true, false]) {
+        for (let p = 0; p < prefabChunk.length && !prefabIndices.length; p++) {
+          if (prefabChunk[p] === raw.model && prefabDir[p] !== SYSTEM_DIR && !prefabs[p].sprite && !!prefabs[p].d3m === d3m) prefabIndices.push(p)
+        }
+        if (prefabIndices.length) break
+      }
+    }
     // A triggered generator's mesh may live in the shared effects file too
     // (footsteps' footprints and splashes). Only triggered ones: an auto-run
     // generator resolved this way would start drawing in zones already judged

@@ -531,6 +531,8 @@ export function TriggeredEffects({ zone, range }: { zone: ParsedZone; range: num
     const out = new Set<string>()
     const groups = new Map<string, number[][]>()
     const sizes = new Map<string, number>()
+    const fades = new Map<string, number>()
+    const rises = new Set<string>()
     for (const sp of placed) {
       const key = sp.dir + '|' + sp.generator
       if (started.has(key)) continue
@@ -539,16 +541,31 @@ export function TriggeredEffects({ zone, range }: { zone: ParsedZone; range: num
       // Placed in the zone, not offsets from whatever starts it: Whitegate's
       // effe/funs (0,-10,0) and La Theine's effe/rott (0,-2,0) play where an
       // event puts them, and at the origin they sat inside a building.
-      if (Math.hypot(...sp.position) > PLACED_MIN) list.push([sp.position[0], -sp.position[1], -sp.position[2]])
-      groups.set(sp.dir, list)
-      // Reach: the model's furthest vertex times the generator's scale.
       const v = zone.prefabs[sp.prefabIndices[0]]?.vertices ?? []
+      const k = Math.max(...sp.scale.map(Math.abs))
+      // Where it is and how far it reaches. A billboard grows from its point
+      // (the rainbow): the furthest vertex, from the point. A mesh can sit off
+      // its point: Uleguerand's ice wall kabe is 22-27 units along x from it,
+      // so Go to framed bare canyon. Its middle and half-diagonal instead
+      // (scale only; these doors are not rotated).
+      const at = [sp.position[0], sp.position[1], sp.position[2]]
       let r = 0
-      for (let i = 0; i < v.length; i++) r = Math.max(r, Math.abs(v[i]))
-      sizes.set(sp.dir, Math.max(sizes.get(sp.dir) ?? 0, r * Math.max(...sp.scale.map(Math.abs))))
+      if (sp.billboard & 1 || v.length < 3) {
+        for (let i = 0; i < v.length; i++) r = Math.max(r, Math.abs(v[i]))
+      } else {
+        const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity]
+        for (let i = 0; i < v.length; i += 3) for (let c = 0; c < 3; c++) { lo[c] = Math.min(lo[c], v[i + c]); hi[c] = Math.max(hi[c], v[i + c]) }
+        for (let c = 0; c < 3; c++) at[c] += ((lo[c] + hi[c]) / 2) * sp.scale[c]
+        r = Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]) / 2
+      }
+      if (Math.hypot(...sp.position) > PLACED_MIN) list.push([at[0], -at[1], -at[2]])
+      groups.set(sp.dir, list)
+      sizes.set(sp.dir, Math.max(sizes.get(sp.dir) ?? 0, r * k))
+      if (sp.billboard & 1) rises.add(sp.dir)
+      if (sp.drawDistance) fades.set(sp.dir, Math.min(fades.get(sp.dir) ?? Infinity, sp.drawDistance.far))
     }
     const list = [...groups].filter(([, pts]) => pts.length).map(([dir, pts]) => ({
-      dir, label: triggerLabel(dir), size: sizes.get(dir) ?? 0,
+      dir, label: triggerLabel(dir), size: sizes.get(dir) ?? 0, fade: fades.get(dir) ?? null, rises: rises.has(dir),
       at: [0, 1, 2].map(k => pts.reduce((a, p) => a + p[k], 0) / pts.length) as [number, number, number],
     })).sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true }))
     return { roots: out, groups: list }
@@ -574,16 +591,24 @@ export function TriggeredEffects({ zone, range }: { zone: ParsedZone; range: num
     if (g?.at) {
       triggerCommands.goTo = null
       const [x, y0, z] = g.at
-      const y = y0 + g.size * 0.4
-      const d = Math.max(14, g.size * 1.3)
-      const lift = Math.max(6, g.size * 0.15)
+      // Only a billboard rises from its point; aimed 40% up, Uleguerand's ice
+      // wall (a zone mesh centred on its point) was looked for over the cave roof.
+      const y = y0 + (g.rises ? g.size * 0.4 : 0)
+      // Inside its fade-out, too: Uleguerand's ice door (reach ~30) fades by
+      // 40 units, and Go to stood at 39 and showed nothing (2026-10-24).
+      const near = g.fade && range > 0 ? g.fade * range * 0.6 : Infinity
+      const d = Math.min(Math.max(14, g.size * 1.3), near)
+      const lift = Math.min(Math.max(6, g.size * 0.15), near * 0.5)
       const target = new THREE.Vector3(x, y, z)
       const solid = scene.children.filter(o => o.type === 'Group')
       const ray = new THREE.Raycaster()
       let spot: THREE.Vector3 | null = null
-      for (let k = 0; k < 8 && !spot; k++) {
+      // Then closer rings: inside Uleguerand's ice caves every direction at
+      // full distance ran into rock, and the view from above saw the roof.
+      for (let k = 0; k < 24 && !spot; k++) {
         const a = Math.PI / 4 + (k * Math.PI) / 4
-        const p = new THREE.Vector3(x + Math.cos(a) * d, y + lift, z + Math.sin(a) * d)
+        const r = d * [1, 0.6, 0.35][Math.floor(k / 8)]
+        const p = new THREE.Vector3(x + Math.cos(a) * r, y + lift * r / d, z + Math.sin(a) * r)
         // Both ways: walls are one-sided, and a ray leaving from inside a
         // room passes out through their backs unseen.
         const blocked = (from: THREE.Vector3, to: THREE.Vector3) => {
@@ -595,7 +620,7 @@ export function TriggeredEffects({ zone, range }: { zone: ParsedZone; range: num
         if (!blocked(target, p) && !blocked(p, target)) spot = p
       }
       // Walled in all round: look down on it from high above.
-      camera.position.copy(spot ?? new THREE.Vector3(x + 0.01, y + Math.max(40, d * 2), z + 0.01))
+      camera.position.copy(spot ?? new THREE.Vector3(x + 0.01, y + Math.min(Math.max(40, d * 2), near), z + 0.01))
       const orbit = controls as unknown as { target?: THREE.Vector3; update?: () => void } | null
       orbit?.target?.set(x, y, z)
       camera.lookAt(x, y, z)
