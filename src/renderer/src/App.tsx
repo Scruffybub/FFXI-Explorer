@@ -19,6 +19,13 @@ import {
 } from './lib/settings'
 import { ZoneMusicPlayer, type MusicStatus } from './lib/zoneMusic'
 import { setSoundRoot } from './lib/footstepSounds'
+import { GpuSuggestion } from './components/GpuSuggestion'
+import { setRenderScale } from './lib/renderScale'
+
+const AO_QUALITY_KEY = 'ffxi-explorer.aoQuality'
+function savedAoQuality(): PostSettings['aoQuality'] {
+  try { return localStorage.getItem(AO_QUALITY_KEY) === 'fast' ? 'fast' : 'standard' } catch { return 'standard' }
+}
 import type { UpdateInfo } from '../../preload/index'
 
 /** Where the 'check for updates on startup' preference is remembered. */
@@ -42,7 +49,10 @@ export default function App() {
   const [load, setLoad] = useState<LoadState>({ status: 'idle' })
 
   const [lighting, setLighting] = useState<LightingSettings>(DEFAULT_LIGHTING)
-  const [post, setPost] = useState<PostSettings>(DEFAULT_POST)
+  // AO quality is a performance choice, like render resolution: remembered per
+  // viewer, and kept when a preset or a reset changes the rest of the look.
+  const [post, setPost] = useState<PostSettings>(() => ({ ...DEFAULT_POST, aoQuality: savedAoQuality() }))
+  useEffect(() => { try { localStorage.setItem(AO_QUALITY_KEY, post.aoQuality) } catch { /* not remembered */ } }, [post.aoQuality])
   const [scene, setScene] = useState<SceneSettings>(DEFAULT_SCENE)
   // Weather states the loaded zone carries geometry for. Reported by
   // ZoneViewer once the zone is parsed, because it is a property of the zone
@@ -368,7 +378,7 @@ export default function App() {
     // Original used to leave the view desaturated, because Original never
     // mentions saturation.
     setLighting({ ...DEFAULT_LIGHTING, ...preset.lighting })
-    setPost({ ...DEFAULT_POST, ...preset.post })
+    setPost(p => ({ ...DEFAULT_POST, ...preset.post, aoQuality: p.aoQuality }))
     // Camera mode and wireframe are navigation choices rather than part of the
     // preset's look, so they survive a preset change.
     setScene(s => ({
@@ -381,7 +391,7 @@ export default function App() {
 
   const resetAll = useCallback(() => {
     setLighting(DEFAULT_LIGHTING)
-    setPost(DEFAULT_POST)
+    setPost(p => ({ ...DEFAULT_POST, aoQuality: p.aoQuality }))
     setScene(DEFAULT_SCENE)
     setPointLights(DEFAULT_POINT_LIGHTS)
     setSelectedLightId(null)
@@ -747,6 +757,9 @@ export default function App() {
       />
 
       {lookPicker}
+      {ffxiPath && !lookPicker && !updateInfo && (
+        <GpuSuggestion onApply={() => { setRenderScale(0.67); setPost(p => ({ ...p, aoQuality: 'fast' })) }} />
+      )}
       {updateInfo && !lookPicker && (
         <UpdateNotice
           info={updateInfo}

@@ -151,7 +151,12 @@ you.
 
 **Interface → Render resolution** draws the 3D view at a share of your
 screen's resolution and scales it up: on built-in graphics, 67% nearly doubles
-the frame rate for a softer picture.
+the frame rate for a softer picture. **Post-processing → AO quality → Fast**
+lightens the most demanding effect. If the app finds only built-in graphics,
+it offers to set both for you, once.
+
+**Interface → Frame rate limit** caps drawing at 30, 60 or 120 frames a
+second, to save battery and heat.
 
 ---
 

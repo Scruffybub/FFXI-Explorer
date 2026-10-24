@@ -3731,6 +3731,34 @@ rather than solved.
             136 → 155.
           - **No measurable effect:** logarithmic depth (`?nologdepth=1`),
             preserveDrawingBuffer (`?nopreserve=1`).
+        - **Stage 4, 2026-10-23: settings for slower machines (0.1.11).**
+          - **Post-processing → AO quality** (Standard / Fast,
+            `PostSettings.aoQuality`): N8AO `quality` `medium` or
+            `performance`, still half resolution. Kept across presets and
+            Reset, and remembered in localStorage `ffxi-explorer.aoQuality`
+            (App.tsx). The `key` on N8AO remounts it on change.
+          - **Interface → Frame rate limit** (`lib/frameCap.ts`, localStorage
+            `ffxi-explorer.frameCap`; off/30/60/120). ZoneViewer `FrameCap`
+            sets R3F's frameloop to `never` and calls `advance` on a
+            requestAnimationFrame beat. Keep the beat (`last += interval`):
+            snapping `last = t` made 120 draw 88. Verified 120/60/30 →
+            120/60/30 on a 178 Hz screen.
+          - **Built-in graphics offer** (`components/GpuSuggestion.tsx`). Once
+            (localStorage `ffxi-explorer.igpuOffered`), when the app asked for
+            the high-performance card and WebGL still reports a built-in chip
+            (`isBuiltInGpu` on the ANGLE string), so the machine has no other.
+            "Use faster settings" sets 67% resolution and Fast AO. Tested by
+            faking the renderer string with CDP
+            `Page.addScriptToEvaluateOnNewDocument` (scratch `igpu-sim.cjs`);
+            hidden on the RTX as it should be.
+          - **Effects trimming:** particle buffers upload only live particles
+            (`addUpdateRange`), particle and static zone meshes skip per-frame
+            matrix updates (`matrixAutoUpdate = false`). The upload cost left
+            the CPU profile; fps unchanged (~145 in Outer Ra'Kaznar, partly
+            GPU-bound).
+          - **Seen, not fixed (also in 0.1.10):** Outer Ra'Kaznar's overview
+            camera sits inside its weather fog and shows a flat purple screen.
+            Walking in looks right.
         - **Not done, if more is wanted:** merge single-instance prefabs that
           share a material into one static mesh. Watch the per-instance
           `aLamps` and the overlay order.

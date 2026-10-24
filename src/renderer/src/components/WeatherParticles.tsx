@@ -396,6 +396,8 @@ function buildSystems(
     geo.setAttribute('aUvOffset', uvOffset)
     const mesh = new THREE.InstancedMesh(geo, mats.length === 1 ? mats[0] : mats, capacity)
     mesh.frustumCulled = false
+    // Particles are placed by their instance matrices; the mesh stays at the origin.
+    mesh.matrixAutoUpdate = false
     mesh.layers.set(haze ? HAZE_LAYER : GAMMA_BLEND_LAYER)
     mesh.renderOrder = 5
     mesh.count = 0
@@ -910,9 +912,19 @@ function ParticleField({ systems, weather, range = 1, triggered = false, running
       s.mesh.count = drawn
       // Nothing alive: skip the draw call (hundreds of idle lamps in a castle).
       s.mesh.visible = drawn > 0
-      s.mesh.instanceMatrix.needsUpdate = true
-      s.alpha.needsUpdate = true
-      if (s.frameOffsets || s.scrolls) s.uvOffset.needsUpdate = true
+      // Upload only the live particles: a batch's buffers hold its whole
+      // capacity, and sending all of it every frame — idle lamps included —
+      // was about a tenth of Outer Ra'Kaznar's frame with everything on.
+      if (drawn > 0) {
+        const upload = (attr: THREE.BufferAttribute) => {
+          attr.clearUpdateRanges()
+          attr.addUpdateRange(0, drawn * attr.itemSize)
+          attr.needsUpdate = true
+        }
+        upload(s.mesh.instanceMatrix)
+        upload(s.alpha)
+        if (s.frameOffsets || s.scrolls) upload(s.uvOffset)
+      }
     }
     // The flash, added in gamma like the game, at most a white screen.
     const fl = Math.max(tmp.flash.x, tmp.flash.y, tmp.flash.z)

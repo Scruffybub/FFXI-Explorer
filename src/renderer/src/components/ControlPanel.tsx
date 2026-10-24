@@ -12,6 +12,7 @@ import { UI_LOOKS, type UiLook, type UiText } from '../lib/uiLook'
 import { MOON_FRAMES, moonPhase } from '../lib/vanaTime'
 import { goToTrigger, playTrigger, triggerStore } from '../lib/triggeredEffects'
 import { RENDER_SCALES, renderScaleStore, setRenderScale } from '../lib/renderScale'
+import { FRAME_CAPS, frameCapStore, setFrameCap } from '../lib/frameCap'
 
 interface ControlPanelProps {
   lighting: LightingSettings
@@ -216,6 +217,21 @@ function SelectField({
       <div className="control-row"><Label text={label} info={info} /></div>
       <select value={value} onChange={e => onChange(e.target.value)}>{children}</select>
     </label>
+  )
+}
+
+/** Interface → Frame rate limit (lib/frameCap). */
+function FrameCapField() {
+  const cap = useSyncExternalStore(frameCapStore.subscribe, frameCapStore.get)
+  return (
+    <SelectField
+      label="Frame rate limit"
+      value={String(cap)}
+      onChange={v => setFrameCap(Number(v))}
+      info="The most frames a second the 3D view draws. Screen rate draws as fast as your display refreshes. A limit saves power and keeps a laptop cooler and quieter; 60 still looks smooth, 30 is fine for slow exploring."
+    >
+      {FRAME_CAPS.map(c => <option key={c} value={String(c)}>{c ? `${c} fps` : 'Screen rate'}</option>)}
+    </SelectField>
   )
 }
 
@@ -811,6 +827,15 @@ export default function ControlPanel({
                   onChange={v => onPost({ aoRadius: v })}
                   info="How far the effect looks for nearby geometry, in world units. Small values catch fine detail; large ones shade whole recesses."
                 />
+                <SelectField
+                  label="AO quality"
+                  value={post.aoQuality}
+                  onChange={v => onPost({ aoQuality: v === 'fast' ? 'fast' : 'standard' })}
+                  info="How many samples the contact shadows take. Fast takes half as many: a little grainier, but noticeably quicker on built-in graphics, where ambient occlusion is the most expensive effect."
+                >
+                  <option value="standard">Standard</option>
+                  <option value="fast">Fast</option>
+                </SelectField>
               </>
             )}
 
@@ -1236,6 +1261,7 @@ export default function ControlPanel({
         )}
         <GraphicsCardField />
         <RenderScaleField />
+        <FrameCapField />
       </Section>
 
       <Section

@@ -423,7 +423,7 @@ select {
   cursor: pointer;
 }
 .update-actions button:hover { border-color: var(--accent-dim); }
-.update-actions button.primary { background: var(--accent-dim); border-color: var(--accent-dim); }
+.update-actions button.primary { background: var(--accent-dim); border-color: var(--accent-dim); margin-top: 0; }
 
 .link-btn {
   margin-top: 12px;

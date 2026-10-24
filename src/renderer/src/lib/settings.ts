@@ -147,6 +147,13 @@ export interface PostSettings {
   ao: boolean
   aoIntensity: number
   aoRadius: number
+  /**
+   * N8AO's sample budget: standard is its default ('medium', 16 samples);
+   * fast is its 'performance' level (8), for built-in graphics, where AO is
+   * the costliest effect (West Ronfaure on an Intel Arc: 103 fps with it, 133
+   * without, 2026-10-23).
+   */
+  aoQuality: 'standard' | 'fast'
 
   bloom: boolean
   bloomIntensity: number
@@ -471,6 +478,7 @@ export const DEFAULT_POST: PostSettings = {
   ao: true,
   aoIntensity: 1.5,
   aoRadius: 2,
+  aoQuality: 'standard',
 
   bloom: true,
   bloomIntensity: 0.3,

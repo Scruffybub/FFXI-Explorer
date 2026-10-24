@@ -29,6 +29,7 @@ import { childEvents } from '../lib/weatherEvents'
 import { footstepSoundId, playSound } from '../lib/footstepSounds'
 import { curveStart, rotationOrder } from '../lib/ximRules'
 import { renderScaleStore } from '../lib/renderScale'
+import { frameCapStore } from '../lib/frameCap'
 import { LampLights } from './LampLights'
 import { zoneLamps, LAMP_VERTEX_PARS, LAMP_FRAGMENT_PARS, LAMP_VERTEX, buildLampTexture, lampSlots } from '../lib/zoneLamps'
 import { LensFlare } from './LensFlare'
@@ -1822,6 +1823,44 @@ const PERF_DIAG = new URLSearchParams(typeof window !== 'undefined' ? window.loc
 /** Diagnostic: ?norendertune=1 leaves RenderTuning and n8aoOpaqueOnly off, for before/after comparisons. */
 const NO_RENDER_TUNE = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('norendertune')
 
+/**
+ * Interface → Frame rate limit (lib/frameCap). With a limit, three's own loop
+ * is paused and advanced on a timer instead; the effects run on elapsed time,
+ * so they keep their speed at a lower rate.
+ */
+function FrameCap() {
+  const cap = useSyncExternalStore(frameCapStore.subscribe, frameCapStore.get)
+  const setFrameloop = useThree(s => s.setFrameloop)
+  const advance = useThree(s => s.advance)
+  useEffect(() => {
+    if (!cap) return
+    setFrameloop('never')
+    const interval = 1000 / cap
+    let raf = 0
+    let last = -Infinity
+    const loop = (t: number) => {
+      raf = requestAnimationFrame(loop)
+      // A millisecond's slack, so a 60 limit on a 60 Hz screen skips nothing.
+      if (t - last < interval - 1) return
+      // Keep the beat rather than restarting it at each frame drawn, so the
+      // rate averages out to the limit (restarting gave 88 for a 120 limit);
+      // after a stall, start afresh instead of drawing a burst to catch up.
+      last = t - last > interval * 2 ? t : last + interval
+      advance(t)
+    }
+    raf = requestAnimationFrame(loop)
+    return () => { cancelAnimationFrame(raf); setFrameloop('always') }
+  }, [cap, setFrameloop, advance])
+  return null
+}
+
+/** A ref callback for a group that never moves: compute its matrix once, then stop. */
+function freezeMatrix(g: THREE.Object3D | null) {
+  if (!g) return
+  g.updateMatrix()
+  g.matrixAutoUpdate = false
+}
+
 /** Applies renderer-level settings that R3F does not expose declaratively. */
 function RendererSettings({ post, shadows }: { post: PostSettings; shadows: boolean }) {
   const { gl } = useThree()
@@ -2797,7 +2836,8 @@ function PostStack({ post, generatorLayer }: { post: PostSettings; generatorLaye
   if (post.smaa) effects.push(<SMAA key="smaa" />)
   if (aoAllowed) {
     effects.push(
-      <N8AO key="ao" ref={n8aoOpaqueOnly} aoRadius={post.aoRadius} intensity={post.aoIntensity} distanceFalloff={0.5} halfRes />
+      <N8AO key={'ao-' + post.aoQuality} ref={n8aoOpaqueOnly} aoRadius={post.aoRadius} intensity={post.aoIntensity} distanceFalloff={0.5} halfRes
+        quality={post.aoQuality === 'fast' ? 'performance' : 'medium'} />
     )
   }
   if (post.bloom) {
@@ -3885,6 +3925,9 @@ export default function ZoneViewer({
     const cullPlaced = (mesh: THREE.InstancedMesh) => {
       mesh.frustumCulled = !PERF_DIAG.has('nocull')
       if (mesh.frustumCulled) mesh.computeBoundingSphere()
+      // Never moved: skip recomputing its matrix every frame.
+      mesh.matrixAutoUpdate = false
+      mesh.updateMatrix()
     }
 
     for (const [meshIdx, matrices] of normalGroups) {
@@ -4453,6 +4496,16 @@ export default function ZoneViewer({
         JSON.stringify([...weatherStates].sort()))
     }
 
+    // Only weather meshes move once built (WeatherFollow rides them on the
+    // camera); every other zone and generator mesh keeps its matrix as built,
+    // so three need not recompose it every frame — Outer Ra'Kaznar's ~800
+    // generator meshes did (updateMatrixWorld, ~7% of the frame).
+    for (const m of instancedMeshes) {
+      if (m.userData.weatherState) continue
+      m.updateMatrix()
+      m.matrixAutoUpdate = false
+    }
+
     return {
       instancedMeshes, waterMaterials, litMaterials, textures, spawnAnims,
       weatherStates: [...weatherStates].sort(),
@@ -4808,6 +4861,7 @@ export default function ZoneViewer({
       <CameraPersistence store={cameraPose} />
       <RendererSettings post={post} shadows={shadowsActive} />
       <RenderTuning />
+      <FrameCap />
       <SkyAnimator skyMaterial={skyMaterial} timeOfDayRef={timeOfDayRef} exposure={post.exposure} zoneWeather={zoneLight} />
       {zoneLight && (
         <SkyLayers
@@ -4911,8 +4965,10 @@ export default function ZoneViewer({
         />
       )}
 
-      {/* FFXI stores Y inverted — the PI rotation puts the zone the right way up. */}
-      <group rotation={[Math.PI, 0, 0]}>
+      {/* FFXI stores Y inverted — the PI rotation puts the zone the right way up.
+          Frozen once placed: recomputed each frame it forced every zone mesh
+          under it to recompute its world matrix too (~7% of a busy frame). */}
+      <group rotation={[Math.PI, 0, 0]} ref={freezeMatrix}>
         {instancedMeshes.map((mesh, i) => (
           <primitive key={i} object={mesh} />
         ))}
