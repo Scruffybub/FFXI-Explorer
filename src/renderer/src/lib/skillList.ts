@@ -1,4 +1,6 @@
 import { animationOptions } from './characterModel'
+import rawAbilities from '../../../../resources/ability-effects.json'
+import rawMobSkills from '../../../../resources/mob-skill-effects.json'
 
 /**
  * Weapon skills, job abilities and dances for the effect browser, per race.
@@ -28,4 +30,34 @@ export function skillOptions(race: number): SkillEntry[] {
   return animationOptions(race)
     .filter(e => SKILL_CATEGORIES.includes(e.category) && e.paths.length > 0)
     .map(e => ({ name: e.name, category: e.category, path: e.paths[0] }))
+}
+
+/**
+ * Job abilities (Mighty Strikes, Provoke..) and monster moves, by the numbers
+ * LandSandBoat's abilities.sql and mob_skills.sql give (GPL-3.0; ids and
+ * names only, scripts/build-skill-effects.cjs, credited in
+ * THIRD-PARTY-NOTICES). Their effect files are found the way xim does
+ * (AbilityTable, MobSkillInfoTable).
+ */
+export interface NumberedSkill {
+  id: number
+  name: string
+  /** A job ability's job (WAR, MNK..); none for monster moves. */
+  job?: string
+  animation: number
+}
+
+export const JOB_ABILITIES = rawAbilities as NumberedSkill[]
+export const MONSTER_MOVES = rawMobSkills as NumberedSkill[]
+
+/** A job ability's effect file number: 0x113C + its animation. */
+export const abilityFileId = (a: NumberedSkill) => 0x113c + a.animation
+
+/**
+ * A monster move's effect file number: its animation plus a base by range.
+ * About 84% resolve in a current install; the rest point at empty slots.
+ */
+export function monsterMoveFileId(m: NumberedSkill): number {
+  const a = m.animation
+  return a + (a < 0x200 ? 0x0f3c : a < 0x600 ? 0xc1ef : a < 0x800 ? 0xe739 : 0x14b07)
 }

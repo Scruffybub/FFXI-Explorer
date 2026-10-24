@@ -3984,13 +3984,33 @@ rather than solved.
       fire, blue burst), Steal (dash, white flash). Curing Waltz runs its
       script (dance `dc1?`, `dc10` at frame 199, `cst0`, `tgt0`, sound) but
       its effect pieces were hard to see — unjudged.
-    - **Not yet:** job abilities beyond the list's few (Provoke, Berserk..:
-      file 0x113C + an id from LandSandBoat's abilities.sql); **monster
-      moves** (file = animation id + 0xF3C / 0xC1EF / 0xE739 / 0x14B07 by
-      range; ids from LandSandBoat's mob_skills.sql; names in the client,
-      ROM/27/80.DAT; the user of a move is a monster, so the caster would be
-      a monster too). Both need a download Ryan approves.
-    - Census: `__playSkill(name)`. Stage 3:
+    - Census: `__playSkill(name)`.
+  - **Stage 3, second part (2026-10-24): job abilities and monster moves.**
+    LandSandBoat's `abilities.sql` and `mob_skills.sql` downloaded with
+    Ryan's OK; `scripts/build-skill-effects.cjs` keeps ids, names and
+    animation numbers (`resources/ability-effects.json`: 406 job abilities,
+    actionType 6; `mob-skill-effects.json`: 4,039 moves); credited.
+    - **Job abilities:** file 0x113C + animation (Mighty Strikes → `mats`,
+      Hundred Fists → `hyak`); all 406 resolve. Skills lists them by job
+      after the race's weapon skills (names already there are not doubled).
+    - **Monster moves:** file = animation + 0xF3C (<0x200), 0xC1EF (<0x600),
+      0xE739 (<0x800), 0x14B07 (above) (xim MobSkillInfoTable); 3,389 of
+      4,039 resolve here — the rest point at empty file-table slots, and the
+      Monster list leaves them out (checked when the list opens).
+    - **Roles swap:** the picked creature ("User") uses the move on your
+      character. Its model file is the second source (its routines: `stnm`
+      etc.) and its motions are the pool. EffectViewer now takes each actor's
+      idle and motions from the browser.
+    - **Trap: light catalogue models.** "Goblin 1" (ROM/3/59) holds only
+      `wlk0`/`idl0`; the full goblins are ROM/6/0.. ("Goblin 12" = ROM/6/1:
+      20-odd motions, 40-odd routines). Default creature is Goblin 12; the
+      HUD says so when a user has no fighting motions.
+    - Checked: Mighty Strikes (fire aura, glowing fists), Goblin Rush (lunge,
+      burst on the target), Bomb Toss (throw, explosion). Census:
+      `__playMove(name)`.
+    - **Not yet:** which monster uses which move (LandSandBoat
+      mob_skill_lists — another download); pet abilities and dances by
+      number (actionType 13/14). Stage 3:
     abilities, weapon skills, monster moves. Later: cast in zones; the
     scale-curve and ring sweep for zone effects.
 

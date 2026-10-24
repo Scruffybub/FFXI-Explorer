@@ -10,8 +10,6 @@ import { buildModel, type BuiltModel } from '../lib/modelBuild'
 import { childEvents } from '../lib/weatherEvents'
 import { playSound } from '../lib/footstepSounds'
 import { RendererSettings } from './ModelViewer'
-import { clipsForMotion } from '../lib/motions'
-import type { CastClips } from '../lib/characterModel'
 import { invertRigidMatrix4, poseSkeleton, skinMeshes } from '../lib/skinning'
 import { EffectParticles } from './WeatherParticles'
 import { GAMMA_BLEND_LAYER } from '../lib/GammaBlendPass'
@@ -47,7 +45,6 @@ import { GAMMA_BLEND_LAYER } from '../lib/GammaBlendPass'
 const EFFECT_FPS = 60
 /** How long the caster chants before the spell goes off, seconds (the game's cast times vary; Cure's is 2). */
 const CAST_SECONDS = 2.5
-const NONE: ParsedAnimation[] = []
 const EMPTY_ZONE: ParsedZone = { prefabs: [], instances: [], textures: [], textureNames: [], collision: null, environment: [], spawns: [] }
 /** Caster and target stand this far apart, world units (a little under casting range). */
 const SPACING = 4.5
@@ -200,7 +197,7 @@ interface RunLog { started: string[]; skipped: string[]; sounds: number[]; routi
  * `eis?`, hit sparks). A routine's names are looked for in its own file
  * first, then in the others in that order.
  */
-function EffectRunner({ sources, castRoutine, ownMotions, caster, target, playId, volume, cast }: {
+function EffectRunner({ sources, castRoutine, ownMotions, caster, target, playId, volume, casterMotions }: {
   sources: ParsedZone[]
   /** Motions the effect file carries, looked for before the race file's. */
   ownMotions: ParsedAnimation[]
@@ -210,8 +207,8 @@ function EffectRunner({ sources, castRoutine, ownMotions, caster, target, playId
   target: Stage | null
   playId: number
   volume: number
-  /** The caster's casting motions; null for a caster without them. */
-  cast: CastClips | null
+  /** Every motion the caster's own files hold: a player's race file, a monster's model. */
+  casterMotions: ParsedAnimation[]
 }) {
   const sequences = useRef<Sequence[]>([])
   /** The effect frame the spell's script starts at, after the cast; -1 when none is waiting. */
@@ -326,7 +323,7 @@ function EffectRunner({ sources, castRoutine, ownMotions, caster, target, playId
         // the next (white magic's raised hand waits for its recovery) — or
         // loops when the family has no stage 0 (singing is sk1, then sk2).
         const prefix = cmd.ref.replace(/\?$/, '')
-        const pool = [...ownMotions, ...(cast?.motions ?? [])]
+        const pool = [...ownMotions, ...casterMotions]
         const clips = pool.filter(c => c.name.startsWith(prefix))
         if (!clips.length) { log.current.skipped.push('motion ' + cmd.ref); return }
         const stage = prefix[2]
@@ -375,11 +372,14 @@ function ParticleLayer() {
 
 const CENSUS = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('census')
 
-export function EffectViewer({ caster, cast, target, effect, playId, settings, volume }: {
+export function EffectViewer({ caster, casterIdle, casterMotions, target, targetIdle, effect, playId, settings, volume }: {
+  /** Who uses the effect: your character, or a monster for its moves. */
   caster: ParsedDatFile | null
-  /** The caster race's casting and idle motions (characterModel loadCastClips). */
-  cast: CastClips | null
+  casterIdle: ParsedAnimation[]
+  /** Motions the caster's routines can name (a player's race file, a monster's model). */
+  casterMotions: ParsedAnimation[]
   target: ParsedDatFile | null
+  targetIdle: ParsedAnimation[]
   effect: EffectBundle | null
   /** Bumped to play the effect (again). */
   playId: number
@@ -388,9 +388,7 @@ export function EffectViewer({ caster, cast, target, effect, playId, settings, v
 }) {
   const [casterStage, setCasterStage] = useState<Stage | null>(null)
   const [targetStage, setTargetStage] = useState<Stage | null>(null)
-  // A monster's own first motion is its idle (ModelViewer's default).
   const sources = useMemo(() => effect ? [effect.zone, effect.race ?? EMPTY_ZONE, effect.shared ?? EMPTY_ZONE] : null, [effect])
-  const targetIdle = useMemo(() => (target ? clipsForMotion(target.animations, null) : NONE), [target])
   return (
     <Canvas
       camera={{ fov: 45, near: 0.05, far: 500, position: [0, 2.2, 8.5] }}
@@ -410,14 +408,14 @@ export function EffectViewer({ caster, cast, target, effect, playId, settings, v
           front", is 1.2 out along it): the caster as authored looks at the
           target, and the target, turned half round, back at it. A half turn
           on the caster too (judged by eye, stage 1) had it facing away. */}
-      {caster && <Actor model={caster} idle={cast?.idle ?? NONE} x={-SPACING / 2} yaw={0} onStage={setCasterStage} />}
+      {caster && <Actor model={caster} idle={casterIdle} x={-SPACING / 2} yaw={0} onStage={setCasterStage} />}
       {target && <Actor model={target} idle={targetIdle} x={SPACING / 2} yaw={Math.PI} onStage={setTargetStage} />}
       {effect && (
         <>
           <EffectParticles key={effect.path} effect={effect.zone} />
           {effect.race && <EffectParticles effect={effect.race} />}
           {effect.shared && <EffectParticles effect={effect.shared} />}
-          <EffectRunner sources={sources!} castRoutine={effect.castRoutine} ownMotions={effect.motions} caster={casterStage} target={targetStage} playId={playId} volume={volume} cast={cast} />
+          <EffectRunner sources={sources!} castRoutine={effect.castRoutine} ownMotions={effect.motions} caster={casterStage} target={targetStage} playId={playId} volume={volume} casterMotions={casterMotions} />
         </>
       )}
       <OrbitControls makeDefault target={[0, 1, 0]} maxDistance={60} />

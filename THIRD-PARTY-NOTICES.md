@@ -60,16 +60,19 @@ attribution of the format research.
 ## Zone and item tables — LandSandBoat (GPL-3.0 source data)
 
 **Files:** `resources/item-names.json`, `resources/zone-music.json`,
-`resources/zone-weather.json`, `resources/spell-effects.json`
+`resources/zone-weather.json`, `resources/spell-effects.json`,
+`resources/ability-effects.json`, `resources/mob-skill-effects.json`
 
 Built by `scripts/build-item-names.cjs`, `scripts/build-zone-music.cjs`,
-`scripts/build-zone-weather.cjs` and `scripts/build-spell-effects.cjs` from
-LandSandBoat's `item_equipment.sql`, `zone_settings.sql`, `zone_weather.sql`,
-`spell_list.sql` and zone data files. Those sources are fetched at build time
+`scripts/build-zone-weather.cjs`, `scripts/build-spell-effects.cjs` and
+`scripts/build-skill-effects.cjs` from LandSandBoat's `item_equipment.sql`,
+`zone_settings.sql`, `zone_weather.sql`, `spell_list.sql`, `abilities.sql`,
+`mob_skills.sql` and zone data files. Those sources are fetched at build time
 and are **not vendored** in this repository; the generated JSON contains item
 names, zone→music-id mappings, each zone's list of native weather types in
-order (no frequencies), and each spell's id, name, effect number, magic skill,
-element and valid targets, extracted from them.
+order (no frequencies), each spell's id, name, effect number, magic skill,
+element and valid targets, and each job ability's and monster move's id, name
+and animation number, extracted from them.
 
 The underlying facts are Square Enix's game data rather than LandSandBoat's
 creative work, but the extraction came from a GPL-3.0 project and is recorded
