@@ -186,6 +186,9 @@ export interface MusicSettings {
   enabled: boolean
   /** 0..1, applied to the output gain. */
   volume: number
+  /** The zone's ambient sounds (lib/ambientSounds): waterfalls, rivers, birds. */
+  sounds: boolean
+  soundsVolume: number
 }
 
 export const DEFAULT_MUSIC: MusicSettings = {
@@ -193,6 +196,8 @@ export const DEFAULT_MUSIC: MusicSettings = {
   // zone is startling, and 151 of 298 zones are silent anyway.
   enabled: false,
   volume: 0.5,
+  sounds: false,
+  soundsVolume: 0.6,
 }
 
 export interface SceneSettings {

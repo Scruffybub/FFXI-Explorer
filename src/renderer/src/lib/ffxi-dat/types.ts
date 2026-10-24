@@ -242,6 +242,33 @@ export interface ParsedZone {
    * are in fses (`0T11`..: ground type, then the footwear's two digits).
    */
   sounds?: { dir: string; name: string; id: number }[]
+  /**
+   * Generators that play a sound (link 0x3D): waterfalls, rivers, birds,
+   * machinery. Resolved to sound effect numbers; see ZoneSound.
+   */
+  ambient?: ZoneSound[]
+}
+
+/** A sound a zone generator plays (GeneratorParser RawSoundSpawn, resolved). */
+export interface ZoneSound {
+  dir: string
+  generator: string
+  /** Sound effect number: sound*\/win/se/se{id/1000}/se{id}.spw. */
+  id: number
+  /** DAT space. */
+  position: [number, number, number]
+  near: number
+  far: number
+  loop: boolean
+  /** Frames between plays, 60 a second, for a sound that does not loop. */
+  every: number
+  autoRun: boolean
+  /**
+   * The line it runs along (block 0x4A, "RAB"): points with a radius, DAT
+   * space, joined by segments. Heard from the nearest point; inside the
+   * radius, at full strength.
+   */
+  path: { points: [number, number, number, number][]; segments: [number, number][] } | null
 }
 
 export interface AnimationBone {

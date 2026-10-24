@@ -27,6 +27,7 @@ import { SkyLayers } from './SkyLayers'
 import { WeatherParticles, ZoneEffects, TriggeredEffects, footstepDir, zoneMeshPicker, waterFolders, colourSheet } from './WeatherParticles'
 import { childEvents } from '../lib/weatherEvents'
 import { footstepSoundId, playSound } from '../lib/footstepSounds'
+import { AmbientSounds } from '../lib/ambientSounds'
 import { curveStart, rotationOrder } from '../lib/ximRules'
 import { renderScaleStore } from '../lib/renderScale'
 import { frameCapStore } from '../lib/frameCap'
@@ -71,6 +72,8 @@ interface ZoneViewerProps {
   onWeatherStates?: (states: string[]) => void
   /** Map view's current scale, for the panel's readout. Null when it is off. */
   onMapScale?: (scale: MapScale | null) => void
+  /** Sound → Zone sounds: the ambient sounds' level, 0 = off. */
+  soundVolume?: number
 }
 
 const TONE_MAPPING: Record<ToneMappingMode, THREE.ToneMapping> = {
@@ -2604,6 +2607,32 @@ function WalkCamera({
   return null
 }
 
+/**
+ * Sound → Zone sounds: the zone's ambient sounds (lib/ambientSounds), heard
+ * from the orbit target when orbiting (the ranges are 10-60 units, made for a
+ * camera behind the player, so from an orbit camera nothing carries), and
+ * from the camera walking or flying. Re-levelled ten times a second. The
+ * weather folders' sounds wait on the weather state; triggered ones on events.
+ */
+function AmbientSoundPlayer({ zone, volume }: { zone: ParsedZone; volume: number }) {
+  const player = useMemo(() => new AmbientSounds(
+    (zone.ambient ?? []).filter(s => s.autoRun && !/(^|\/)weat(\/|$)/.test(s.dir)),
+  ), [zone])
+  useEffect(() => () => player.dispose(), [player])
+  useEffect(() => { player.setVolume(volume) }, [player, volume])
+  const last = useRef(-1)
+  useFrame(({ camera, controls, clock }) => {
+    const t = clock.getElapsedTime()
+    if (t - last.current < 0.1) return
+    last.current = t
+    const orbit = (controls as unknown as { target?: THREE.Vector3 } | null)?.target
+    const at = orbit ?? camera.position
+    // World to DAT space: x, -y, -z.
+    player.update([at.x, -at.y, -at.z])
+  })
+  return null
+}
+
 /** A zone's footstep effect folders: walking (fses/fefs) and running (fser/fefr). */
 interface FootstepDirs {
   walk: string | null
@@ -2983,6 +3012,7 @@ export default function ZoneViewer({
   selectedLightId = null, placingLight = false, onPlaceLight,
   inspecting = false, onInspectResult, onFlySpeedChange,
   character = null, characterMotion = null, characterMoves = null, onWeatherStates, onMapScale,
+  soundVolume = 0,
 }: ZoneViewerProps) {
   // Where the walking body is. Written by WalkCamera, read by Avatar.
   const walkBody = useRef<WalkBodyState>({ x: 0, y: 0, z: 0, yaw: 0, moving: false, running: false, grounded: false, terrain: 0 })
@@ -5029,6 +5059,7 @@ export default function ZoneViewer({
       )}
       {scene.zoneEffects && !scene.mapView && <TriggeredEffects zone={zoneData} range={scene.effectRange} />}
       {footsteps && !character && <FootstepCadence body={walkBody} footsteps={footsteps} />}
+      {!scene.mapView && soundVolume > 0 && <AmbientSoundPlayer zone={zoneData} volume={soundVolume} />}
 
       {/* Already world space — deliberately outside the rotated group. */}
       {scene.showCollision && <CollisionOverlay world={collisionWorld} />}

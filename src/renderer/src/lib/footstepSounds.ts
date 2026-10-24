@@ -22,6 +22,13 @@ const CENSUS = typeof window !== 'undefined' && new URLSearchParams(window.locat
 let root: string | null = null
 let ctx: AudioContext | null = null
 const buffers = new Map<number, Promise<AudioBuffer | null>>()
+/** Where a looping sound jumps back to, seconds, from its header; absent: the start. */
+const loopStarts = new WeakMap<AudioBuffer, number>()
+
+/** The loop point a decoded sound carries, or 0. */
+export function loopStartOf(buf: AudioBuffer): number {
+  return loopStarts.get(buf) ?? 0
+}
 
 /** The FFXI install the sounds are read from (App sets it with the path). */
 export function setSoundRoot(path: string | null) {
@@ -29,7 +36,19 @@ export function setSoundRoot(path: string | null) {
   root = path
 }
 
-function load(id: number): Promise<AudioBuffer | null> {
+// ?census=1: harnesses decode any sound by number (window.__loadSound).
+if (CENSUS) {
+  (window as unknown as Record<string, unknown>).__loadSound = (id: number) => load(id)
+  ;(window as unknown as Record<string, unknown>).__loopStartOf = (buf: AudioBuffer) => loopStartOf(buf)
+}
+
+/** The shared audio context, once any sound has decoded (ambientSounds plays through it too). */
+export function soundContext(): AudioContext | null {
+  return ctx
+}
+
+/** Decodes a sound effect once and keeps it; null when missing or undecodable. */
+export function load(id: number): Promise<AudioBuffer | null> {
   let p = buffers.get(id)
   if (p) return p
   p = (async () => {
@@ -45,6 +64,7 @@ function load(id: number): Promise<AudioBuffer | null> {
       const length = decoded.channels[0].length
       const buf = ctx.createBuffer(decoded.channels.length, length, decoded.sampleRate)
       decoded.channels.forEach((c, i) => buf.copyToChannel(c as Float32Array<ArrayBuffer>, i))
+      if (decoded.loopStartSample !== null) loopStarts.set(buf, decoded.loopStartSample / decoded.sampleRate)
       return buf
     }
     return null

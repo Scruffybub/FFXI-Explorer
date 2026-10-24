@@ -986,8 +986,8 @@ export default function ControlPanel({
       </Section>
 
       <Section
-        title="Music"
-        info="The zone's own background music, decoded from the BGW files in your installation. 148 of 298 zones have an ambient track; the rest are genuinely silent in FFXI's own data."
+        title="Sound"
+        info="The zone's own music and sounds, decoded from your installation. 148 of 298 zones have a music track; the rest are genuinely silent in FFXI's own data."
       >
         <Toggle
           label="Zone music"
@@ -1004,6 +1004,19 @@ export default function ControlPanel({
             />
             <p className="note small">{describeMusic(musicStatus)}</p>
           </>
+        )}
+        <Toggle
+          label="Zone sounds"
+          checked={music.sounds}
+          onChange={v => onMusic({ sounds: v })}
+          info="The sounds the zone places itself: waterfalls, rivers, fountains, birds, insects and machinery, each heard within its own range, which is short — 10 to 60 units. Orbiting, you hear what is around the point you circle; walking or flying, what is around the camera. Off by default."
+        />
+        {music.sounds && (
+          <Slider
+            label="Sound volume" value={music.soundsVolume} min={0} max={1} step={0.01}
+            onChange={v => onMusic({ soundsVolume: v })}
+            info="Output level for the zone sounds. Footsteps have their own volume under Scene."
+          />
         )}
       </Section>
 

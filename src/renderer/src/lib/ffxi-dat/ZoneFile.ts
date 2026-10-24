@@ -1,6 +1,6 @@
 import { DatReader } from './DatReader'
 import { parseTextureBlock } from './TextureParser'
-import { parseModelSpawn, parseKeyFrames } from './GeneratorParser'
+import { parseModelSpawn, parseKeyFrames, parseSoundSpawn } from './GeneratorParser'
 import { parseD3m, type ParsedD3m } from './D3mParser'
 import { parseSprite, type ParsedSprite } from './SpriteParser'
 import { parseEnvironmentRecord } from './EnvironmentParser'
@@ -8,7 +8,7 @@ import { decodeMzb, decodeMmb } from './ZoneDecrypt'
 import { parseMzbBlock } from './MzbParser'
 import { parseMzbCollision, type ParsedCollision } from './CollisionParser'
 import { parseMmbBlock } from './MmbParser'
-import type { GeneratorSpawn, ParsedZone, ParsedZoneMesh, ParsedTexture, ZoneEnvRecord, ZoneMeshInstance } from './types'
+import type { GeneratorSpawn, ParsedZone, ParsedZoneMesh, ParsedTexture, ZoneEnvRecord, ZoneMeshInstance, ZoneSound } from './types'
 
 const DATHEAD_SIZE = 8
 const BLOCK_PADDING = 8
@@ -29,6 +29,8 @@ const BLOCK_MZB = 0x1C
 const BLOCK_MMB = 0x2E
 /** Effect emitters. They place the water, sky layers and lamp glows. */
 const BLOCK_GENERATOR = 0x05
+/** A line a sound runs along: "RAB", points with a radius, segments (xim PathSection). */
+const BLOCK_PATH = 0x4A
 /** Effect meshes, spawned by generators — the sea foam is one. */
 const BLOCK_D3M = 0x1F
 /** Sprite quads, spawned by particle generators — the rain is one. */
@@ -786,8 +788,41 @@ export function parseZoneFile(
     sounds.push({ dir: block.dir, name: block.name.trim(), id: new DataView(buffer).getUint32(at + 8, true) })
   }
 
+  // Ambient sounds: generators linking a sound pointer (waterfalls, rivers,
+  // birds, machinery). The pointer is looked for in the generator's folder and
+  // its parents, then anywhere in the zone (xim AudioEmitter).
+  const paths = new Map<string, NonNullable<ZoneSound['path']>>()
+  for (const block of blocks.filter(b => b.type === BLOCK_PATH)) {
+    const path = parsePath(buffer, block.dataOffset + BLOCK_PADDING, block.dataLength - BLOCK_PADDING)
+    if (path) paths.set(block.dir + '|' + block.name.trim(), path)
+  }
+  const nearest = <T>(map: Map<string, T>, dir: string, name: string): T | undefined => {
+    const parts = dir ? dir.split('/') : []
+    for (let depth = parts.length; depth >= 0; depth--) {
+      const hit = map.get(parts.slice(0, depth).join('/') + '|' + name)
+      if (hit !== undefined) return hit
+    }
+    for (const [k, v] of map) if (k.endsWith('|' + name)) return v
+    return undefined
+  }
+  const soundIds = new Map(sounds.map(s => [s.dir + '|' + s.name, s.id]))
+  const ambient: ZoneSound[] = []
+  for (const block of blocks.filter(b => b.type === BLOCK_GENERATOR)) {
+    const len = block.dataLength - BLOCK_PADDING
+    if (len <= 0) continue
+    const raw = parseSoundSpawn(new Uint8Array(buffer, block.dataOffset + BLOCK_PADDING, len))
+    if (!raw) continue
+    const id = nearest(soundIds, block.dir, raw.sound)
+    if (id === undefined) continue
+    ambient.push({
+      dir: block.dir, generator: block.name.trim(), id,
+      position: raw.position, near: raw.near, far: raw.far, loop: raw.loop, every: raw.every, autoRun: raw.autoRun,
+      path: raw.path ? nearest(paths, block.dir, raw.path) ?? null : null,
+    })
+  }
+
   return {
-    prefabs, instances, textures, textureNames, collision, spawns, environment, sounds,
+    prefabs, instances, textures, textureNames, collision, spawns, environment, sounds, ambient,
     shared: { prefabs: systemSprites, textures: systemTextures },
   }
 }
@@ -824,4 +859,32 @@ function mergeCollision(parts: ParsedCollision[]): ParsedCollision | null {
   }
 
   return { vertices, indices, faceFlags, indexFlags, waterHeight, terrain }
+}
+
+/**
+ * A path block (0x4A): "RAB", then offsets (from the data start) to the
+ * points and the segments. A point is xyz, a radius and four unknown words
+ * (32 bytes); a segment two point indices in the low 24 bits of a word each.
+ * Layout from xim PathSection.
+ */
+function parsePath(buffer: ArrayBuffer, start: number, len: number): ZoneSound['path'] {
+  if (len < 40) return null
+  const v = new DataView(buffer, start, len)
+  if (String.fromCharCode(v.getUint8(0), v.getUint8(1), v.getUint8(2)) !== 'RAB') return null
+  const pointsAt = v.getUint32(16, true), pairsAt = v.getUint32(20, true)
+  if (pointsAt + 16 > len || pairsAt + 16 > len) return null
+  const pointCount = v.getUint32(pointsAt, true), pairCount = v.getUint32(pairsAt, true)
+  if (pointsAt + 16 + pointCount * 32 > len || pairsAt + 16 + pairCount * 8 > len) return null
+  const points: [number, number, number, number][] = []
+  for (let i = 0; i < pointCount; i++) {
+    const o = pointsAt + 16 + i * 32
+    points.push([v.getFloat32(o, true), v.getFloat32(o + 4, true), v.getFloat32(o + 8, true), v.getFloat32(o + 12, true)])
+  }
+  const segments: [number, number][] = []
+  for (let i = 0; i < pairCount; i++) {
+    const o = pairsAt + 16 + i * 8
+    const a = v.getUint32(o, true) & 0xFFFFFF, b = v.getUint32(o + 4, true) & 0xFFFFFF
+    if (a < pointCount && b < pointCount) segments.push([a, b])
+  }
+  return segments.length ? { points, segments } : null
 }

@@ -3822,6 +3822,38 @@ rather than solved.
        real game-loadable DATs is a much larger and riskier step. Saved layouts
        must never contain game assets, only references to the user's install.
 
+- **Zone sounds — built 2026-10-24.** Panel → **Sound** (was Music) →
+  *Zone sounds* (off by default, like the music) and *Sound volume*
+  (`MusicSettings.sounds` / `soundsVolume`; `?sounds=1` turns it on).
+  - **The data** (format from xim: PGS LinkedDataType.Audio, PI
+    AudioRangeSetup / PathReferenceSetup, PathSection, AudioEmitter):
+    a generator with linked type **0x3D** plays the sound pointer its model
+    field names (looked up in its folder and parents, then anywhere in the
+    zone). Initializer **0x4C**: far, near (floats). Life 0: loops; otherwise
+    one play per emission, `every` frames apart, one at a time. Initializer
+    **0x6B**: a path name at the record's start (not after a word, unlike the
+    child links) — block **0x4A** "RAB": offsets at +16 (points: count, 3
+    words, then xyz + radius + 4 words each) and +20 (segments: count, 3
+    words, then two u24 indices). Heard from the path's nearest point.
+  - **Parsed** into `ParsedZone.ambient` (`ZoneSound`, GeneratorParser
+    `parseSoundSpawn`, ZoneFile `parsePath`).
+  - **Played** by `lib/ambientSounds.ts` through footstepSounds' decoder and
+    AudioContext: the 24 loudest in range, linear fade near → far (no range:
+    25), gains gliding 0.15 s, loops from the header's loop point (every loop
+    measured has a lead-in, 0.05-7.3 s; `loopEnd` must be set or Web Audio
+    ignores `loopStart`). Exact duplicate generators (same sound and spot)
+    play once. ZoneViewer `AmbientSoundPlayer` re-levels 10x a second; the
+    listener is the orbit target, else the camera.
+  - **Measured** (`?census=1` → `__amb`, `__loadSound`): West Ronfaure 212
+    (8 waterfall loops, se2024, far 30; the rest bird and insect one-shots,
+    far 10-20), La Theine 190, Bastok Markets 12 loops (3 on canal paths: full
+    at both ends of a 370-unit path, 0.8 between, silent away). Every ambient
+    sound in 11 zones decodes (codec 0 and 1; no ATRAC3 met).
+  - **Left out:** auto-run only, no weather folders. Weather-folder sounds
+    are rare (Lower Jeuno's `weat/*/kamo` gulls, triggered); rain and wind
+    are not in the zone files. Not done: the volume keyframe (updater 0x43),
+    stereo panning.
+
 - **Zone music — PLAYING IN THE APP as of 2026-08-10.** Panel → **Music** →
   *Zone music* (off by default) plus a volume slider and a line of status.
   `lib/bgw.ts` decodes, `lib/zoneMusic.ts` resolves and plays, `App.tsx` starts

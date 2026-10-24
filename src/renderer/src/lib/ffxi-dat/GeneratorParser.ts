@@ -217,6 +217,64 @@ function* records(view: DataView, body: Uint8Array, headerField: number) {
 }
 
 /**
+ * A generator that plays a sound (linked type 0x3D, xim LinkedDataType.Audio):
+ * the sound pointer it names, where, and how far it carries.
+ */
+export interface RawSoundSpawn {
+  /** The sound pointer's name (block 0x3D), looked up in its folders. */
+  sound: string
+  /** DAT space. */
+  position: [number, number, number]
+  /** Heard fully within `near`, fading to nothing at `far` (op 0x4C; xim AudioRangeSetup). 0 far: everywhere. */
+  near: number
+  far: number
+  /** Life 0 is endless: the sound loops. Otherwise it plays once per emission. */
+  loop: boolean
+  /** Frames between emissions (60 a second). */
+  every: number
+  autoRun: boolean
+  /** A path (block 0x4A) the sound runs along, heard from its nearest point (op 0x6B). */
+  path: string | null
+}
+
+const LINKED_AUDIO = 0x3d
+
+/** Parse a generator that plays a sound; null for every other kind. */
+export function parseSoundSpawn(body: Uint8Array): RawSoundSpawn | null {
+  if (body.length < HEADER_LEN) return null
+  const view = new DataView(body.buffer, body.byteOffset, body.byteLength)
+  let out: RawSoundSpawn | null = null
+  let near = 0, far = 0
+  let path: string | null = null
+  for (const { op, p } of records(view, body, 0x74)) {
+    if (op === 0x01 && p + 32 <= body.length) {
+      if (body[p + 29] !== LINKED_AUDIO) return null
+      let end = p + 8
+      while (end < p + 16 && body[end] !== 0) end++
+      out = {
+        sound: String.fromCharCode(...body.subarray(p + 8, end)).trim(),
+        position: [view.getFloat32(p + 16, true), view.getFloat32(p + 20, true), view.getFloat32(p + 24, true)],
+        near: 0, far: 0,
+        loop: view.getUint16(p + 30, true) === 0,
+        every: view.getUint16(EMISSION_AT + 2, true) + 1,
+        autoRun: (body[EMISSION_AT + 5] & 0x10) !== 0,
+        path: null,
+      }
+    } else if (op === 0x4c && p + 8 <= body.length) {
+      far = view.getFloat32(p, true)
+      near = view.getFloat32(p + 4, true)
+    } else if (op === 0x6b && p + 4 <= body.length) {
+      // The name comes first here, not after a word like the child links'.
+      let end = p
+      while (end < p + 4 && body[end] !== 0) end++
+      path = String.fromCharCode(...body.subarray(p, end)).trim() || null
+    }
+  }
+  if (!out || !out.sound) return null
+  return { ...out, near, far, path }
+}
+
+/**
  * Parse one generator chunk body (the bytes after its 16-byte header). Returns
  * null for any generator that does not spawn a model — particle emitters,
  * sounds, lights.

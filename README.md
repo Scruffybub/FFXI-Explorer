@@ -48,6 +48,11 @@ one you walk zones as.
 **Zone music** — the game's own BGW tracks, decoded in-app. Both codecs play:
 PS-ADPCM, and ATRAC3 via a from-source decoder validated against ffmpeg.
 
+**Zone sounds** — the sounds each zone places itself: waterfalls, rivers and
+canals, fountains, birds, insects, machinery. Each carries only as far as the
+game lets it, so you hear what is around the point you orbit, or around you
+as you walk or fly (**Sound → Zone sounds**, off by default).
+
 **Map view** — a top-down orthographic capture with no perspective distortion,
 for shaping a zone into a map.
 

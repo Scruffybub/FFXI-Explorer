@@ -65,6 +65,8 @@ export default function App() {
     ...DEFAULT_MUSIC,
     enabled: typeof window !== 'undefined' &&
       new URLSearchParams(window.location.search).get('music') === '1',
+    sounds: typeof window !== 'undefined' &&
+      new URLSearchParams(window.location.search).get('sounds') === '1',
   }))
   const [musicStatus, setMusicStatusRaw] = useState<MusicStatus>({ state: 'silent' })
   const setMusicStatus = useCallback((s: MusicStatus) => {
@@ -640,6 +642,7 @@ export default function App() {
             characterMoves={charMoves}
             onWeatherStates={setWeatherStates}
             onMapScale={setMapScale}
+            soundVolume={music.sounds ? music.soundsVolume : 0}
           />
         )}
 
