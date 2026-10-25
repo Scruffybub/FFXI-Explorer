@@ -468,8 +468,15 @@ export function WeatherParticles({ zone, state }: { zone: ParsedZone; state: str
 }
 
 /** The zone's own ambient effects, sprites and meshes (Scene → Zone effects). */
-export function ZoneEffects({ zone, range }: {
+export function ZoneEffects({ zone, range, npc = false }: {
   zone: ParsedZone
+  /**
+   * An NPC's own effects (NpcStations): every self-running mesh is drawn.
+   * The zone's water rules do not apply: a Home Point crystal's rings scroll
+   * their texture, so its folder read as water and only 1 of its 8
+   * generators drew (2026-10-25).
+   */
+  npc?: boolean
   /**
    * Scene → Effect distance: the emit range and draw distance x this;
    * 0 = everywhere. The game's
@@ -484,13 +491,14 @@ export function ZoneEffects({ zone, range }: {
     // ?onlymeshfx=1 the meshes alone; ?nobatch=1 one draw per generator.
     const q = new URLSearchParams(window.location.search)
     const pick = q.has('onlymeshfx') ? (sp: GeneratorSpawn) => sp.link === 'mesh' && zonePick(sp) : zonePick
-    const s = buildSystems(zone, pick, 1, q.has('nomeshfx') ? undefined : zoneMeshPicker(zone), !q.has('nobatch'))
+    const meshPick = npc ? (sp: GeneratorSpawn) => sp.link === 'mesh' && zonePick(sp) : zoneMeshPicker(zone)
+    const s = buildSystems(zone, pick, 1, q.has('nomeshfx') ? undefined : meshPick, !q.has('nobatch'))
     console.log(`[ZFX] ${s.length} zone effect particle systems`)
     if (new URLSearchParams(window.location.search).has('census')) {
       (window as unknown as { __zfx?: System[] }).__zfx = s
     }
     return s
-  }, [zone])
+  }, [zone, npc])
   return <ParticleField systems={systems} weather={false} range={range} />
 }
 

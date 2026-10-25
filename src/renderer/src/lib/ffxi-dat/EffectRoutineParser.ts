@@ -23,6 +23,12 @@ export type RoutineCommand =
   | { kind: 'generator'; delay: number; duration: number; ref: string }
   /** Run another routine; `onTarget` swaps caster and target (op 0x09). */
   | { kind: 'routine'; delay: number; ref: string; onTarget: boolean }
+  /**
+   * Op 0x57, a linked routine (xim LinkedEffectRoutine): NPC files chain their
+   * spawn scripts with it (a gathering point's init -> str0 starts its
+   * sparkle). Read for NPC effects (npcStations); the spell runner skips it.
+   */
+  | { kind: 'link'; delay: number; ref: string }
   /** Play a sound pointer, heard from the caster or the target. */
   | { kind: 'sound'; delay: number; ref: string; onTarget: boolean; near: number; far: number }
   /** Play a motion on the actor: `ma2?` is a spell's release, ? any body part. */
@@ -84,6 +90,8 @@ export function parseEffectRoutine(view: DataView, blockStart: number, blockEnd:
       commands.push({ kind: 'stop', delay, ref: readName(view, args) })
     } else if ((op === 0x76 || op === 0x77) && argWords >= 1) {
       commands.push({ kind: 'ranged', delay, start: op === 0x76, subtype: view.getUint32(args, true) })
+    } else if (op === 0x57 && argWords >= 1) {
+      commands.push({ kind: 'link', delay, ref: readName(view, args) })
     } else if (op === 0x5f && argWords >= 1) {
       commands.push({ kind: 'stopRoutine', delay, ref: readName(view, args) })
     } else if ((op === 0x03 || op === 0x09 || op === 0x3b || op === 0x3c || (op === 0x0a && argWords !== 6)) && argWords >= 1) {

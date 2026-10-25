@@ -4119,11 +4119,48 @@ rather than solved.
     dist, height)` puts the camera in front of NPC i (needs `campos=` so the
     controls do not take the camera back). Facing test: scratchpad
     `facetest.js` with `walkdebug=1`.
-  - **Not yet:** children (races 29-31: no skeleton known; every load failure
-    in the three towns), chocobo and automaton looks, the effects NPC files
-    carry (Home Point crystal = model 51, Planar Rifts, gathering sparkles),
-    sitting and other poses (`animation`/`animation_sub`), names on hover
-    (the install has them: file 0x1A40 + zone, 0x1C-byte name + u32 id).
+  - **Children, names, effects (2026-10-25).**
+    - **Children** (races 29-31): FFXiMain.dll also holds a u16 file number
+      per race 0-40, found by content (entries 1, 2, 3, 7, 8 = SKELETON_PATHS):
+      29 Mithra child ROM/61/110, 30 Hume girl ROM/61/58, 31 Hume boy
+      ROM/61/85, each a skeleton ("kids") and idl0/wlk0/run0; 32-36 chocobos
+      ROM/169/11 (`equipTable.ts raceFilePath`). Gear and faces from body
+      types 9-11 of the appearance table. Bastok Markets, S. San d'Oria and
+      Windurst Woods now load every NPC (0 failures).
+    - **Names** (`npcNames`): file 0x1A40 + zone (above 0xFF: 0x151DB +
+      zone - 0x100), 32-byte entries, a 28-byte name and the full NPC id (xim
+      ZoneNpcTableProvider); matches LandSandBoat's numbering exactly.
+      Hovering an NPC (nearest mesh under the pointer, tested every third
+      frame) shows its name over its head (drei Html, `.npc-name`); a
+      collision ray stops it naming NPCs behind walls.
+    - **Effects** (with Zone effects on): standard-look files are also read
+      with parseZoneFile. The idle generators are the self-running ones the
+      spawn routines reach (`init`, `aper`, `efon`, `pop0`, `@scd`,
+      following calls and op 0x57 links, now read as `link`); a file with
+      none of those routines runs all its self-running ones. Self-running
+      alone was wrong: a Synergy furnace's eight elemental streams are all
+      flagged so but started by its feeding routines, and the dark one drew
+      a black blade. Copies per NPC are moved to the zone, turned with it and
+      placed on their joint as the idle's first frame poses it (a Waypoint's
+      ring is lifted by its idle), then run by ZoneEffects with `npc`: every
+      self-running mesh, since the zone's water test took a Home Point's
+      scrolling rings for water and drew 1 of its 8 generators.
+      Checked: Home Point crystals (Bastok), Survival Guide, Synergy furnace
+      (now plain), Waypoint (W. Adoulin), Planar Rift, Ethereal Junction,
+      Excavation Point (Attohwa Chasm).
+      **For Ryan to judge:** the Rift and Junction draw a dark, nearly square
+      pool under their vortex: `pou0`, a black glow with blend 0x44 (normal
+      alpha, xim BlendFunc), whose soft texture alpha saturates under the
+      game's 4x alpha stage. Dropping it (`?npcfxdrop=pou0`) leaves a clean
+      swirl; kept because the data says so. The Waypoint's ground glow clips
+      into the paving at one edge.
+      Diagnostics: `__npcFx`, `__npcFxZones`, `?npcfx=<n>` (one set),
+      `?npcfxdrop=a,b`.
+    - Cost: Bastok street ~105-122 fps on vs ~148-154 off (runs vary ±7).
+  - **Not yet:** chocobo and automaton looks of their own (21 and 116 rows,
+    dropped by the build script), effects NPCs start on events (routines with
+    variables: the furnace's feeding), sitting and other poses
+    (`animation`/`animation_sub`).
 
 - **Zone sounds — built 2026-10-24.** Panel → **Sound** (was Music) →
   *Zone sounds* (off by default, like the music) and *Sound volume*

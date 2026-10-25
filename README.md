@@ -66,8 +66,10 @@ drawn in hand yet.)
 guards at the gates, stable hands and chocobos, each in their own clothes,
 facing the way they do in game and idling (**Scene → NPCs**, off by default).
 The game files never say where NPCs stand, so their places come from the
-LandSandBoat project; their looks come from your install. Children, and the
-glow some NPCs carry (Home Point crystals), are not shown yet.
+LandSandBoat project; their looks and names come from your install. Point at
+one to see its name. With **Zone effects** on, NPCs carry their own effects
+too: Home Point crystals, Survival Guides, gathering points' sparkles,
+Waypoints and Planar Rifts.
 
 **Map view** — a top-down orthographic capture with no perspective distortion,
 for shaping a zone into a map.

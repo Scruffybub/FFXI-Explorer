@@ -236,6 +236,8 @@ export interface CharacterSpec {
    * id: NPCs, whose looks come from the game's own table (equipTable).
    */
   paths?: { face: string | null; gear: Record<number, string | null> }
+  /** The race file holding the skeleton, for races SKELETON_PATHS lacks (NPC children). */
+  skeletonPath?: string
 }
 
 export interface ComposedCharacter extends ParsedDatFile {
@@ -259,7 +261,7 @@ export async function composeCharacter(
   ffxiPath: string,
   spec: CharacterSpec,
 ): Promise<ComposedCharacter> {
-  const skeletonPath = SKELETON_PATHS[spec.race]
+  const skeletonPath = spec.skeletonPath ?? SKELETON_PATHS[spec.race]
   if (!skeletonPath) throw new Error(`No skeleton known for race ${spec.race}`)
 
   const skelBuffer = await window.ffxi.readDat(ffxiPath, skeletonPath)

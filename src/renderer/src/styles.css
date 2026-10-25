@@ -1130,3 +1130,15 @@ select {
 :root[data-look='modern'] ::-webkit-scrollbar { width: 7px; height: 7px; }
 :root[data-look='modern'] ::-webkit-scrollbar-thumb { background: rgba(201, 168, 92, 0.35); border-radius: 0; }
 :root[data-look='modern'] ::-webkit-scrollbar-thumb:hover { background: rgba(201, 168, 92, 0.6); }
+
+/* Scene -> NPCs: the name over the NPC under the pointer. */
+.npc-name {
+  background: rgba(10, 12, 17, 0.82);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 12px;
+  white-space: nowrap;
+  color: var(--text);
+  pointer-events: none;
+}

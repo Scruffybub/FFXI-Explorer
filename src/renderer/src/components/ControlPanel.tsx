@@ -1231,7 +1231,7 @@ export default function ControlPanel({
           label="NPCs"
           checked={scene.npcs}
           onChange={v => onScene({ npcs: v })}
-          info="Stand the zone's NPCs at their posts, facing the way they do in game, each in its own clothes and idling: merchants behind their counters, guards at the gates, moogles by the Mog House. The game itself never stores where NPCs stand (the server sends it), so the positions come from the LandSandBoat project. Not yet shown: children, chocobos and automatons, and the glow some NPCs carry, such as Home Point crystals."
+          info="Stand the zone's NPCs at their posts, facing the way they do in game, each in its own clothes and idling: merchants behind their counters, guards at the gates, moogles by the Mog House. The game itself never stores where NPCs stand (the server sends it), so the positions come from the LandSandBoat project; their looks and names come from your game. Point at an NPC to see its name. With Zone effects on, NPCs carry their own effects too: Home Point crystals, Survival Guides, Waypoints, gathering sparkles. Effects NPCs show only when you use them (such as a furnace being fed) are not shown."
         />
         <Toggle
           label="Generator water (beta)"

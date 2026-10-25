@@ -5060,7 +5060,7 @@ export default function ZoneViewer({
           footsteps={footsteps}
         />
       )}
-      {scene.npcs && !scene.mapView && npcZone && <NpcStations root={npcZone.root} zoneId={npcZone.id} />}
+      {scene.npcs && !scene.mapView && npcZone && <NpcStations root={npcZone.root} zoneId={npcZone.id} world={collisionWorld} effectRange={scene.zoneEffects ? scene.effectRange : null} />}
       {scene.zoneEffects && !scene.mapView && <TriggeredEffects zone={zoneData} range={scene.effectRange} />}
       {footsteps && !character && <FootstepCadence body={walkBody} footsteps={footsteps} />}
       {!scene.mapView && soundVolume > 0 && <AmbientSoundPlayer zone={zoneData} volume={soundVolume} />}
