@@ -4088,16 +4088,33 @@ rather than solved.
     NPC's chest along its facing finds open space (median 23.6 / 18.1 / 13.2
     units in Bastok Markets / S. San d'Oria / Windurst Woods, walls within
     1.5 for 0 / 8 / 8 NPCs); turned round, 11 / 18 / 31 face a wall.
-  - **Drawing** (`components/NpcStations.tsx`): one build per look (shared
-    materials and textures), positions cloned per NPC for CPU skinning; idle
-    = the file's first motion (`idl`) or the race's `def_` idle; random start
-    phase. Animated within 60 units (`?npcanim=` overrides), drawn within 100,
-    frustum-tested by a sphere. Looks are cleared when the zone closes.
-  - **Cost** (this PC, street level, Zone effects on): S. San d'Oria 180 →
-    136 fps, Windurst Woods 180 → 149, Bastok Markets 148 → 101 (18 NPCs on
-    screen: +214 draw calls, +32k triangles; animation is ~9 fps of it).
-    Without the draw distance the overview halved (177 → 79). **Next speed-up:
-    merge each NPC's pieces by material.**
+  - **Drawing** (`components/NpcStations.tsx`): one build per look, its
+    meshes merged by texture (one draw per texture, not per mesh; each
+    source mesh still skins into its own slice of the merged vertices),
+    materials and textures shared by every NPC wearing that look, vertices
+    copied per NPC for CPU skinning. Idle = the file's first motion (`idl`)
+    or the race's `def_` idle, random start phase. Drawn within 100 units
+    (frustum-tested by a sphere); animated within 60 (`?npcanim=`
+    overrides): every frame within 20, beyond that 30 times a second (the
+    game's motion rate), staggered. Matrices worked out once
+    (`matrixAutoUpdate` off): NPCs never move. Looks cleared with the zone.
+  - **Cost and the speed-up (2026-10-25, this PC, street level by the
+    busiest cluster, Zone effects on; ~178 fps is this PC's frame cap):**
+    | | Bastok Markets | S. San d'Oria | Windurst Woods |
+    |---|---|---|---|
+    | NPCs off | 148-154 | 178-180 | 179-180 |
+    | stage 1 (a draw per mesh, posed every frame) | 101 | 136 | 149 |
+    | merged by texture | 108 | 170 | 177 |
+    | + 30-a-second poses beyond 20 units, frozen matrices | 121-128 | 177 | 176 |
+    Bastok: 18 NPCs on screen were 214 draws, now 99. The draws were the
+    cost, not the shading: a plain material instead of the lit one changed
+    nothing (123.5 vs 124 fps); hiding the meshes gave back 30 fps. What is
+    left there is ~13 microseconds a draw (about 20 fps) and the idles (~7).
+    The overview costs nothing (no NPC within 100 units; 177 on and off).
+    **Further, if wanted:** one draw per NPC needs its textures in one
+    texture: an atlas breaks FFXI's repeating UVs, a texture array per size
+    keeps them (custom material); or GPU skinning, which would also let NPCs
+    sharing a look be instanced.
   - Census (`?census=1`): `__npcs()` (counts, `failedLooks`), `__npcView(i,
     dist, height)` puts the camera in front of NPC i (needs `campos=` so the
     controls do not take the camera back). Facing test: scratchpad

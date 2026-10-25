@@ -26,6 +26,14 @@ const CENSUS = new URLSearchParams(window.location.search).get('census') === '1'
 /** NPCs closer than this to the camera play their idle, world units. */
 const ANIMATE_RANGE = Number(new URLSearchParams(window.location.search).get('npcanim') ?? 60)
 /**
+ * Beyond this, an NPC is posed at the game's own motion rate, 30 times a
+ * second, rather than every frame. Posing is CPU work over every vertex: in
+ * Bastok Markets 15 idling NPCs of 6-8k vertices cost 134 -> 109 fps when
+ * posed every frame (2026-10-25). Nearer than this, every frame stays smooth.
+ */
+const SMOOTH_RANGE = 20
+const MOTION_STEP = 1 / 30
+/**
  * NPCs further than this are not drawn: a town's 150 at ten pieces each
  * halved the frame rate from the overview, where they are specks
  * (Southern San d'Oria 177 -> 79 fps, 2026-10-25). The game draws them
@@ -33,11 +41,19 @@ const ANIMATE_RANGE = Number(new URLSearchParams(window.location.search).get('np
  */
 const DRAW_RANGE = 100
 
+/** One draw: a look's meshes that share a texture, merged. */
+interface Part {
+  geometry: THREE.BufferGeometry
+  material: THREE.Material
+  /** Each skinned source mesh's place in the merged vertices. */
+  skins: { offset: number; skin: SkinTarget }[]
+}
+
 interface Template {
+  /** The model as buildModel made it; kept for its textures and materials, and to dispose. */
   built: BuiltModel
   model: NpcModel
-  /** Each mesh's skinning data, or null for a mesh without bones. */
-  skins: (SkinTarget | null)[]
+  parts: Part[]
   inverseBind: number[][] | null
 }
 
@@ -51,15 +67,73 @@ interface Placed {
   /** Seconds into its idle, started at random so a crowd does not sway in step. */
   t: number
   posed: boolean
+  /** Seconds since it was last posed, started at random so the 30-a-second poses spread over frames. */
+  since: number
 }
 
+/**
+ * Merges meshes into one geometry: positions, normals, uvs (zero where a mesh
+ * has none) and indices, each mesh's vertices after the last's.
+ */
+function mergeMeshes(meshes: THREE.Mesh[]): THREE.BufferGeometry {
+  let vertices = 0, indices = 0
+  for (const m of meshes) { vertices += m.geometry.getAttribute('position').count; indices += m.geometry.getIndex()?.count ?? 0 }
+  const position = new Float32Array(vertices * 3), normal = new Float32Array(vertices * 3), uv = new Float32Array(vertices * 2)
+  const index = vertices > 65535 ? new Uint32Array(indices) : new Uint16Array(indices)
+  let v = 0, n = 0
+  for (const m of meshes) {
+    const g = m.geometry
+    const p = g.getAttribute('position')
+    position.set(p.array as Float32Array, v * 3)
+    const nm = g.getAttribute('normal')
+    if (nm) normal.set(nm.array as Float32Array, v * 3)
+    const t = g.getAttribute('uv')
+    if (t) uv.set(t.array as Float32Array, v * 2)
+    const ix = g.getIndex()
+    if (ix) for (let i = 0; i < ix.count; i++) index[n + i] = ix.getX(i) + v
+    v += p.count
+    n += ix?.count ?? 0
+  }
+  const out = new THREE.BufferGeometry()
+  out.setAttribute('position', new THREE.BufferAttribute(position, 3))
+  out.setAttribute('normal', new THREE.BufferAttribute(normal, 3))
+  out.setAttribute('uv', new THREE.BufferAttribute(uv, 2))
+  out.setIndex(new THREE.BufferAttribute(index, 1))
+  return out
+}
+
+/**
+ * Builds a look once, its meshes merged by texture: every draw call cost
+ * about 8 microseconds whatever it drew, and a dressed character is a dozen
+ * meshes over half as many textures. In Bastok Markets the 18 NPCs on
+ * screen added 214 draws and 154 -> 124 fps; with a plain material instead
+ * of the lit one it was 123.5, so the draws were the cost, not the shading
+ * (2026-10-25). Skinning still runs per source mesh, into its own slice of
+ * the merged vertices.
+ */
 function makeTemplate(model: NpcModel): Template {
   const built = buildModel(model.model)
-  const skins = built.meshes.map(mesh => {
-    const positions = mesh.geometry.getAttribute('position').array
-    return built.skinTargets.find(s => s.positions === positions) ?? null
-  })
-  return { built, model, skins, inverseBind: model.model.skeleton?.matrices.map(invertRigidMatrix4) ?? null }
+  const groups = new Map<string, THREE.Mesh[]>()
+  for (const mesh of built.meshes) {
+    const mat = mesh.material as THREE.MeshStandardMaterial
+    const key = (mat.map?.uuid ?? 'none') + '|' + mat.alphaTest
+    const list = groups.get(key)
+    if (list) list.push(mesh)
+    else groups.set(key, [mesh])
+  }
+  const parts: Part[] = []
+  for (const meshes of groups.values()) {
+    const skins: Part['skins'] = []
+    let offset = 0
+    for (const mesh of meshes) {
+      const positions = mesh.geometry.getAttribute('position').array
+      const skin = built.skinTargets.find(t => t.positions === positions)
+      if (skin) skins.push({ offset, skin })
+      offset += mesh.geometry.getAttribute('position').count
+    }
+    parts.push({ geometry: mergeMeshes(meshes), material: meshes[0].material as THREE.Material, skins })
+  }
+  return { built, model, parts, inverseBind: model.model.skeleton?.matrices.map(invertRigidMatrix4) ?? null }
 }
 
 function place(template: Template, x: number, y: number, z: number, facing: number): Placed {
@@ -70,26 +144,36 @@ function place(template: Template, x: number, y: number, z: number, facing: numb
   group.rotation.y = (facing / 256) * Math.PI * 2
   const geometries: THREE.BufferGeometry[] = []
   const skins: SkinTarget[] = []
-  template.built.meshes.forEach((mesh, i) => {
-    const skin = template.skins[i]
-    const geometry = skin ? mesh.geometry.clone() : mesh.geometry
-    if (skin) {
+  for (const part of template.parts) {
+    // Skinned parts get their own vertices; still ones share the template's.
+    const geometry = part.skins.length ? part.geometry.clone() : part.geometry
+    if (part.skins.length) {
       geometries.push(geometry)
-      skins.push({ ...skin, positions: geometry.getAttribute('position').array as Float32Array })
+      const array = geometry.getAttribute('position').array as Float32Array
+      for (const { offset, skin } of part.skins) {
+        skins.push({ ...skin, positions: array.subarray(offset * 3, offset * 3 + skin.origPositions.length) })
+      }
     }
-    const copy = new THREE.Mesh(geometry, mesh.material)
+    const copy = new THREE.Mesh(geometry, part.material)
     copy.frustumCulled = false
+    copy.matrixAutoUpdate = false
     group.add(copy)
-  })
+  }
+  // NPCs never move: their matrices are worked out once, not every frame
+  // (three's per-object matrix updates were 8% of a Bastok street frame).
+  group.updateMatrix()
+  group.matrixAutoUpdate = false
   // The zone's group turns Y and Z over; the sphere is tested in the world.
   const sphere = new THREE.Sphere(new THREE.Vector3(x, -y, -z), Math.max(template.built.radius * 1.5, 1))
-  return { template, group, geometries, skins, sphere, t: Math.random() * 10, posed: false }
+  return { template, group, geometries, skins, sphere, t: Math.random() * 10, posed: false, since: Math.random() * MOTION_STEP }
 }
 
 export function NpcStations({ root, zoneId }: { root: string; zoneId: number }) {
   const holder = useMemo(() => {
     const g = new THREE.Group()
     g.rotation.x = Math.PI
+    g.updateMatrix()
+    g.matrixAutoUpdate = false
     return g
   }, [])
   const [placed, setPlaced] = useState<Placed[]>([])
@@ -138,6 +222,7 @@ export function NpcStations({ root, zoneId }: { root: string; zoneId: number }) 
         for (const g of npc.geometries) g.dispose()
       }
       for (const t of templates.values()) {
+        for (const part of t.parts) part.geometry.dispose()
         for (const mesh of t.built.meshes) {
           mesh.geometry.dispose()
           const mat = mesh.material as THREE.MeshStandardMaterial
@@ -169,6 +254,9 @@ export function NpcStations({ root, zoneId }: { root: string; zoneId: number }) 
       const near = model.idle.length > 0 && distance < ANIMATE_RANGE
       if (!near && npc.posed) continue
       if (near) npc.t += delta
+      npc.since += delta
+      if (npc.posed && distance > SMOOTH_RANGE && npc.since < MOTION_STEP) continue
+      npc.since %= MOTION_STEP
       skinMeshes(npc.skins, poseSkeleton(skeleton, model.idle, inverseBind, npc.t))
       for (const g of npc.geometries) g.getAttribute('position').needsUpdate = true
       npc.posed = true
