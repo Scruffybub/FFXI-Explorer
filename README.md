@@ -62,6 +62,13 @@ moves on your character, or a pet — Carbuncle, Ifrit, a wyvern, an automaton �
 uses one of its abilities. (Instruments, handbells and weapons are not
 drawn in hand yet.)
 
+**NPCs** — the townsfolk at their posts: merchants behind their counters,
+guards at the gates, stable hands and chocobos, each in their own clothes,
+facing the way they do in game and idling (**Scene → NPCs**, off by default).
+The game files never say where NPCs stand, so their places come from the
+LandSandBoat project; their looks come from your install. Children, and the
+glow some NPCs carry (Home Point crystals), are not shown yet.
+
 **Map view** — a top-down orthographic capture with no perspective distortion,
 for shaping a zone into a map.
 

@@ -21,3 +21,19 @@ export async function fileIdPath(root: string, id: number): Promise<string | nul
   const entry = f.getUint16(id * 2, true)
   return `${rom === 1 ? 'ROM' : 'ROM' + rom}/${entry >> 7}/${entry & 0x7f}.DAT`
 }
+
+/** Every file number whose entry points at `path` (install-relative; several can share one file). */
+export async function fileIdsOf(root: string, path: string): Promise<number[]> {
+  await fileIdPath(root, 0)
+  if (!cached) return []
+  const [v, f] = await Promise.all([cached.v, cached.f])
+  const m = /^ROM(\d*)\/(\d+)\/(\d+)(?:\.dat)?$/i.exec(path.replace(/\\/g, '/'))
+  if (!m) return []
+  const rom = m[1] ? Number(m[1]) : 1
+  const entry = (Number(m[2]) << 7) | Number(m[3])
+  const ids: number[] = []
+  for (let id = 0; id < v.length && id * 2 + 2 <= f.byteLength; id++) {
+    if (v[id] === rom && f.getUint16(id * 2, true) === entry) ids.push(id)
+  }
+  return ids
+}

@@ -231,6 +231,11 @@ export interface CharacterSpec {
   equipment: Equipment
   /** Index into `animationOptions(race)`, or null to stand in bind pose. */
   animation: number | null
+  /**
+   * Exact files to use instead of the tables above, for the face and each slot
+   * id: NPCs, whose looks come from the game's own table (equipTable).
+   */
+  paths?: { face: string | null; gear: Record<number, string | null> }
 }
 
 export interface ComposedCharacter extends ParsedDatFile {
@@ -264,10 +269,17 @@ export async function composeCharacter(
   const pieces: { label: string; path: string }[] = []
 
   const faces = faceOptions(spec.race)
-  if (spec.face !== null && faces[spec.face]) {
+  if (spec.paths) {
+    if (spec.paths.face) pieces.push({ label: 'Face', path: spec.paths.face })
+  } else if (spec.face !== null && faces[spec.face]) {
     pieces.push({ label: 'Face', path: faces[spec.face].path })
   }
   for (const slot of SLOTS) {
+    if (spec.paths) {
+      const path = spec.paths.gear[slot.id]
+      if (path) pieces.push({ label: slot.label, path })
+      continue
+    }
     const chosen = spec.equipment[slot.id]
     if (chosen == null) continue
     const table = EQUIP[`${spec.race}:${slot.id}`]
@@ -305,7 +317,7 @@ export async function composeCharacter(
 
   // Bare feet still tread at the race's weight: take the step from its first
   // feet model (boots), read for the info block only.
-  if (footSound === null) {
+  if (footSound === null && !spec.paths) {
     const first = EQUIP[`${spec.race}:6`]?.['0']
     if (first) footSound = await window.ffxi.readDat(ffxiPath, first).then(readFootSound, () => null)
   }

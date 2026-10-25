@@ -62,18 +62,21 @@ attribution of the format research.
 **Files:** `resources/item-names.json`, `resources/zone-music.json`,
 `resources/zone-weather.json`, `resources/spell-effects.json`,
 `resources/ability-effects.json`, `resources/mob-skill-effects.json`,
-`resources/mob-skill-lists.json`, `resources/pet-skill-effects.json`
+`resources/mob-skill-lists.json`, `resources/pet-skill-effects.json`,
+`resources/npc-stations.json`
 
 Built by `scripts/build-item-names.cjs`, `scripts/build-zone-music.cjs`,
 `scripts/build-zone-weather.cjs`, `scripts/build-spell-effects.cjs` and
-`scripts/build-skill-effects.cjs` from LandSandBoat's `item_equipment.sql`,
+`scripts/build-skill-effects.cjs` and `scripts/build-npc-stations.cjs` from LandSandBoat's `item_equipment.sql`,
 `zone_settings.sql`, `zone_weather.sql`, `spell_list.sql`, `abilities.sql`,
-`mob_skills.sql`, `mob_skill_lists.sql`, `pet_skills.sql` and zone data files. Those sources are fetched at build time
+`mob_skills.sql`, `mob_skill_lists.sql`, `pet_skills.sql`, the per-zone
+`data/zones/*/npcs.yaml` and zone data files. Those sources are fetched at build time
 and are **not vendored** in this repository; the generated JSON contains item
 names, zone→music-id mappings, each zone's list of native weather types in
 order (no frequencies), each spell's id, name, effect number, magic skill,
 element and valid targets, each job ability's, monster move's and pet
-ability's id, name and animation number, and which monster family has which moves, extracted
+ability's id, name and animation number, which monster family has which moves,
+and each shown NPC's position, facing and appearance numbers, extracted
 from them.
 
 The underlying facts are Square Enix's game data rather than LandSandBoat's
@@ -91,15 +94,18 @@ here so anyone relying on it can make their own assessment.
 `ZoneViewer.tsx`, `src/renderer/src/lib/uiLook.ts` (the game's menu art),
 `EffectRoutineParser.ts`, `SkeletonParser.ts` (joint references),
 `DatFile.ts` (footwear info block), `ZoneFile.ts` (sound paths, mesh look-up
-order), `ambientSounds.ts`, `spellList.ts` and `EffectViewer.tsx`
+order), `ambientSounds.ts`, `spellList.ts`, `EffectViewer.tsx`,
+`npcStations.ts` (NPC model numbers) and `equipTable.ts` (the appearance
+table's layout)
 
 The layouts of generator chunks, D3M effect meshes, KeyFrame curves and
 environment (weather) records, the zone's point lights (generator light links
 and the MZB light table), particle setup flags (billboards, depth writes,
 haze), FFXI's texture-stage and lighting maths, its zone transparency rule,
 where the game keeps its menu window styles and font, effect routines, skeleton
-joint references, footwear info, sound generators and paths, and where spell
-effect files sit were worked out with
+joint references, footwear info, sound generators and paths, where spell
+effect files sit, which file an NPC model number names and how the game's
+appearance table is laid out were worked out with
 reference to
 [kuluu-ffxi](https://github.com/jondwillis/kuluu-ffxi) and to xim in
 [Heyrio/FFXI-BROWSER-GAME](https://github.com/Heyrio/FFXI-BROWSER-GAME), both

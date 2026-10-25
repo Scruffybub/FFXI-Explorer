@@ -34,6 +34,7 @@ import { frameCapStore } from '../lib/frameCap'
 import { LampLights } from './LampLights'
 import { zoneLamps, LAMP_VERTEX_PARS, LAMP_FRAGMENT_PARS, LAMP_VERTEX, buildLampTexture, lampSlots } from '../lib/zoneLamps'
 import { LensFlare } from './LensFlare'
+import { NpcStations } from './NpcStations'
 import type {
   LightingSettings, PointLightSettings, PostSettings, SceneSettings, SurfaceInfo, ToneMappingMode,
 } from '../lib/settings'
@@ -74,6 +75,8 @@ interface ZoneViewerProps {
   onMapScale?: (scale: MapScale | null) => void
   /** Sound → Zone sounds: the ambient sounds' level, 0 = off. */
   soundVolume?: number
+  /** Scene → NPCs: the install and the zone's id, whose NPC posts to show. */
+  npcZone?: { root: string; id: number } | null
 }
 
 const TONE_MAPPING: Record<ToneMappingMode, THREE.ToneMapping> = {
@@ -3012,7 +3015,7 @@ export default function ZoneViewer({
   selectedLightId = null, placingLight = false, onPlaceLight,
   inspecting = false, onInspectResult, onFlySpeedChange,
   character = null, characterMotion = null, characterMoves = null, onWeatherStates, onMapScale,
-  soundVolume = 0,
+  soundVolume = 0, npcZone = null,
 }: ZoneViewerProps) {
   // Where the walking body is. Written by WalkCamera, read by Avatar.
   const walkBody = useRef<WalkBodyState>({ x: 0, y: 0, z: 0, yaw: 0, moving: false, running: false, grounded: false, terrain: 0 })
@@ -5057,6 +5060,7 @@ export default function ZoneViewer({
           footsteps={footsteps}
         />
       )}
+      {scene.npcs && !scene.mapView && npcZone && <NpcStations root={npcZone.root} zoneId={npcZone.id} />}
       {scene.zoneEffects && !scene.mapView && <TriggeredEffects zone={zoneData} range={scene.effectRange} />}
       {footsteps && !character && <FootstepCadence body={walkBody} footsteps={footsteps} />}
       {!scene.mapView && soundVolume > 0 && <AmbientSoundPlayer zone={zoneData} volume={soundVolume} />}

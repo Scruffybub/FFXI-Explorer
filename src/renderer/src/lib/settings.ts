@@ -296,6 +296,12 @@ export interface SceneSettings {
   zoneEffects: boolean
 
   /**
+   * The zone's NPCs at their posts (lib/npcStations), each playing its idle.
+   * Off by default; kept across presets, like the camera mode.
+   */
+  npcs: boolean
+
+  /**
    * How far away zone effects play: the game's own emit range (from the
    * player — in orbit, the point circled) and draw distance (from the camera)
    * times 1, 2, 5 or 10, or 0 = everywhere.
@@ -519,6 +525,7 @@ export const DEFAULT_SCENE: SceneSettings = {
   generatorWater: false,
   zoneWeather: false,
   zoneEffects: false,
+  npcs: false,
   effectRange: 0,
   lampBrightness: 1,
   lampCount: 12,

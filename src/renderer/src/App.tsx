@@ -391,6 +391,7 @@ export default function App() {
       ...preset.scene,
       cameraMode: s.cameraMode,
       wireframe: s.wireframe,
+      npcs: s.npcs,
     }))
   }, [])
 
@@ -643,6 +644,7 @@ export default function App() {
             onWeatherStates={setWeatherStates}
             onMapScale={setMapScale}
             soundVolume={music.sounds ? music.soundsVolume : 0}
+            npcZone={ffxiPath && selected ? { root: ffxiPath, id: selected.id } : null}
           />
         )}
 

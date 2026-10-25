@@ -1228,6 +1228,12 @@ export default function ControlPanel({
           />
         )}
         <Toggle
+          label="NPCs"
+          checked={scene.npcs}
+          onChange={v => onScene({ npcs: v })}
+          info="Stand the zone's NPCs at their posts, facing the way they do in game, each in its own clothes and idling: merchants behind their counters, guards at the gates, moogles by the Mog House. The game itself never stores where NPCs stand (the server sends it), so the positions come from the LandSandBoat project. Not yet shown: children, chocobos and automatons, and the glow some NPCs carry, such as Home Point crystals."
+        />
+        <Toggle
           label="Generator water (beta)"
           checked={scene.generatorWater}
           onChange={v => onScene({ generatorWater: v })}

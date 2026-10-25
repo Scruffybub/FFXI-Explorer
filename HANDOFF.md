@@ -3811,7 +3811,8 @@ rather than solved.
       CatsEyeXI's `npc_list` (a LandSandBoat fork). LandSandBoat's
       `npc_list.sql` has each NPC's zone position, facing and look (the
       appearance bytes: race and gear, or a model id). Needs the
-      look → model mapping and a download Ryan approves.
+      look → model mapping and a download Ryan approves. **Stage 1 built
+      2026-10-25** (see "NPCs at their stations" below).
     - **Roaming enemies, visual only (not a game):** LandSandBoat's
       `mob_spawn_points.sql` (positions per spawn group) → `mob_groups` →
       `mob_pools` (model). Most mobs roam at random near their spawn; some
@@ -4048,6 +4049,64 @@ rather than solved.
       a long monster's back can still leave the frame (front reach only). Stage 3:
     abilities, weapon skills, monster moves. Later: cast in zones; the
     scale-curve and ring sweep for zone effects.
+
+- **NPCs at their stations — stage 1 built 2026-10-25.** Scene → **NPCs**
+  (off by default, kept across presets like the camera mode).
+  - **Data.** The client has no NPC positions. LandSandBoat moved them out of
+    `sql/npc_list.sql` into per-zone `data/zones/<zone>/npcs.yaml` on
+    2026-08-12 (the SQL now holds only ~4,700 instanced-content rows). The 294
+    YAML files (10 MB) were downloaded with Ryan's OK into the scratchpad;
+    `scripts/build-npc-stations.cjs <data/zones>` (js-yaml) →
+    `resources/npc-stations.json` (278 KB, 6,490 NPCs in 233 zones):
+    `{zone: [[index, x, y, z, facing, look]]}`. The zone id is the NPC id's
+    bits 12-23. Kept: a position, status `normal`/`update`, look `standard`
+    (model number) or `equipped` ([race, face, 8 gear values & 0xFFF]).
+    Dropped: no status (LandSandBoat's default, hidden: the Mog House moogle
+    at 0,0,1.5, debug NPCs), `cutscene_only`, `invisible`, `status_*`; doors,
+    lifts, ships; models 50 and 52 (the invisible "???" markers, one mesh
+    named `toum`). Chocobo (21) and automaton looks dropped for now.
+  - **Model number → file** (xim NpcTable): < 0x5DC: 0x514 + m; < 0xBB8:
+    0xC477 + m; < 0xC79: 0x17A8B + m; else 0x180F2 + m (xim's guess). Checked
+    against npc-model-paths.json names (Bastok's merchants → Hume Merchant
+    files, Moogle → Moogle 1).
+  - **Gear and faces from the game's own table** (`lib/equipTable.ts`):
+    FFXiMain.dll holds 16 body types × 0x1B0 bytes, 9 slots × 0x30 (face 0,
+    head 1 .. ranged 8), up to six runs of (first file u32, count u32). Found
+    by content (the Hume male's first face, count 32, with the Hume female's
+    0x1B0 later): 0x34C88 in this install. Faces: 32 per race, the 16
+    player faces (all match face-paths.json) and 16 NPC faces. Agrees with
+    model-dat-paths.json where both have an entry except where that table
+    drifts (Hume male bodies 177-191 five places off; Elvaan male body 101,
+    a San d'Oria stable hand, missing: he stood without a torso). Body types
+    9-11 are the children, 12-16 chocobos. **The Character builder still
+    uses model-dat-paths.json** — switching it is a separate decision.
+    `composeCharacter` takes `paths` (exact files) for this.
+  - **Facing:** 0-255 is a full turn clockwise from east (+X; LandSandBoat
+    +Z is north: Port Bastok's zone line is north of Gustaberg's), so the
+    NPC group (inside the zone's upright-turned group, raw Y-down space)
+    turns +facing/256·2π. Measured, not guessed: a collision ray from each
+    NPC's chest along its facing finds open space (median 23.6 / 18.1 / 13.2
+    units in Bastok Markets / S. San d'Oria / Windurst Woods, walls within
+    1.5 for 0 / 8 / 8 NPCs); turned round, 11 / 18 / 31 face a wall.
+  - **Drawing** (`components/NpcStations.tsx`): one build per look (shared
+    materials and textures), positions cloned per NPC for CPU skinning; idle
+    = the file's first motion (`idl`) or the race's `def_` idle; random start
+    phase. Animated within 60 units (`?npcanim=` overrides), drawn within 100,
+    frustum-tested by a sphere. Looks are cleared when the zone closes.
+  - **Cost** (this PC, street level, Zone effects on): S. San d'Oria 180 →
+    136 fps, Windurst Woods 180 → 149, Bastok Markets 148 → 101 (18 NPCs on
+    screen: +214 draw calls, +32k triangles; animation is ~9 fps of it).
+    Without the draw distance the overview halved (177 → 79). **Next speed-up:
+    merge each NPC's pieces by material.**
+  - Census (`?census=1`): `__npcs()` (counts, `failedLooks`), `__npcView(i,
+    dist, height)` puts the camera in front of NPC i (needs `campos=` so the
+    controls do not take the camera back). Facing test: scratchpad
+    `facetest.js` with `walkdebug=1`.
+  - **Not yet:** children (races 29-31: no skeleton known; every load failure
+    in the three towns), chocobo and automaton looks, the effects NPC files
+    carry (Home Point crystal = model 51, Planar Rifts, gathering sparkles),
+    sitting and other poses (`animation`/`animation_sub`), names on hover
+    (the install has them: file 0x1A40 + zone, 0x1C-byte name + u32 id).
 
 - **Zone sounds — built 2026-10-24.** Panel → **Sound** (was Music) →
   *Zone sounds* (off by default, like the music) and *Sound volume*
