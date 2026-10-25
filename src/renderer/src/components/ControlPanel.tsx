@@ -1234,6 +1234,12 @@ export default function ControlPanel({
           info="Stand the zone's NPCs at their posts, facing the way they do in game, each in its own clothes and idling: merchants behind their counters, guards at the gates, moogles by the Mog House. The game itself never stores where NPCs stand (the server sends it), so the positions come from the LandSandBoat project; their looks and names come from your game. Point at an NPC to see its name. With Zone effects on, NPCs carry their own effects too: Home Point crystals, Survival Guides, Waypoints, gathering sparkles. Effects NPCs show only when you use them (such as a furnace being fed) are not shown."
         />
         <Toggle
+          label="Monsters"
+          checked={scene.monsters}
+          onChange={v => onScene({ monsters: v })}
+          info="Let the zone's ordinary monsters wander where they live: each appears somewhere in its own spawn area, stands a while, then ambles to another spot. Only those out at the current time of day show, so the rabbits of West Ronfaure give way to bats in the evening. Just to look at: nothing attacks or can be fought. Where they live comes from the LandSandBoat project; their looks and names come from your game. Notorious monsters and those that only appear on events, weather or scripts are left out."
+        />
+        <Toggle
           label="Generator water (beta)"
           checked={scene.generatorWater}
           onChange={v => onScene({ generatorWater: v })}

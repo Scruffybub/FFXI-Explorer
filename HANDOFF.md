@@ -4162,6 +4162,50 @@ rather than solved.
     variables: the furnace's feeding), sitting and other poses
     (`animation`/`animation_sub`).
 
+- **Roaming monsters — built 2026-10-25.** Scene → **Monsters** (off by
+  default, kept across presets). Visual only.
+  - **Data.** LandSandBoat moved monsters out of SQL too (mob_spawn_points,
+    mob_groups, mob_pools now hold only instanced content). Downloaded with
+    Ryan's OK: per-zone `mobs.yaml` (248 files, 17 MB: templates with look,
+    type, spawn type, speed; spawns by id with `region` or `at`; `slots`
+    of spawns taking turns) and `regions.yaml` (173 files, 55 MB: polygon
+    outlines with heights). 51,220 spawns name a region, 14,898 give a
+    position, the rest neither (scripted). `scripts/build-mob-spawns.cjs` →
+    `resources/mob-spawns.json` (3.1 MB, 47,381 monsters in 161 zones):
+    `{zone: {r: [[x, y, z, ..]], m: [[index, look, where, time, slot,
+    speed?]]}}`; every outline point keeps its height. Outlines Douglas-Peucker'd to 2 units (896k → 194k points).
+    Left out: types notorious/fished/battlefield/called/event/unused, spawn
+    types scripted/lottery/weather/fog, automaton and misc looks, 1,1,1
+    placeholders. Time: at_evening 18-6, at_night 20-4 (`mobSpawns outAt`).
+    A slot shows one member: a timed one whose time it is, else an untimed
+    one. Names: the install's NPC name file has the monsters too (index =
+    id & 0xFFF; West Ronfaure 6 = Wild Rabbit).
+  - **Roaming** (`NpcStations` Roam, same templates/merging/posing/hover as
+    NPCs): placed at a random point of its region, on the collision floor nearest
+    the region's own height there (its outline heights weighted by
+    nearness; `CollisionWorld.floorsAt` lists every floor in the column).
+    **Fixed 2026-10-25 (Ryan):** taking the first floor down from above put
+    King Ranperre's Tomb's monsters on the hill over the caves; now 0 of
+    its monsters are 8+ units off their region's height (1 over 3). Retries
+    other points where there is no floor (5-10% of first spots; then 0
+    unplaced in six zones). Walk targets and re-reads take the floor nearest
+    the monster's own height, so a low ceiling cannot catch it. Rests 4-16 s,
+    walks 4-14 units to a point of its region (fixed spawns: within 6 of
+    home) whose floor is within 4 of its own, at 1.8 u/s x speed/40, turning
+    at 5 rad/s, ground re-read every 0.25 s; plays the file's `wlk` motion
+    (the race's walk for dressed ones) or glides in its idle. Only within
+    150 units of the camera wander. Monster effects are not run (Zone effects
+    places generators once).
+  - Checked: West Ronfaure noon (326 out of 445: worms, hares, sheep,
+    funguars, beetles, orcs, goblins) and 19:00 (360, Ding Bats and Mouse
+    Bats added), King Ranperre's Tomb (bats, Nachzehrer on the cave floor).
+    Cost: West Ronfaure at the frame cap with and without (177-179).
+  - Census: `__npcs()` (monsters, out, walking), `__mobGround()` (grounds
+    all now, counts none found and those 3/8+ units off their region's height), `__npcView(i)` now reports name and out.
+  - **Not yet:** scripted paths (some monsters walk set routes in the zone
+    Lua), notorious monsters, effects monsters carry (bombs' flames),
+    aggro/fights (not wanted).
+
 - **Zone sounds — built 2026-10-24.** Panel → **Sound** (was Music) →
   *Zone sounds* (off by default, like the music) and *Sound volume*
   (`MusicSettings.sounds` / `soundsVolume`; `?sounds=1` turns it on).

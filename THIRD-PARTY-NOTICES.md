@@ -63,20 +63,23 @@ attribution of the format research.
 `resources/zone-weather.json`, `resources/spell-effects.json`,
 `resources/ability-effects.json`, `resources/mob-skill-effects.json`,
 `resources/mob-skill-lists.json`, `resources/pet-skill-effects.json`,
-`resources/npc-stations.json`
+`resources/npc-stations.json`, `resources/mob-spawns.json`
 
 Built by `scripts/build-item-names.cjs`, `scripts/build-zone-music.cjs`,
 `scripts/build-zone-weather.cjs`, `scripts/build-spell-effects.cjs` and
-`scripts/build-skill-effects.cjs` and `scripts/build-npc-stations.cjs` from LandSandBoat's `item_equipment.sql`,
+`scripts/build-skill-effects.cjs`, `scripts/build-npc-stations.cjs` and
+`scripts/build-mob-spawns.cjs` from LandSandBoat's `item_equipment.sql`,
 `zone_settings.sql`, `zone_weather.sql`, `spell_list.sql`, `abilities.sql`,
 `mob_skills.sql`, `mob_skill_lists.sql`, `pet_skills.sql`, the per-zone
-`data/zones/*/npcs.yaml` and zone data files. Those sources are fetched at build time
+`data/zones/*/npcs.yaml`, `mobs.yaml` and `regions.yaml` and zone data files. Those sources are fetched at build time
 and are **not vendored** in this repository; the generated JSON contains item
 names, zone→music-id mappings, each zone's list of native weather types in
 order (no frequencies), each spell's id, name, effect number, magic skill,
 element and valid targets, each job ability's, monster move's and pet
 ability's id, name and animation number, which monster family has which moves,
-and each shown NPC's position, facing and appearance numbers, extracted
+each shown NPC's position, facing and appearance numbers, and each
+ordinary monster's appearance number, spawn time and spawn area (outlines
+simplified to within 2 units), extracted
 from them.
 
 The underlying facts are Square Enix's game data rather than LandSandBoat's

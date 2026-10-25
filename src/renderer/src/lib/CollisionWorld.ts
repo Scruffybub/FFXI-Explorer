@@ -88,6 +88,25 @@ export class CollisionWorld {
   }
 
   /**
+   * Every floor in the column at x, z, top to bottom: world heights of the
+   * upward-facing surfaces (normal y above `slopeCos`). A cave under a hill
+   * has two, the hilltop and the cave floor.
+   */
+  floorsAt(x: number, z: number, slopeCos = 0.5): number[] {
+    const box = this.geometry.boundingBox ?? (this.geometry.computeBoundingBox(), this.geometry.boundingBox!)
+    const from = new THREE.Vector3(x, box.max.y + 5, z)
+    const floors: number[] = []
+    for (let layer = 0, left = box.max.y - box.min.y + 10; layer < 32 && left > 0; layer++) {
+      const hit = this.groundBelow(from, left)
+      if (!hit) break
+      left -= from.y - hit.y + 0.05
+      from.y = hit.y - 0.05
+      if (hit.normal.y >= slopeCos) floors.push(hit.y)
+    }
+    return floors
+  }
+
+  /**
    * Somewhere a walker can stand, as near `preferred` as possible: a floor no
    * steeper than `slopeCos`, with `headroom` clear above it and level ground
    * `footing` units out all round. Each column is

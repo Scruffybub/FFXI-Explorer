@@ -392,6 +392,7 @@ export default function App() {
       cameraMode: s.cameraMode,
       wireframe: s.wireframe,
       npcs: s.npcs,
+      monsters: s.monsters,
     }))
   }, [])
 

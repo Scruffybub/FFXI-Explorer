@@ -71,6 +71,14 @@ one to see its name. With **Zone effects** on, NPCs carry their own effects
 too: Home Point crystals, Survival Guides, gathering points' sparkles,
 Waypoints and Planar Rifts.
 
+**Monsters** — the zone's ordinary monsters wander where they live: each
+appears in its own spawn area, stands a while, then ambles somewhere else in
+it, on the ground. Only those out at the time of day show, so West
+Ronfaure's rabbits give way to bats in the evening. Point at one for its name
+(**Scene → Monsters**, off by default). Just to look at: nothing fights.
+Notorious monsters, and those that appear only on events, weather or scripts,
+are left out.
+
 **Map view** — a top-down orthographic capture with no perspective distortion,
 for shaping a zone into a map.
 

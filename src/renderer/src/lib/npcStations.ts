@@ -54,6 +54,8 @@ export interface NpcModel {
   model: ParsedDatFile
   /** What it does standing at its post; none stands in bind pose. */
   idle: ParsedAnimation[]
+  /** Its walk, for a roaming monster (mobSpawns); empty when it has none (it glides in its idle). */
+  walk: ParsedAnimation[]
   /**
    * The file read as a small zone when it carries generators that run by
    * themselves: a Home Point crystal's glow and motes (model 51, `bind`),
@@ -80,7 +82,8 @@ async function loadLook(root: string, look: number | number[]): Promise<NpcModel
       const spawns = zone.spawns?.filter(sp => sp.emission.autoRun && (!idle || idle.has(sp.generator))) ?? []
       if (spawns.length) effects = { ...zone, spawns }
     } catch { /* a model without effects */ }
-    return { model, idle: clipsForMotion(model.animations, null), effects }
+    const walk = model.animations.filter(c => c.name.startsWith('wlk'))
+    return { model, idle: clipsForMotion(model.animations, null), walk, effects }
   }
   const [race, face, ...gear] = look
   const paths = {
@@ -93,10 +96,12 @@ async function loadLook(root: string, look: number | number[]): Promise<NpcModel
   if (!SKELETON_PATHS[race] && !own) return null
   const model = await composeCharacter(root, { race, face, equipment: {}, animation: null, paths, skeletonPath: own ?? undefined })
   if (!model.meshes.length) return null
-  const idle = own
-    ? parseAnimationDat(await window.ffxi.readDat(root, own)).filter(c => c.name.startsWith('idl'))
-    : (await loadMovementClips(root, race))?.idle ?? []
-  return { model, idle, effects: null }
+  if (own) {
+    const clips = parseAnimationDat(await window.ffxi.readDat(root, own))
+    return { model, idle: clips.filter(c => c.name.startsWith('idl')), walk: clips.filter(c => c.name.startsWith('wlk')), effects: null }
+  }
+  const moves = await loadMovementClips(root, race)
+  return { model, idle: moves?.idle ?? [], walk: moves?.walk ?? [], effects: null }
 }
 
 /** Routines an NPC runs as it appears and stands (xim: efon and pop0 on spawn, @scd looped). */
