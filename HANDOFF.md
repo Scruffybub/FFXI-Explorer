@@ -4021,7 +4021,15 @@ rather than solved.
     - **Spacing by size:** `modelReach` (98th-percentile forward reach and
       height from the vertices) sets the gap (reach + reach + 2.5, at least
       4.5) and `FrameStage` the camera. A behemoth stood on the caster.
-    - **Not yet:** pet abilities and dances by number (actionType 13/14);
+    - **Pet abilities were mislisted (fixed 2026-10-24):** in abilities.sql
+      the 241 pet abilities (ids 512 up: Healing Ruby, Poison Nails..; and
+      353-355) carry animation 94 — the master's "command your pet" gesture
+      (xim: 0x113C + 94) — so each played the same thing. Dropped from the job
+      list (294 remain; Fight/Heel/Deploy.. sharing 83 and the eight
+      Maneuvers sharing 333 are genuine). The pet's own effect is file
+      0xC0EF + an animation from LandSandBoat's pet_skills.sql (xim
+      PetSkillTable / PetSkillInfoTable) — a download not yet made.
+    - **Not yet:** dances by number (actionType 13/14);
       a long monster's back can still leave the frame (front reach only). Stage 3:
     abilities, weapon skills, monster moves. Later: cast in zones; the
     scale-curve and ring sweep for zone effects.

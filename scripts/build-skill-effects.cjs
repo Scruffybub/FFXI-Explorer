@@ -33,7 +33,10 @@ const str = x => x.replace(/^'|'$/g, '')
 const JOBS = ['', 'WAR', 'MNK', 'WHM', 'BLM', 'RDM', 'THF', 'PLD', 'DRK', 'BST', 'BRD', 'RNG', 'SAM', 'NIN', 'DRG', 'SMN', 'BLU', 'COR', 'PUP', 'DNC', 'SCH', 'GEO', 'RUN']
 
 const abilities = rows(fs.readFileSync(path.join(dir, 'abilities.sql'), 'utf8'), 'abilities')
-  .filter(f => num(f[12]) === 6 && num(f[9]) > 0)
+  // Pet abilities (ids 512 up, and Concentric Pulse..) all carry animation 94,
+  // the master's "command your pet" gesture, not the pet's own effect: listed,
+  // they all played the same thing. The pet's own needs pet_skills.sql.
+  .filter(f => num(f[12]) === 6 && num(f[9]) > 0 && num(f[9]) !== 94)
   .map(f => ({ id: num(f[0]), name: title(str(f[1])), job: JOBS[num(f[2])] ?? String(f[2]), animation: num(f[9]) }))
 fs.writeFileSync(path.join(out, 'ability-effects.json'), JSON.stringify(abilities))
 
