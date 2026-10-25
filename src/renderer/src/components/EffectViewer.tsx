@@ -55,14 +55,15 @@ const SPACING = 4.5
  * park hidden parts thousands of units away. A behemoth stood on top of the
  * caster at a fixed spacing.
  */
-function modelReach(model: ParsedDatFile): { front: number; height: number } {
+function modelReach(model: ParsedDatFile): { front: number; height: number; ground: number } {
   const xs: number[] = [], ys: number[] = []
   for (const m of model.meshes) {
     for (let i = 0; i < m.vertices.length; i += 9) { xs.push(m.vertices[i]); ys.push(-m.vertices[i + 1]) }
   }
-  if (!xs.length) return { front: 0.5, height: 2 }
+  if (!xs.length) return { front: 0.5, height: 2, ground: 0 }
   const at = (v: number[], q: number) => v.sort((a, b) => a - b)[Math.min(v.length - 1, Math.floor(v.length * q))]
-  return { front: Math.max(0.3, at(xs, 0.98)), height: Math.max(0.5, at(ys, 0.98) - at(ys, 0.02)) }
+  // ys are heights (y flipped); the ground is the low end, back in model terms.
+  return { front: Math.max(0.3, at(xs, 0.98)), height: Math.max(0.5, at(ys, 0.98) - at(ys, 0.02)), ground: -at(ys, 0.02) }
 }
 
 /** Puts the camera back far enough for both actors, looking at their middle. */
@@ -139,8 +140,10 @@ function Actor({ model, idle, x, yaw, onStage }: {
   const motion = useRef<{ clips: ParsedAnimation[]; mode: 'loop' | 'hold' | 'once'; t: number }>({ clips: idle, mode: 'loop', t: 0 })
   useEffect(() => { motion.current = { clips: idle, mode: 'loop', t: 0 } }, [idle])
   const pose = useRef<number[][] | null>(null)
-  // Model space is Y down, so the lowest point is the largest y: lift by it.
-  const lift = built ? built.bounds.max.y : 0
+  // Model space is Y down, so the lowest point is the largest y: lift by it —
+  // the 98th percentile, as modelReach: a stray parked vertex lifted
+  // Carbuncle out of the frame.
+  const lift = useMemo(() => modelReach(model).ground, [model])
   useEffect(() => {
     if (!built) { onStage(null); return }
     const placed = new THREE.Matrix4()

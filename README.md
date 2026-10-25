@@ -57,8 +57,9 @@ as you walk or fly (**Sound → Zone sounds**, off by default).
 or your character's weapon skills, job abilities and dances, and your
 character uses it on a monster of your choice: the casting motions and circles,
 the release, the effect itself and its sounds, all played from the game's own
-effect files and scripts. Or turn it round: a monster uses one of 3,000-odd
-monster moves on your character. (Instruments, handbells and weapons are not
+effect files and scripts. Or turn it round: a monster uses one of its own
+moves on your character, or a pet — Carbuncle, Ifrit, a wyvern, an automaton —
+uses one of its abilities. (Instruments, handbells and weapons are not
 drawn in hand yet.)
 
 **Map view** — a top-down orthographic capture with no perspective distortion,

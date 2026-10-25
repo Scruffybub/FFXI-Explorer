@@ -1,6 +1,6 @@
 /**
  * Builds resources/ability-effects.json, resources/mob-skill-effects.json and
- * resources/mob-skill-lists.json:
+ * resources/mob-skill-lists.json and resources/pet-skill-effects.json:
  * each job ability's and monster move's id, name and animation number (its
  * effect file: lib/skillList.ts).
  *
@@ -8,7 +8,8 @@
  *
  * The client never says which effect an ability or a monster move plays (the
  * server sends it), so the numbers come from LandSandBoat's abilities.sql and
- * mob_skills.sql, and which family has which from mob_skill_lists.sql
+ * mob_skills.sql and pet_skills.sql, and which family has which from
+ * mob_skill_lists.sql
  * (GPL-3.0; see THIRD-PARTY-NOTICES.md). Only those facts are
  * kept, not the SQL. Abilities: job abilities only (actionType 6); weapon
  * skills and dances come from the animation list per race instead.
@@ -62,4 +63,17 @@ if (fs.existsSync(listsSql)) {
   const out2 = Object.fromEntries(Object.entries(lists).map(([k, v]) => [k, [...v].sort((a, b) => a - b)]))
   fs.writeFileSync(path.join(out, 'mob-skill-lists.json'), JSON.stringify(out2))
   console.log(Object.keys(out2).length, 'monster skill lists')
+}
+
+// Pet abilities (pet_skills.sql): the pet's own effect, file 0xC0EF + its
+// animation (xim PetSkillTable). Their job comes from abilities.sql, where
+// they sit with the master's command gesture instead.
+const petSql = path.join(dir, 'pet_skills.sql')
+if (fs.existsSync(petSql)) {
+  const jobOf = new Map(rows(fs.readFileSync(path.join(dir, 'abilities.sql'), 'utf8'), 'abilities').map(f => [num(f[0]), JOBS[num(f[2])] ?? '']))
+  const pets = rows(fs.readFileSync(petSql, 'utf8'), 'pet_skills')
+    .map(f => ({ id: num(f[0]), name: title(str(f[3])), job: jobOf.get(num(f[0])) || 'Pet', animation: num(f[2]) }))
+    .filter(s => s.name)
+  fs.writeFileSync(path.join(out, 'pet-skill-effects.json'), JSON.stringify(pets))
+  console.log(pets.length, 'pet abilities by job', JSON.stringify(pets.reduce((c, p) => (c[p.job] = (c[p.job] || 0) + 1, c), {})))
 }

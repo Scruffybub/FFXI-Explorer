@@ -2,6 +2,7 @@ import { animationOptions } from './characterModel'
 import rawAbilities from '../../../../resources/ability-effects.json'
 import rawMobSkills from '../../../../resources/mob-skill-effects.json'
 import rawSkillLists from '../../../../resources/mob-skill-lists.json'
+import rawPetSkills from '../../../../resources/pet-skill-effects.json'
 
 /**
  * Weapon skills, job abilities and dances for the effect browser, per race.
@@ -86,3 +87,12 @@ export function movesForCreature(name: string): { family: string; ids: Set<numbe
   }
   return key ? { family: key, ids: new Set(SKILL_LISTS[key]) } : null
 }
+
+/**
+ * Pet abilities (LandSandBoat pet_skills.sql): Blood Pacts, Ready moves,
+ * wyvern breaths, automaton skills. The pet's own effect is file 0xC0EF +
+ * its animation (xim PetSkillTable); 220 of 255 resolve here. Job from
+ * abilities.sql ("Pet" where it has none).
+ */
+export const PET_SKILLS = rawPetSkills as NumberedSkill[]
+export const petSkillFileId = (p: NumberedSkill) => 0xc0ef + p.animation

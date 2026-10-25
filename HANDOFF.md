@@ -4029,6 +4029,21 @@ rather than solved.
       Maneuvers sharing 333 are genuine). The pet's own effect is file
       0xC0EF + an animation from LandSandBoat's pet_skills.sql (xim
       PetSkillTable / PetSkillInfoTable) — a download not yet made.
+    - **Pet abilities (2026-10-25):** LandSandBoat `pet_skills.sql` downloaded
+      with Ryan's OK → `resources/pet-skill-effects.json` (255; job from
+      abilities.sql, "Pet" where none). File 0xC0EF + pet_anim_id (xim
+      PetSkillTable): 220 resolve (Healing Ruby ROM/118/21 `ban_`, Flaming
+      Crush ROM/118/42 `if_h`); the rest are mostly BST Ready moves on empty
+      slots, left out. **Pet** tab: grouped by job; picking a job puts its
+      usual pet in the User picker (SMN Carbuncle (Summon), DRG Wyvern (Pet)
+      1, PUP Automaton 1, BST Rabbit 1; no luopan in the catalogue for GEO).
+      The User picker now includes Avatars and the automatons (Misc). Pets
+      use their abilities on your character, like monsters. Which avatar has
+      which Blood Pact is not in the data: pick it.
+    - **Ground from the 98th percentile too** (`modelReach` ground): a stray
+      parked vertex lifted Carbuncle out of the frame.
+    - Checked: Healing Ruby (Carbuncle leaps, rays, healing sphere), Flaming
+      Crush (Ifrit leaps across, fire blast). Census: `__playPet(name)`.
     - **Not yet:** dances by number (actionType 13/14);
       a long monster's back can still leave the frame (front reach only). Stage 3:
     abilities, weapon skills, monster moves. Later: cast in zones; the

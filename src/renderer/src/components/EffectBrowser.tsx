@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 import { parseAnimationDat, parseDatFile, parseSystemEffects, parseZoneFile, SKELETON_PATHS, type ParsedAnimation, type ParsedDatFile, type ParsedZone, type SystemEffects } from '../lib/ffxi-dat'
 import { MODELS } from '../lib/modelList'
 import { SPELLS, SPELL_SKILLS, SPELL_EFFECT_BASE, castRoutine } from '../lib/spellList'
-import { JOB_ABILITIES, MONSTER_MOVES, SKILL_CATEGORIES, abilityFileId, monsterMoveFileId, movesForCreature, skillOptions } from '../lib/skillList'
+import { JOB_ABILITIES, MONSTER_MOVES, PET_SKILLS, SKILL_CATEGORIES, abilityFileId, monsterMoveFileId, movesForCreature, petSkillFileId, skillOptions } from '../lib/skillList'
 import { fileIdPath } from '../lib/fileTable'
 import { clipsForMotion } from '../lib/motions'
 import { loadCastClips, type CastClips } from '../lib/characterModel'
@@ -18,7 +18,10 @@ import { EffectViewer, type EffectBundle } from './EffectViewer'
 
 /** Creature families: targets for your character, and the users of monster moves. */
 const CREATURE_CATEGORIES = new Set(['Beastmen', 'Beasts', 'Birds', 'Amorphs', 'Aquans', 'Lizards', 'Plantoids', 'Vermin', 'Undead', 'Demons', 'Dragons', 'Arcana', 'Elementals'])
-const CREATURES = MODELS.filter(m => CREATURE_CATEGORIES.has(m.category))
+// Pets as users too: the avatars, and the automatons filed under Misc.
+const CREATURES = MODELS.filter(m => CREATURE_CATEGORIES.has(m.category) || m.category === 'Avatars' || (m.category === 'Misc' && /^Automaton/.test(m.name)))
+/** The pet a job's abilities default to (no luopan in the catalogue for GEO). */
+const PET_FOR_JOB: Record<string, string> = { SMN: 'Carbuncle (Summon)', DRG: 'Wyvern (Pet) 1', PUP: 'Automaton 1', BST: 'Rabbit 1' }
 // A full monster file (ROM/6/1): mesh, skeleton, its fighting motions and
 // routines. Some catalogue entries (Goblin 1, ROM/3/59) are light models with
 // only a walk and an idle, and their moves play without motions.
@@ -48,7 +51,7 @@ interface Entry {
   moveId?: number
 }
 
-type Kind = 'magic' | 'skills' | 'monster'
+type Kind = 'magic' | 'skills' | 'monster' | 'pet'
 
 const spellEntries: Entry[] = SPELLS.map(s => ({
   key: 'spell' + s.id, name: s.name, detail: `${s.skill} · ${s.element}`, group: s.skill,
@@ -57,6 +60,10 @@ const spellEntries: Entry[] = SPELLS.map(s => ({
 const abilityEntries: Entry[] = JOB_ABILITIES.map(a => ({
   key: 'ability' + a.id, name: a.name, detail: `${a.job} ability`, group: a.job ?? '',
   file: { id: abilityFileId(a) }, castRoutine: null,
+}))
+const petEntries: Entry[] = PET_SKILLS.map(p => ({
+  key: 'pet' + p.id, name: p.name, detail: `${p.job} pet`, group: p.job ?? '',
+  file: { id: petSkillFileId(p) }, castRoutine: null,
 }))
 const moveEntries: Entry[] = MONSTER_MOVES.map(m => ({
   key: 'move' + m.id, name: m.name, detail: 'monster move', group: '',
@@ -96,9 +103,9 @@ export default function EffectBrowser({ ffxiPath, head, caster, casterRace, sett
     return () => { cancelled = true }
   }, [ffxiPath, casterRace])
   useEffect(() => {
-    if (kind !== 'monster' || movesHere) return
+    if ((kind !== 'monster' && kind !== 'pet') || movesHere) return
     let cancelled = false
-    Promise.all(moveEntries.map(async e => ((await fileIdPath(ffxiPath, (e.file as { id: number }).id)) ? e.key : null)))
+    Promise.all([...moveEntries, ...petEntries].map(async e => ((await fileIdPath(ffxiPath, (e.file as { id: number }).id)) ? e.key : null)))
       .then(keys => { if (!cancelled) setMovesHere(new Set(keys.filter((k): k is string => !!k))) })
       .catch(() => { if (!cancelled) setMovesHere(new Set()) })
     return () => { cancelled = true }
@@ -106,6 +113,7 @@ export default function EffectBrowser({ ffxiPath, head, caster, casterRace, sett
 
   const entries = useMemo<Entry[]>(() => {
     if (kind === 'magic') return spellEntries
+    if (kind === 'pet') return movesHere ? petEntries.filter(e => movesHere.has(e.key)) : []
     if (kind === 'monster') {
       if (!movesHere) return []
       const here = moveEntries.filter(e => movesHere.has(e.key))
@@ -120,6 +128,7 @@ export default function EffectBrowser({ ffxiPath, head, caster, casterRace, sett
   }, [kind, casterRace, movesHere, ownMoves, family])
   const groups = kind === 'magic' ? SPELL_SKILLS
     : kind === 'skills' ? [...SKILL_CATEGORIES, ...new Set(abilityEntries.map(e => e.group))].filter(g => entries.some(e => e.group === g))
+    : kind === 'pet' ? [...new Set(entries.map(e => e.group))]
     : []
 
   const list = useMemo(() => {
@@ -153,7 +162,7 @@ export default function EffectBrowser({ ffxiPath, head, caster, casterRace, sett
       // The user's own file, for the routines its scripts call: a player's
       // race file, or the monster's model.
       let own: Promise<ParsedZone | null>
-      if (as === 'monster') {
+      if (as === 'monster' || as === 'pet') {
         own = window.ffxi.readDat(ffxiPath, creaturePath).then(b => parseZoneFile(b, undefined, undefined, system)).catch(() => null)
       } else {
         const racePath = SKELETON_PATHS[casterRace]
@@ -181,11 +190,22 @@ export default function EffectBrowser({ ffxiPath, head, caster, casterRace, sett
     w.__playSpell = by(spellEntries, 'magic')
     w.__playSkill = by([...skillOptions(casterRace).map(s => ({ key: s.category + '/' + s.name, name: s.name, detail: s.category, group: s.category, file: { path: s.path }, castRoutine: null })), ...abilityEntries], 'skills')
     w.__playMove = by(moveEntries, 'monster')
-    return () => { delete w.__playSpell; delete w.__playSkill; delete w.__playMove }
+    w.__playPet = by(petEntries, 'pet')
+    return () => { delete w.__playSpell; delete w.__playSkill; delete w.__playMove; delete w.__playPet }
   }, [choose, casterRace])
 
-  const switchKind = (k: Kind) => { setKind(k); setGroup(null); setSearch('') }
-  const monster = kind === 'monster'
+  const switchKind = (k: Kind) => {
+    setKind(k); setGroup(null); setSearch('')
+    if (k === 'pet') pickPetFor('SMN')
+  }
+  /** Put the job's usual pet in the User picker. */
+  const pickPetFor = (job: string | null) => {
+    const want = job ? PET_FOR_JOB[job] : undefined
+    const m = want ? CREATURES.find(c => c.name === want) : undefined
+    if (m) setCreaturePath(m.path)
+  }
+  // Pets, like monsters, use their abilities on your character.
+  const monster = kind === 'monster' || kind === 'pet'
   // Who stands where: your character uses spells and skills on the creature;
   // the creature uses its moves on your character.
   const creatureIdle = useMemo(() => (creature ? clipsForMotion(creature.animations, null) : NONE), [creature])
@@ -204,15 +224,16 @@ export default function EffectBrowser({ ffxiPath, head, caster, casterRace, sett
             <button className={kind === 'magic' ? 'active' : ''} onClick={() => switchKind('magic')}>Magic</button>
             <button className={kind === 'skills' ? 'active' : ''} onClick={() => switchKind('skills')}>Skills</button>
             <button className={kind === 'monster' ? 'active' : ''} onClick={() => switchKind('monster')}>Monster</button>
+            <button className={kind === 'pet' ? 'active' : ''} onClick={() => switchKind('pet')}>Pet</button>
           </div>
           <input className="search" placeholder={kind === 'magic' ? 'Search spells...' : kind === 'skills' ? 'Search skills...' : 'Search moves...'} value={search} onChange={e => setSearch(e.target.value)} />
           {groups.length > 0 && (
-            <select className="category-select" value={group ?? ''} onChange={e => setGroup(e.target.value || null)}>
+            <select className="category-select" value={group ?? ''} onChange={e => { setGroup(e.target.value || null); if (kind === 'pet') pickPetFor(e.target.value || null) }}>
               <option value="">All ({entries.length})</option>
               {groups.map(k => <option key={k} value={k}>{k[0].toUpperCase() + k.slice(1)}</option>)}
             </select>
           )}
-          {monster && (
+          {kind === 'monster' && (
             <label className="toggle-row">
               <input type="checkbox" checked={ownMoves} onChange={e => setOwnMoves(e.target.checked)} />
               <span>{family ? `Only ${family.family}'s moves` : 'No move list for this creature: all moves'}</span>
@@ -251,7 +272,7 @@ export default function EffectBrowser({ ffxiPath, head, caster, casterRace, sett
             <span>
               {error ?? (effect ? `${effect.path} · ${effect.zone.routines?.length ?? 0} routines · ${effect.zone.spawns?.length ?? 0} generators`
                 : monster ? 'The monster uses it on your character.' : 'Your character uses it on the target.')}
-              {monster && creature && creature.animations.length < 5 && ' · This model has no fighting motions: try another variant of it.'}
+              {kind === 'monster' && creature && creature.animations.length < 5 && ' · This model has no fighting motions: try another variant of it.'}
             </span>
             {effect && <button className="hud-button" onClick={() => setPlayId(n => n + 1)}>Play again</button>}
           </div>
