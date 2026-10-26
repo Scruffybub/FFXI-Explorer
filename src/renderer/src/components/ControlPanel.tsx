@@ -1,4 +1,5 @@
 import { useEffect, useState, useMemo, useSyncExternalStore } from 'react'
+import { CameraPathPanel } from './CameraPathPanel'
 import { Label } from './Info'
 import type {
   LightingSettings, MusicSettings, PointLightSettings, PointLightSpec,
@@ -1256,6 +1257,14 @@ export default function ControlPanel({
           onChange={v => onScene({ showCollision: v })}
           info="Draw the collision mesh FFXI actually uses for movement, in green. It is not the visible geometry — it carries invisible walls and leaves out decoration — so it will not match the art everywhere. This is exactly what Walk mode stands on."
         />
+      </Section>
+
+      <Section
+        title="Camera path"
+        defaultOpen={false}
+        info="Save views along a route and fly the camera through them, sweeping smoothly from one to the next: a flythrough. Move the camera, press Add this view, move on and add the next. Each view has the seconds the flight to the next one takes. Play flies it (Loop repeats it); Record video plays it once and saves the 3D view as a WebM video, without the panels. Views are remembered for each zone on this computer. While a path plays the mouse and keys do not move the camera; Stop hands it back where it is."
+      >
+        <CameraPathPanel zoneId={zoneId} />
       </Section>
 
       <Section

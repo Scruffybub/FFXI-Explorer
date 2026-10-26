@@ -95,6 +95,11 @@ are left out.
 **Map view** — a top-down orthographic capture with no perspective distortion,
 for shaping a zone into a map.
 
+**Camera paths** — save views along a route and the camera flies through them,
+sweeping smoothly from one to the next, once or on a loop; **Record video**
+saves the flythrough as a WebM video of the 3D view (**Scene → Camera path**).
+Views are remembered for each zone.
+
 **Area maps** — the game's own parchment maps, in **Models → Maps**. 191 zones
 have them, dungeons a page per floor, and any of them can be saved as a PNG.
 

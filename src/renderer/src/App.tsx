@@ -725,6 +725,7 @@ export default function App() {
             onMapScale={setMapScale}
             soundVolume={music.sounds ? music.soundsVolume : 0}
             npcZone={ffxiPath && selected ? { root: ffxiPath, id: selected.id } : null}
+            zoneName={selected?.name}
           />
         )}
 

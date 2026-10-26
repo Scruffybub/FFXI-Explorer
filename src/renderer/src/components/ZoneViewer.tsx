@@ -36,6 +36,8 @@ import { zoneLamps, LAMP_VERTEX_PARS, LAMP_FRAGMENT_PARS, LAMP_VERTEX, buildLamp
 import { LensFlare } from './LensFlare'
 import { NpcStations } from './NpcStations'
 import { setZoneMeshes } from '../lib/zoneExport'
+import { CameraPathPlayer } from './CameraPathPlayer'
+import { cameraPathStore } from '../lib/cameraPath'
 import type {
   LightingSettings, PointLightSettings, PostSettings, SceneSettings, SurfaceInfo, ToneMappingMode,
 } from '../lib/settings'
@@ -76,6 +78,8 @@ interface ZoneViewerProps {
   onMapScale?: (scale: MapScale | null) => void
   /** Sound → Zone sounds: the ambient sounds' level, 0 = off. */
   soundVolume?: number
+  /** The zone's name, for a recorded flythrough's file name. */
+  zoneName?: string
   /** Scene → NPCs: the install and the zone's id, whose NPC posts to show. */
   npcZone?: { root: string; id: number } | null
 }
@@ -2059,11 +2063,13 @@ function SmartOrbitControls({ size, lookAt, world, center }: {
 }
 
 function FlyCamera({
-  center, size, onSpeedChange,
+  center, size, onSpeedChange, keepPose = false,
 }: {
   center: THREE.Vector3
   size: number
   onSpeedChange?: (speed: number) => void
+  /** Start from where the camera is (after a camera path), not the default view. */
+  keepPose?: boolean
 }) {
   const { camera, gl } = useThree()
   const moveState = useRef({ forward: false, backward: false, left: false, right: false, up: false, down: false })
@@ -2078,8 +2084,10 @@ function FlyCamera({
 
   useEffect(() => {
     if (!initialized.current) {
-      camera.position.set(center.x, center.y + size * 0.15, center.z + size * 0.4)
-      camera.lookAt(center)
+      if (!keepPose) {
+        camera.position.set(center.x, center.y + size * 0.15, center.z + size * 0.4)
+        camera.lookAt(center)
+      }
       initialized.current = true
     }
     onSpeedChange?.(speed.current)
@@ -3016,8 +3024,11 @@ export default function ZoneViewer({
   selectedLightId = null, placingLight = false, onPlaceLight,
   inspecting = false, onInspectResult, onFlySpeedChange,
   character = null, characterMotion = null, characterMoves = null, onWeatherStates, onMapScale,
-  soundVolume = 0, npcZone = null,
+  soundVolume = 0, npcZone = null, zoneName = 'Zone',
 }: ZoneViewerProps) {
+  // Scene → Camera path: while a path plays its player owns the camera and the
+  // controls step aside; each handover restarts them from where it left off.
+  const cameraPath = useSyncExternalStore(cameraPathStore.subscribe, cameraPathStore.get)
   // Where the walking body is. Written by WalkCamera, read by Avatar.
   const walkBody = useRef<WalkBodyState>({ x: 0, y: 0, z: 0, yaw: 0, moving: false, running: false, grounded: false, terrain: 0 })
   const zoneUniforms = useRef<ZoneUniforms>({
@@ -5026,15 +5037,16 @@ export default function ZoneViewer({
           fixedUnits={scene.mapFixedScale ? scene.mapUnits : undefined}
           onScale={onMapScale}
         />
-      ) : hasCameraOverride ? (
+      ) : cameraPath.playing ? null : hasCameraOverride && cameraPath.handover === 0 ? (
         <CameraOrientation />
       ) : scene.cameraMode === 'orbit' ? (
-        <SmartOrbitControls size={size} lookAt={PICK || PICK_PREFAB.size > 0 ? center : undefined} world={collisionWorld} center={center} />
+        <SmartOrbitControls key={cameraPath.handover} size={size} lookAt={(PICK || PICK_PREFAB.size > 0) && cameraPath.handover === 0 ? center : undefined} world={collisionWorld} center={center} />
       ) : scene.cameraMode === 'walk' ? (
         <WalkCamera world={collisionWorld} center={center} size={size} scene={scene} body={walkBody} />
       ) : (
-        <FlyCamera center={center} size={size} onSpeedChange={onFlySpeedChange} />
+        <FlyCamera key={cameraPath.handover} center={center} size={size} onSpeedChange={onFlySpeedChange} keepPose={cameraPath.handover > 0} />
       )}
+      {!scene.mapView && <CameraPathPlayer name={zoneName} />}
 
       {waterFocus && <CameraGoTo target={waterFocus} />}
       {CENSUS && <ProbeHook meshes={instancedMeshes} zoneData={zoneData} />}

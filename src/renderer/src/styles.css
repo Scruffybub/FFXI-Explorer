@@ -1152,3 +1152,11 @@ select {
   border-radius: 6px;
   padding: 3px 8px;
 }
+
+/* Scene -> Camera path: the views, each with the seconds to the next. */
+.camera-views { margin-top: 6px; }
+.camera-seconds { display: flex; align-items: center; gap: 3px; font-size: 11px; color: var(--muted); }
+.camera-seconds input { width: 52px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 5px; color: var(--text); padding: 3px 5px; font-size: 11px; }
+.camera-seconds.end { width: 64px; justify-content: center; }
+.camera-actions { display: flex; gap: 6px; margin-top: 6px; }
+.camera-actions .place-btn { flex: 1; }

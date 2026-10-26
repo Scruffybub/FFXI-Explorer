@@ -4274,6 +4274,31 @@ rather than solved.
     **Not yet:** collision as a separate mesh, generator water, NPCs and
     monsters in the file, the lamps as glTF lights.
 
+- **Camera path — built 2026-10-26.** Panel → **Camera path** (closed by
+  default). `lib/cameraPath.ts` (store, views, curve), `CameraPathPlayer`
+  (in the zone Canvas: flies the camera, records), `CameraPathPanel`.
+  - A view is camera position + quaternion + seconds to the next. Position
+    and rotation both follow a centripetal Catmull-Rom through the views
+    (quaternions aligned to one hemisphere, then renormalised); first leg
+    eases in, last eases out. Checked in Bastok Markets: passes view 2 at
+    exactly 2.0 s, settles on view 3 at 4.0 s.
+  - While playing, ZoneViewer renders no camera controls; stopping bumps
+    `handover`, which re-keys SmartOrbitControls (it re-aims at what the
+    camera faces, so no jump) and FlyCamera (`keepPose`: no reset to the
+    default view). Walk mode returns to the body. `hasCameraOverride`
+    (campos/yaw) only applies before the first handover.
+  - Record video: `canvas.captureStream(60)` → MediaRecorder (VP9 WebM,
+    16 Mbit/s), saved via `window:saveFile`. The 3D view only, no panels.
+    A 4 s Bastok flight: 2.9 MB, EBML header.
+  - Views persist per zone in localStorage `ffxi-explorer.cameraPath.<zoneId>`
+    (per-computer convenience). Test cleanup must remove these keys too.
+  - Census: `__cameraPath` {goTo, play, stop, captureView, state, camera};
+    `__testVideo = 1` keeps a recording in memory (`__lastVideo`) instead of
+    opening the save dialog.
+  - **Not yet:** looking at a fixed point while moving, per-view easing, a
+    timeline scrubber, NPCs/monsters moving in sync with a recording (they
+    already animate live), exporting the path.
+
 - **Zone sounds — built 2026-10-24.** Panel → **Sound** (was Music) →
   *Zone sounds* (off by default, like the music) and *Sound volume*
   (`MusicSettings.sounds` / `soundsVolume`; `?sounds=1` turns it on).
