@@ -128,6 +128,14 @@ export default function App() {
     return () => { cancelled = true }
   }, [ffxiPath, charSpec])
 
+  // ?census=1: set the character (__setSpec) and read which files it loaded (__character).
+  useEffect(() => {
+    if (!new URLSearchParams(window.location.search).has('census')) return
+    const w = window as unknown as Record<string, unknown>
+    w.__character = character ? { loaded: character.loaded, failed: character.failed } : null
+    w.__setSpec = (patch: Partial<CharacterSpec>) => setCharSpec(s => ({ ...s, ...patch }))
+  }, [character])
+
   // Walk mode's idle, walk and run, for the character's race.
   const [charMoves, setCharMoves] = useState<MovementClips | null>(null)
   useEffect(() => {

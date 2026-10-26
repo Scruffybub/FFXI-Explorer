@@ -23,7 +23,8 @@ import { SKELETON_PATHS } from './ffxi-dat'
  * models some item uses, and around a model it has missed, its numbering
  * drifts. Elvaan male body 101, which a San d'Oria stable hand wears, is not
  * in it, so he stood without a torso; Hume male bodies 177-191 sit five
- * places off (2026-10-25). The Character builder still uses it.
+ * places off (2026-10-25). The Character builder uses this table too, and
+ * model-dat-paths.json only as a fallback.
  */
 
 const TYPE_SIZE = 0x1b0
@@ -84,6 +85,57 @@ export async function appearancePath(root: string, race: number, slot: number, i
     before += count
   }
   return null
+}
+
+/**
+ * How many models the game's table holds for a race and slot (0 face, 1 head
+ * .. 8 ranged); 0 when the table was not found. Many of the higher numbers
+ * are unused and point at a placeholder.
+ */
+export async function appearanceCount(root: string, race: number, slot: number): Promise<number> {
+  const type = bodyType(race)
+  const t = await table(root)
+  if (!t || type === null) return 0
+  let count = 0
+  for (let i = 0; i < 6; i++) {
+    const at = TYPE_SIZE * (type - 1) + SLOT_SIZE * slot + 8 * i
+    if (at + 8 > t.byteLength) break
+    if (t.getUint32(at, true)) count += t.getUint32(at + 4, true)
+  }
+  return count
+}
+
+/** Whether a DAT holds a texture block (type 0x20): 16-byte block headers, type in the low 7 bits, length in 16-byte units above. */
+function hasTexture(dat: DataView): boolean {
+  for (let at = 0; at + 8 <= dat.byteLength;) {
+    const packed = dat.getUint32(at + 4, true)
+    if ((packed & 0x7f) === 0x20) return true
+    const units = (packed >>> 7) & 0x7ffff
+    if (!units) return false
+    at += units * 16
+  }
+  return false
+}
+
+/**
+ * The faces the game keeps for NPCs (numbers 16-31 of a race's 32) that are
+ * faces of their own: most of the 16 point back at a player face (Hume male
+ * 17-24 are 1-8 again); Hume male has 6 others, Elvaan male 5. One more is
+ * empty (Hume male 16, ROM/380/26: no texture, nothing to draw), so a face
+ * must carry a texture block. Returned as face numbers, for the Character
+ * builder.
+ */
+export async function npcFaces(root: string, race: number): Promise<number[]> {
+  const player = new Set<string>()
+  for (let i = 0; i < 16; i++) { const p = await appearancePath(root, race, 0, i); if (p) player.add(p) }
+  const out: number[] = []
+  for (let i = 16; i < 32; i++) {
+    const p = await appearancePath(root, race, 0, i)
+    if (!p || player.has(p)) continue
+    player.add(p)
+    if (hasTexture(new DataView(await window.ffxi.readDat(root, p)))) out.push(i)
+  }
+  return out
 }
 
 /**

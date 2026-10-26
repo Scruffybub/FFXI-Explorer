@@ -1,8 +1,9 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   RACES, SLOTS, equipOptions, faceOptions, animationOptions,
   type CharacterSpec,
 } from '../lib/characterModel'
+import { appearanceCount, npcFaces } from '../lib/equipTable'
 
 /**
  * Sidebar controls for assembling a player character: race, face, and one
@@ -13,13 +14,27 @@ import {
  * needs the item database, which this app does not have.
  */
 export default function CharacterBuilder({
-  spec, onChange, onClear,
+  ffxiPath, spec, onChange, onClear,
 }: {
+  ffxiPath: string
   spec: CharacterSpec
   onChange: (patch: Partial<CharacterSpec>) => void
   onClear: () => void
 }) {
   const faces = faceOptions(spec.race)
+  // The game's own table sizes, per slot: numbers beyond them are not models
+  // (the path table had a body 8782). Until read, nothing is cut.
+  const [limits, setLimits] = useState<Record<number, number>>({})
+  // And the faces the game keeps for its NPCs, after the 16 a player picks from.
+  const [extraFaces, setExtraFaces] = useState<number[]>([])
+  useEffect(() => {
+    let cancelled = false
+    void Promise.all(SLOTS.map(async (slot, i) => [slot.id, await appearanceCount(ffxiPath, spec.race, i + 1)] as const))
+      .then(counts => { if (!cancelled) setLimits(Object.fromEntries(counts.filter(([, n]) => n > 0))) })
+    setExtraFaces([])
+    void npcFaces(ffxiPath, spec.race).then(f => { if (!cancelled) setExtraFaces(f) }, () => {})
+    return () => { cancelled = true }
+  }, [ffxiPath, spec.race])
   const animations = useMemo(() => animationOptions(spec.race), [spec.race])
   const categories = useMemo(
     () => [...new Set(animations.map(a => a.category))],
@@ -52,13 +67,16 @@ export default function CharacterBuilder({
         >
           <option value="">None</option>
           {faces.map((f, i) => (
-            <option key={f.path} value={i}>{f.name}</option>
+            <option key={i} value={i}>{f.name}</option>
+          ))}
+          {extraFaces.map((n, k) => (
+            <option key={n} value={n}>NPC face {k + 1}</option>
           ))}
         </select>
       </label>
 
       {SLOTS.map(slot => {
-        const options = equipOptions(spec.race, slot.id)
+        const options = equipOptions(spec.race, slot.id, limits[slot.id])
         const value = spec.equipment[slot.id]
         return (
           <label className="control" key={slot.id}>

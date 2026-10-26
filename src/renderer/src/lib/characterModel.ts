@@ -2,6 +2,7 @@ import rawEquip from '../../../../resources/model-dat-paths.json'
 import rawFaces from '../../../../resources/face-paths.json'
 import rawItemNames from '../../../../resources/item-names.json'
 import rawAnims from '../../../../resources/animation-paths.json'
+import { appearancePath } from './equipTable'
 import {
   parseDatFile, parseSkeletonDat, readFootSound, SKELETON_PATHS,
   parseAnimationDat,
@@ -66,7 +67,6 @@ const FACES = rawFaces as FaceTable
 
 export interface ModelOption {
   index: number
-  path: string
   /** Items known to use this model, shortest name first. Empty if unknown. */
   names: string[]
   /** What to show in a dropdown: the item name, or the bare index. */
@@ -77,27 +77,30 @@ type NameTable = Record<string, Record<string, string[]>>
 const ITEM_NAMES = rawItemNames as NameTable
 
 /**
- * Every model available for a race and slot, ordered by model index.
+ * Every model available for a race and slot, ordered by model index: the
+ * numbers the path table knows and those an item is known to use, below
+ * `limit` (the game's own table's size, equipTable appearanceCount) when
+ * given. The files themselves come from the game's table (composeCharacter).
  *
  * Names come from LandSandBoat's `item_equipment` table, which carries an
  * `MId` per item — many items share one model, so each index maps to a list.
  * The DATs themselves hold no names at all, so this is the only way to label
  * them. Roughly a tenth of indices have no known item and keep the raw number.
  */
-export function equipOptions(race: number, slot: number): ModelOption[] {
-  const table = EQUIP[`${race}:${slot}`]
-  if (!table) return []
+export function equipOptions(race: number, slot: number, limit = Infinity): ModelOption[] {
+  const table = EQUIP[`${race}:${slot}`] ?? {}
   const names = ITEM_NAMES[String(slot)] ?? {}
+  const indices = new Set([...Object.keys(table), ...Object.keys(names)].map(Number).filter(i => i < limit))
 
-  return Object.entries(table)
-    .map(([index, path]) => {
+  return [...indices]
+    .map(i => {
+      const index = String(i)
       const known = names[index] ?? []
       // Not "+N": FFXI's own item names end in +1, +2, +3, so that suffix would
       // read as an item rank rather than a count of other items sharing the model.
       const extra = known.length > 1 ? ` (${known.length - 1} more)` : ''
       return {
-        index: Number(index),
-        path,
+        index: i,
         names: known,
         label: known.length > 0 ? `${known[0]}${extra}` : `Model ${index}`,
       }
@@ -270,13 +273,18 @@ export async function composeCharacter(
 
   const pieces: { label: string; path: string }[] = []
 
+  // The game's own table names each file (equipTable). The path tables are
+  // the fallback when it cannot be read: model-dat-paths.json drifts around
+  // models it lacks (Hume male bodies 177-191 five places off) and misses
+  // others (Elvaan male body 101).
   const faces = faceOptions(spec.race)
   if (spec.paths) {
     if (spec.paths.face) pieces.push({ label: 'Face', path: spec.paths.face })
-  } else if (spec.face !== null && faces[spec.face]) {
-    pieces.push({ label: 'Face', path: faces[spec.face].path })
+  } else if (spec.face !== null) {
+    const path = await appearancePath(ffxiPath, spec.race, 0, spec.face) ?? faces[spec.face]?.path
+    if (path) pieces.push({ label: 'Face', path })
   }
-  for (const slot of SLOTS) {
+  for (const [i, slot] of SLOTS.entries()) {
     if (spec.paths) {
       const path = spec.paths.gear[slot.id]
       if (path) pieces.push({ label: slot.label, path })
@@ -284,8 +292,7 @@ export async function composeCharacter(
     }
     const chosen = spec.equipment[slot.id]
     if (chosen == null) continue
-    const table = EQUIP[`${spec.race}:${slot.id}`]
-    const path = table?.[String(chosen)]
+    const path = await appearancePath(ffxiPath, spec.race, i + 1, chosen) ?? EQUIP[`${spec.race}:${slot.id}`]?.[String(chosen)]
     if (path) pieces.push({ label: slot.label, path })
   }
 
@@ -320,7 +327,7 @@ export async function composeCharacter(
   // Bare feet still tread at the race's weight: take the step from its first
   // feet model (boots), read for the info block only.
   if (footSound === null && !spec.paths) {
-    const first = EQUIP[`${spec.race}:6`]?.['0']
+    const first = await appearancePath(ffxiPath, spec.race, 5, 0) ?? EQUIP[`${spec.race}:6`]?.['0']
     if (first) footSound = await window.ffxi.readDat(ffxiPath, first).then(readFootSound, () => null)
   }
 

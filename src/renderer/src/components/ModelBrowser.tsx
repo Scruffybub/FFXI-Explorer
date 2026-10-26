@@ -206,6 +206,7 @@ export default function ModelBrowser({
         {mode === 'character' && (
           <div className="builder-scroll">
             <CharacterBuilder
+              ffxiPath={ffxiPath}
               spec={spec}
               onChange={patch => onSpec(s => ({ ...s, ...patch }))}
               onClear={() => onSpec(s => ({ ...s, equipment: {} }))}

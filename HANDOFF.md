@@ -1700,8 +1700,12 @@ npx electron-vite build
 npx electron-builder --win dir --config electron-builder.yml
 node scripts/set-icon.cjs          # never pipe this — its exit code matters
 npx electron-builder --prepackaged release/win-unpacked --win portable nsis --config electron-builder.yml
-gh release create v0.1.N --target main --title "FFXI Explorer 0.1.N" --notes-file <notes> release/*.exe
+gh release create v0.1.N --target main --title "FFXI Explorer 0.1.N" --notes-file <notes> release/FFXI-Explorer-0.1.N-setup.exe release/FFXI-Explorer-0.1.N-portable.exe
 ```
+
+Name the two files: `release/` keeps every earlier version's installers, and
+a `release/*.exe` glob would upload them all to the new release. Push main
+first (`--target main` tags what GitHub has).
 
 **Close the app first** — a running instance locks the exe and `rcedit` fails.
 Verify afterwards by extracting the icon from both artifacts, launching the
@@ -4078,8 +4082,16 @@ rather than solved.
     model-dat-paths.json where both have an entry except where that table
     drifts (Hume male bodies 177-191 five places off; Elvaan male body 101,
     a San d'Oria stable hand, missing: he stood without a torso). Body types
-    9-11 are the children, 12-16 chocobos. **The Character builder still
-    uses model-dat-paths.json** — switching it is a separate decision.
+    9-11 are the children, 12-16 chocobos. **The Character builder uses it
+    too since 2026-10-25** (composeCharacter resolves face and gear through
+    `appearancePath`, model-dat-paths.json only as the fallback). Its lists
+    offer every number model-dat-paths.json or item-names.json knows, below
+    the table's size for that slot (`appearanceCount`; it dropped a bogus
+    body 8782); most higher numbers point at a placeholder. Body 187 (Orange
+    Race Silks) now loads ROM/181/60, not ROM/184/71; Elvaan male body 101
+    loads at all. The Face list adds the game's NPC faces that are their own
+    (`npcFaces`: of numbers 16-31, those not pointing back at a player face
+    and carrying a texture; Hume male 5, Elvaan male 5).
     `composeCharacter` takes `paths` (exact files) for this.
   - **Facing:** 0-255 is a full turn clockwise from east (+X; LandSandBoat
     +Z is north: Port Bastok's zone line is north of Gustaberg's), so the
