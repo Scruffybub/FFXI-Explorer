@@ -1,4 +1,4 @@
-**Work in progress** — the rough edges as of 0.1.11:
+**Work in progress** — the rough edges as of 0.1.12:
 
 **Water (beta)** - Scene → Generator water draws the game's own water, waves and foam. Most zones match the game; Foret de Hennetiel's sea and rivers do not yet. It is off by default.
 
@@ -9,6 +9,10 @@
 **Transparency** - A few plants, walls and ground textures still do not blend exactly as they do in game.
 
 **Unknown textures** - Some zones have models/textures/effects hidden in out-of-bounds areas.
+
+**Spells and skills** - Weapons, instruments and handbells are not drawn in hand, beams do not tilt up or down, and which avatar uses which Blood Pact is up to you to pick.
+
+**NPCs and monsters** - Positions come from the LandSandBoat project, so they follow its data rather than today's retail game. Monsters wander their spawn areas rather than the set routes some walk in game, and notorious monsters are not shown. Planar Rifts and Ethereal Junctions draw a dark square pool under their swirl.
 
 **Model viewer** - Some names in the model list (it comes from a community catalogue) may still be wrong, a few models draw untextured, and motions without a known name show the game's code for them.
 
@@ -22,7 +26,7 @@ Everything is read straight out of your own local FFXI installation. Nothing is
 uploaded, and no server or account is involved. The only network request it ever
 makes is an optional check for a newer version — see [Updates](#updates).
 
-![Version](https://img.shields.io/badge/version-0.1.11-blue) ![Platform](https://img.shields.io/badge/platform-Windows-lightgrey)
+![Version](https://img.shields.io/badge/version-0.1.12-blue) ![Platform](https://img.shields.io/badge/platform-Windows-lightgrey)
 
 ---
 
