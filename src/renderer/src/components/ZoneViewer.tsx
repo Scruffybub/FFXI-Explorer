@@ -35,6 +35,7 @@ import { LampLights } from './LampLights'
 import { zoneLamps, LAMP_VERTEX_PARS, LAMP_FRAGMENT_PARS, LAMP_VERTEX, buildLampTexture, lampSlots } from '../lib/zoneLamps'
 import { LensFlare } from './LensFlare'
 import { NpcStations } from './NpcStations'
+import { setZoneMeshes } from '../lib/zoneExport'
 import type {
   LightingSettings, PointLightSettings, PostSettings, SceneSettings, SurfaceInfo, ToneMappingMode,
 } from '../lib/settings'
@@ -4866,6 +4867,12 @@ export default function ZoneViewer({
   }, [zoneData])
 
   useEffect(() => () => { disposeAll() }, [disposeAll])
+
+  // Export glTF (lib/zoneExport) takes the meshes as drawn.
+  useEffect(() => {
+    setZoneMeshes(instancedMeshes)
+    return () => setZoneMeshes([])
+  }, [instancedMeshes])
 
   // Diagnostic: ?gotowater=1 parks the camera beside the first water surface.
   // Real water planes are unreferenced prefabs carrying blend 0x2000, so the

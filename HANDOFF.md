@@ -4246,8 +4246,33 @@ rather than solved.
     and posed. The page's CSP stops GLTFLoader decoding embedded images
     (blob: under connect-src 'self'); the check decodes them itself. Blender
     itself not tried here: no Blender on this PC.
-  - **Not yet:** zones (stage 2: instanced prefabs, huge), NPC/monster effects,
-    the character's other motion sets in one file (only the chosen set goes).
+  - **Not yet:** NPC/monster effects, the character's other motion sets in
+    one file (only the chosen set goes).
+  - **Zones (2026-10-26).** Zone view → **Export glTF** (by Screenshot).
+    `lib/zoneExport.ts` takes the meshes the view built (ZoneViewer calls
+    `setZoneMeshes`), only placed geometry (`userData.prefabIdx`, not
+    `unrefPrefab`/`generator`/`weatherState`): no sky, weather, generator
+    water or effects. One glTF mesh per prefab (and per prefab mirrored),
+    one node per placement (plain glTF, no instancing extension, so every
+    tool reads it); a placement that is not move-turn-scale is baked into its
+    own copy (none in Bastok Markets, West Ronfaure, Whitegate). Mirrored
+    placements go out with the prefab's own triangles (the view flips them;
+    glTF flips a mirrored node itself). Materials: base colour texture x
+    COLOR_0 (vec4, alpha already x2 as the view uses it), MASK at 0.375 for
+    `_` cutouts, BLEND for 0x8000 overlays, else OPAQUE.
+    **Canvas trap:** GLTFExporter writes images through a 2D canvas, which
+    premultiplies, so a pixel with alpha 0 loses its colour. FFXI sheets keep
+    art in colour and a mask in alpha that opaque surfaces ignore: Bastok's
+    walls came out in black squares. Opaque materials now get a copy with
+    alpha 255 (`gltfExport opaqueTexture`; model export too, for solid-drawn
+    dithered sheets).
+    Sizes and times: Bastok Markets 8.6 MB / 1.2 s (2,280 placements, 1,169
+    meshes), West Ronfaure 10.9 MB / 0.4 s (13,115 placements, 340 meshes),
+    Aht Urhgan Whitegate 7.1 MB / 1.2 s (7,077). Checked by reading back and
+    rendering (`?census=1` `__zoneExport()`, `__zoneExportView(eye, at,
+    strip?)` with strip 'colors'/'maps' to isolate a fault).
+    **Not yet:** collision as a separate mesh, generator water, NPCs and
+    monsters in the file, the lamps as glTF lights.
 
 - **Zone sounds — built 2026-10-24.** Panel → **Sound** (was Music) →
   *Zone sounds* (off by default, like the music) and *Sound volume*

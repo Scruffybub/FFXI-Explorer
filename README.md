@@ -52,8 +52,11 @@ one you walk zones as.
 **Export glTF** — the model on screen (a monster, an NPC, an object or your
 character) saved as a single .glb file for Blender and other 3D tools: rigged
 to its own skeleton, with every motion it has as a named animation (Idle,
-Walk, Attack 1 ..) and its textures inside. It is Square Enix's artwork from
-your own game, for your own use.
+Walk, Attack 1 ..) and its textures inside. Zones export too (the button by
+Screenshot): every building, wall, tree and patch of ground in its place, with
+its textures and the game's baked lighting; the sky, weather, water and
+effects stay behind. It is Square Enix's artwork from your own game, for your
+own use.
 
 **Zone music** — the game's own BGW tracks, decoded in-app. Both codecs play:
 PS-ADPCM, and ATRAC3 via a from-source decoder validated against ffmpeg.

@@ -80,6 +80,9 @@ export async function exportGlb(model: ParsedDatFile, name: string): Promise<Arr
       } else {
         out = new THREE.Mesh(geometry, mesh.material)
       }
+      // A solid-drawn sheet (dithered alpha) ignores alpha; write it with alpha full.
+      const mat = out.material as THREE.MeshStandardMaterial
+      if (mat.map && !mat.transparent && mat.alphaTest === 0) mat.map = opaqueTexture(mat.map)
       out.name = `${name}_${meshes.length}`
       root.add(out)
       meshes.push(out)
@@ -154,4 +157,32 @@ function motionClips(model: ParsedDatFile, boneCount: number): THREE.AnimationCl
     clips.push(new THREE.AnimationClip(n > 1 ? `${label} ${n}` : label, duration, tracks))
   }
   return clips
+}
+
+const opaqueCopies = new WeakMap<THREE.Texture, THREE.DataTexture>()
+
+/**
+ * A copy of a texture with every pixel's alpha full, for a material that
+ * ignores alpha. GLTFExporter writes images through a 2D canvas, which keeps
+ * colour premultiplied, so a fully transparent pixel's colour is lost: FFXI
+ * zone sheets keep their art in the colour and a mask in the alpha that
+ * opaque surfaces never read, and Bastok's walls came out in black squares
+ * (2026-10-26). Cutout and blended materials keep their alpha.
+ */
+export function opaqueTexture(texture: THREE.Texture): THREE.Texture {
+  const image = texture.image as { data?: Uint8Array; width: number; height: number } | undefined
+  if (!image?.data) return texture
+  let copy = opaqueCopies.get(texture)
+  if (!copy) {
+    const data = new Uint8Array(image.data)
+    for (let i = 3; i < data.length; i += 4) data[i] = 255
+    copy = new THREE.DataTexture(data, image.width, image.height, THREE.RGBAFormat)
+    copy.name = texture.name
+    copy.colorSpace = texture.colorSpace
+    copy.wrapS = texture.wrapS; copy.wrapT = texture.wrapT
+    copy.flipY = texture.flipY
+    copy.needsUpdate = true
+    opaqueCopies.set(texture, copy)
+  }
+  return copy
 }

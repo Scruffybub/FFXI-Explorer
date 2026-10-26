@@ -9,6 +9,8 @@ import ControlPanel from './components/ControlPanel'
 import ModelBrowser from './components/ModelBrowser'
 import LookPicker from './components/LookPicker'
 import { applyLook, loadClassicKit, saveLook, savedLook, saveText, savedText, type ClassicKit, type UiLook, type UiText } from './lib/uiLook'
+import { exportZoneGlb, hasZoneMeshes } from './lib/zoneExport'
+import * as THREE from 'three'
 import { composeCharacter, loadMovementClips, type CharacterSpec, type ComposedCharacter, type MovementClips } from './lib/characterModel'
 import {
   DEFAULT_LIGHTING, DEFAULT_POST, DEFAULT_SCENE, DEFAULT_POINT_LIGHTS,
@@ -441,6 +443,75 @@ export default function App() {
     setUiHidden(next)
   }, [])
 
+  // Export glTF: the zone's placed geometry as one .glb (lib/zoneExport).
+  const [exportingZone, setExportingZone] = useState(false)
+  const exportZone = useCallback(async () => {
+    if (!hasZoneMeshes()) return
+    setExportingZone(true)
+    setToast('Exporting the zone…')
+    try {
+      const name = selected?.name ?? 'Zone'
+      const { glb } = await exportZoneGlb(name, setToast)
+      setToast(null)
+      const saved = await window.ffxi.saveFile(glb, name.replace(/[^\w' -]+/g, '').trim().replace(/\s+/g, '-') + '.glb', 'glTF model', 'glb')
+      if (saved) setToast(`Saved to ${saved}`)
+    } catch (err) {
+      setToast('Export failed: ' + String(err))
+    } finally {
+      setExportingZone(false)
+      setTimeout(() => setToast(null), 4000)
+    }
+  }, [selected])
+
+  // ?census=1: export the zone without the save dialog and report what went in.
+  useEffect(() => {
+    if (!new URLSearchParams(window.location.search).has('census')) return
+    ;(window as unknown as Record<string, unknown>).__zoneExport = async () => {
+      const t = performance.now()
+      const r = await exportZoneGlb(selected?.name ?? 'Zone')
+      return { bytes: r.glb.byteLength, placements: r.placements, prefabs: r.prefabs, baked: r.baked, ms: Math.round(performance.now() - t) }
+    }
+    // Reads the export back and draws it from `eye` looking at `at` (world, upright), as a PNG data URL.
+    ;(window as unknown as Record<string, unknown>).__zoneExportView = async (eye: number[], at: number[], strip = '') => {
+      const r = await exportZoneGlb(selected?.name ?? 'Zone')
+      const glb = r.glb
+      const { GLTFLoader } = await import('three/examples/jsm/loaders/GLTFLoader.js')
+      const gltf = await new GLTFLoader().parseAsync(glb, '')
+      // The page's security policy stops the loader decoding embedded images; decode them here.
+      const jsonLength = new DataView(glb).getUint32(12, true)
+      const doc = JSON.parse(new TextDecoder().decode(new Uint8Array(glb, 20, jsonLength)))
+      const bin = new Uint8Array(glb, 20 + jsonLength + 8)
+      const images = await Promise.all((doc.images ?? []).map(async (im: { bufferView: number }) => {
+        const bv = doc.bufferViews[im.bufferView]
+        const tex = new THREE.Texture(await createImageBitmap(new Blob([bin.slice(bv.byteOffset ?? 0, (bv.byteOffset ?? 0) + bv.byteLength)]), { premultiplyAlpha: "none" }))
+        tex.flipY = false; tex.colorSpace = THREE.SRGBColorSpace; tex.wrapS = tex.wrapT = THREE.RepeatWrapping; tex.needsUpdate = true
+        return tex
+      }))
+      gltf.scene.traverse(o => {
+        const mesh = o as THREE.Mesh
+        if (!mesh.isMesh) return
+        const mat = mesh.material as THREE.MeshStandardMaterial
+        const index = gltf.parser.associations.get(mat)?.materials
+        const t = index !== undefined ? doc.materials[index]?.pbrMetallicRoughness?.baseColorTexture?.index : undefined
+        if (t !== undefined) { mat.map = images[doc.textures[t].source]; mat.needsUpdate = true }
+        if (strip === 'colors') { mat.vertexColors = false; mat.needsUpdate = true }
+        if (strip === 'maps') { mat.map = null; mat.needsUpdate = true }
+      })
+      const canvas = document.createElement('canvas')
+      canvas.width = 960; canvas.height = 540
+      const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true })
+      const view = new THREE.Scene()
+      view.background = new THREE.Color('#9fb4cc')
+      view.add(new THREE.AmbientLight(0xffffff, 3), gltf.scene)
+      const cam = new THREE.PerspectiveCamera(50, 16 / 9, 0.5, 5000)
+      cam.position.fromArray(eye); cam.lookAt(new THREE.Vector3().fromArray(at))
+      renderer.render(view, cam)
+      const image = canvas.toDataURL('image/png')
+      renderer.dispose()
+      return image
+    }
+  }, [selected])
+
   const takeScreenshot = useCallback(async () => {
     const canvas = document.querySelector('canvas')
     if (!canvas) return
@@ -667,6 +738,13 @@ export default function App() {
             </button>
             <button onClick={takeScreenshot} title="Save a PNG of the view (F12)">
               Screenshot
+            </button>
+            <button
+              onClick={() => void exportZone()}
+              disabled={exportingZone}
+              title="Save the zone as a .glb file (glTF) for Blender and other 3D tools: every building, wall, tree and patch of ground in its place, with its textures and the game's baked lighting. The sky, weather, water and effects are left out. It is Square Enix's artwork from your own game, for your own use; big zones take a few seconds."
+            >
+              {exportingZone ? 'Exporting…' : 'Export glTF'}
             </button>
             <button
               className={inspecting ? 'on' : ''}

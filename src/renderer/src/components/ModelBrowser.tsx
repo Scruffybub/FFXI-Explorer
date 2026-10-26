@@ -107,7 +107,7 @@ export default function ModelBrowser({
         const doc = JSON.parse(new TextDecoder().decode(new Uint8Array(glb, 20, new DataView(glb).getUint32(12, true))))
         const images = await Promise.all(doc.images.map(async (im: { bufferView: number }) => {
           const bv = doc.bufferViews[im.bufferView]
-          const tex = new THREE.Texture(await createImageBitmap(new Blob([bin.slice(bv.byteOffset ?? 0, (bv.byteOffset ?? 0) + bv.byteLength)])))
+          const tex = new THREE.Texture(await createImageBitmap(new Blob([bin.slice(bv.byteOffset ?? 0, (bv.byteOffset ?? 0) + bv.byteLength)]), { premultiplyAlpha: "none" }))
           tex.flipY = false; tex.colorSpace = THREE.SRGBColorSpace; tex.needsUpdate = true
           return tex
         }))
