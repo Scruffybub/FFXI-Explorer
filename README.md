@@ -1,4 +1,4 @@
-**Work in progress** — the rough edges as of 0.1.12:
+**Work in progress** — the rough edges as of 0.1.13:
 
 **Water (beta)** - Scene → Generator water draws the game's own water, waves and foam. Most zones match the game; Foret de Hennetiel's sea and rivers do not yet. It is off by default.
 
@@ -14,6 +14,8 @@
 
 **NPCs and monsters** - Positions come from the LandSandBoat project, so they follow its data rather than today's retail game. Monsters wander their spawn areas rather than the set routes some walk in game, and notorious monsters are not shown. Planar Rifts and Ethereal Junctions draw a dark square pool under their swirl.
 
+**Export** - glTF files have been checked by reading them back, not yet in Blender itself. Zone exports leave out the sky, weather, water and effects, and two-bone joints on models use the standard glTF approximation.
+
 **Model viewer** - Some names in the model list (it comes from a community catalogue) may still be wrong, a few models draw untextured, and motions without a known name show the game's code for them.
 
 
@@ -26,7 +28,7 @@ Everything is read straight out of your own local FFXI installation. Nothing is
 uploaded, and no server or account is involved. The only network request it ever
 makes is an optional check for a newer version — see [Updates](#updates).
 
-![Version](https://img.shields.io/badge/version-0.1.12-blue) ![Platform](https://img.shields.io/badge/platform-Windows-lightgrey)
+![Version](https://img.shields.io/badge/version-0.1.13-blue) ![Platform](https://img.shields.io/badge/platform-Windows-lightgrey)
 
 ---
 
