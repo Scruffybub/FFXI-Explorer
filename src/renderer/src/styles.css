@@ -1142,3 +1142,13 @@ select {
   color: var(--text);
   pointer-events: none;
 }
+
+/* Models -> Export glTF, with a line under it saying where the file went. */
+.model-tools { flex-direction: column; align-items: flex-end; }
+.model-tools-note {
+  font-size: 11px;
+  color: var(--muted);
+  background: rgba(10, 12, 17, 0.85);
+  border-radius: 6px;
+  padding: 3px 8px;
+}

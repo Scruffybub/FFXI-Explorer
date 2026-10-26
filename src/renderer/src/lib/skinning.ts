@@ -128,6 +128,38 @@ export function poseSkeleton(
   time: number,
 ): PoseResult {
   const boneCount = skeleton.bones.length
+  const localMats = localPose(skeleton, animations, time)
+
+  // Cascade to world space. Bones are ordered parents-first, so a single
+  // forward pass suffices.
+  const worldMats: number[][] = new Array(boneCount)
+  for (let i = 0; i < boneCount; i++) {
+    const parent = skeleton.bones[i].parentIndex
+    worldMats[i] = (parent < 0 || parent >= i)
+      ? localMats[i]
+      : mat4Multiply(localMats[i], worldMats[parent])
+  }
+
+  const deformMats: number[][] = new Array(boneCount)
+  for (let i = 0; i < boneCount; i++) {
+    deformMats[i] = mat4Multiply(inverseBind[i], worldMats[i])
+  }
+
+  return { worldMats, deformMats }
+}
+
+/**
+ * Each bone's transform relative to its parent at `time` seconds: the bind
+ * pose, with the animated bones' keyframes composed on. The same 4x4 layout
+ * as three.js's Matrix4 elements (translation in 12..14), so glTF export
+ * (lib/gltfExport) decomposes it directly.
+ */
+export function localPose(
+  skeleton: ParsedSkeleton,
+  animations: ParsedAnimation[],
+  time: number,
+): number[][] {
+  const boneCount = skeleton.bones.length
 
   // Start from the bind pose; animations overwrite only the bones they drive.
   const localMats: number[][] = new Array(boneCount)
@@ -188,23 +220,7 @@ export function poseSkeleton(
       )
     }
   }
-
-  // Cascade to world space. Bones are ordered parents-first, so a single
-  // forward pass suffices.
-  const worldMats: number[][] = new Array(boneCount)
-  for (let i = 0; i < boneCount; i++) {
-    const parent = skeleton.bones[i].parentIndex
-    worldMats[i] = (parent < 0 || parent >= i)
-      ? localMats[i]
-      : mat4Multiply(localMats[i], worldMats[parent])
-  }
-
-  const deformMats: number[][] = new Array(boneCount)
-  for (let i = 0; i < boneCount; i++) {
-    deformMats[i] = mat4Multiply(inverseBind[i], worldMats[i])
-  }
-
-  return { worldMats, deformMats }
+  return localMats
 }
 
 /** Write this frame's skinned vertex positions into each mesh. */

@@ -223,6 +223,18 @@ app.whenReady().then(() => {
     return result.filePath
   })
 
+  ipcMain.handle('window:saveFile', async (_evt, bytes: Uint8Array, suggestedName: string, kind: string, extension: string) => {
+    if (!mainWindow) return null
+    const result = await dialog.showSaveDialog(mainWindow, {
+      title: 'Save ' + kind,
+      defaultPath: join(app.getPath('documents'), suggestedName),
+      filters: [{ name: kind, extensions: [extension] }],
+    })
+    if (result.canceled || !result.filePath) return null
+    await fs.writeFile(result.filePath, Buffer.from(bytes))
+    return result.filePath
+  })
+
   // ── Updates ────────────────────────────────────────────────────────────
   // The renderer decides *whether* to check — the preference lives with the
   // rest of its settings — and the main process does the network work.

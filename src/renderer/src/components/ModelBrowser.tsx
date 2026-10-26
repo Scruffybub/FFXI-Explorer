@@ -9,6 +9,10 @@ import { RACES, type CharacterSpec, type ComposedCharacter } from '../lib/charac
 import MapViewer from './MapViewer'
 import { ZONES, type ZoneEntry } from '../lib/zoneList'
 import EffectBrowser from './EffectBrowser'
+import { exportGlb } from '../lib/gltfExport'
+import { motionsOf } from '../lib/motions'
+import { invertRigidMatrix4, poseSkeleton } from '../lib/skinning'
+import * as THREE from 'three'
 
 /**
  * The model viewer half of the app: its own sidebar and its own viewport,
@@ -46,6 +50,99 @@ export default function ModelBrowser({
   const [settings, setSettings] = useState<ModelSettings>(DEFAULT_MODEL)
 
   const [mode, setMode] = useState<'browse' | 'character' | 'maps' | 'effects'>('browse')
+
+  // Models -> Export glTF (lib/gltfExport): the model on screen, rigged, with its motions.
+  const [exporting, setExporting] = useState(false)
+  const [exportNote, setExportNote] = useState<string | null>(null)
+  const exportModel = useCallback(async (model: ParsedDatFile, name: string) => {
+    setExporting(true)
+    setExportNote(null)
+    try {
+      const glb = await exportGlb(model, name)
+      const file = name.replace(/[^\w' -]+/g, '').trim().replace(/\s+/g, '-') || 'model'
+      const saved = await window.ffxi.saveFile(glb, file + '.glb', 'glTF model', 'glb')
+      if (saved) setExportNote('Saved ' + saved.split(/[\\/]/).pop())
+    } catch (err) {
+      setExportNote('Export failed: ' + String(err))
+    } finally {
+      setExporting(false)
+    }
+  }, [])
+
+  // ?census=1: export what is on screen and read it back as a glTF loader would (no save dialog).
+  useEffect(() => {
+    if (!new URLSearchParams(window.location.search).has('census')) return
+    const model = mode === 'character' ? character : load.status === 'ready' ? load.model : null
+    ;(window as unknown as Record<string, unknown>).__gltfCheck = async (motionName?: string, at = 0.4) => {
+      if (!model) return null
+      const glb = await exportGlb(model, 'check')
+      const { GLTFLoader } = await import('three/examples/jsm/loaders/GLTFLoader.js')
+      const gltf = await new GLTFLoader().parseAsync(glb, '')
+      // A motion played in the file against the viewer's own pose: each bone's
+      // world position, the file's upright, the viewer's Y-down turned over.
+      if (motionName && model.skeleton) {
+        const clip = gltf.animations.find(c => c.name === motionName)
+        const motion = motionsOf(model.animations).find(m => m.label === motionName || m.key === motionName)
+        if (!clip || !motion) return { error: 'no motion ' + motionName }
+        const mixer = new THREE.AnimationMixer(gltf.scene)
+        mixer.clipAction(clip).play()
+        mixer.setTime(at)
+        gltf.scene.updateMatrixWorld(true)
+        const ib = model.skeleton.matrices.map(invertRigidMatrix4)
+        const pose = poseSkeleton(model.skeleton, motion.clips, ib, at).worldMats
+        let worst = 0, found = 0, moved = 0
+        const p = new THREE.Vector3()
+        pose.forEach((m, i) => {
+          const bone = gltf.scene.getObjectByName('bone_' + i)
+          if (!bone) return
+          found++
+          bone.getWorldPosition(p)
+          if (Math.hypot(m[12] - model.skeleton!.matrices[i][12], m[13] - model.skeleton!.matrices[i][13], m[14] - model.skeleton!.matrices[i][14]) > 0.01) moved++
+          worst = Math.max(worst, Math.hypot(p.x - m[12], p.y + m[13], p.z + m[14]))
+        })
+        // ?census: the file itself drawn in this pose, as an image, to see the skin bend.
+        // The page's security policy stops the loader decoding the file's images
+        // (blob URLs); decode them here instead, as glTF says (row 0 at v = 0).
+        const bin = new Uint8Array(glb, 20 + new DataView(glb).getUint32(12, true) + 8)
+        const doc = JSON.parse(new TextDecoder().decode(new Uint8Array(glb, 20, new DataView(glb).getUint32(12, true))))
+        const images = await Promise.all(doc.images.map(async (im: { bufferView: number }) => {
+          const bv = doc.bufferViews[im.bufferView]
+          const tex = new THREE.Texture(await createImageBitmap(new Blob([bin.slice(bv.byteOffset ?? 0, (bv.byteOffset ?? 0) + bv.byteLength)])))
+          tex.flipY = false; tex.colorSpace = THREE.SRGBColorSpace; tex.needsUpdate = true
+          return tex
+        }))
+        gltf.scene.traverse(o => {
+          const mesh = o as THREE.Mesh
+          if (!mesh.isMesh) return
+          const mat = mesh.material as THREE.MeshStandardMaterial
+          const index = gltf.parser.associations.get(mat)?.materials
+          const t = index !== undefined ? doc.materials[index]?.pbrMetallicRoughness?.baseColorTexture?.index : undefined
+          if (t !== undefined) { mat.map = images[doc.textures[t].source]; mat.needsUpdate = true }
+        })
+        const canvas = document.createElement('canvas')
+        canvas.width = 480; canvas.height = 480
+        const r = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true })
+        const view = new THREE.Scene()
+        view.background = new THREE.Color('#26303f')
+        view.add(new THREE.HemisphereLight(0xffffff, 0x445566, 2.5), gltf.scene)
+        const box = new THREE.Box3().setFromObject(gltf.scene), c = box.getCenter(new THREE.Vector3()), h = box.getSize(new THREE.Vector3()).length()
+        const cam = new THREE.PerspectiveCamera(35, 1, 0.01, 100)
+        cam.position.set(c.x + h * 0.9, c.y + h * 0.3, c.z + h * 1.4)
+        cam.lookAt(c)
+        r.render(view, cam)
+        const image = canvas.toDataURL('image/png')
+        r.dispose()
+        return { motion: motionName, at, bones: pose.length, found, movedFromRest: moved, worstBoneOffset: +worst.toFixed(4), image }
+      }
+      let skinned = 0, meshes = 0, bones = 0
+      gltf.scene.traverse(o => { if ((o as THREE.SkinnedMesh).isSkinnedMesh) skinned++; if ((o as THREE.Mesh).isMesh) meshes++; if ((o as THREE.Bone).isBone) bones++ })
+      const json = JSON.parse(new TextDecoder().decode(new Uint8Array(glb, 20, new DataView(glb).getUint32(12, true))))
+      let mapped = 0
+      gltf.scene.traverse(o => { const m = (o as THREE.Mesh).material as THREE.MeshStandardMaterial | undefined; if (m?.map?.image) mapped++ })
+      const box = new THREE.Box3().setFromObject(gltf.scene)
+      return { images: json.images?.length ?? 0, textures: json.textures?.length ?? 0, materials: json.materials?.map((m: { alphaMode?: string; pbrMetallicRoughness?: { baseColorTexture?: unknown } }) => (m.pbrMetallicRoughness?.baseColorTexture ? 'tex' : 'none') + '/' + (m.alphaMode ?? 'OPAQUE')), loadedWithMap: mapped, bytes: glb.byteLength, meshes, skinned, bones, animations: gltf.animations.map(a => a.name + ':' + a.duration.toFixed(2)), size: box.getSize(new THREE.Vector3()).toArray().map(v => +v.toFixed(2)), min: box.min.toArray().map(v => +v.toFixed(2)) }
+    }
+  }, [mode, character, load])
 
   // Only zones the table actually lists map pages for; 'unknown' rows and a
   // handful of instanced areas carry none.
@@ -294,6 +391,12 @@ export default function ModelBrowser({
                   motion={motion}
                 />
                 {!uiHidden && (
+                  <ExportButton
+                    busy={exporting} note={exportNote}
+                    onExport={() => void exportModel(character, RACES.find(r => r.id === spec.race)?.name ?? 'Character')}
+                  />
+                )}
+                {!uiHidden && (
                   <div className="hud">
                     <strong>
                       {RACES.find(r => r.id === spec.race)?.name}
@@ -345,6 +448,12 @@ export default function ModelBrowser({
               motion={motion}
             />
             {!uiHidden && (
+              <ExportButton
+                busy={exporting} note={exportNote}
+                onExport={() => void exportModel(load.model, selected?.name ?? 'Model')}
+              />
+            )}
+            {!uiHidden && (
               <div className="hud">
                 <strong>{selected?.name}</strong>
                 {stats && (
@@ -381,5 +490,24 @@ export default function ModelBrowser({
         />
       )}
     </>
+  )
+}
+
+/**
+ * Export glTF, top right of the model view like the zone view's tools. The
+ * note under it says where the file went, or why it did not.
+ */
+function ExportButton({ busy, note, onExport }: { busy: boolean; note: string | null; onExport: () => void }) {
+  return (
+    <div className="view-tools model-tools">
+      <button
+        onClick={onExport}
+        disabled={busy}
+        title="Save this model as a .glb file (glTF) for Blender and other 3D tools: rigged to its skeleton, with every motion it has, textures included. It is Square Enix's artwork from your own game, for your own use."
+      >
+        {busy ? 'Exporting…' : 'Export glTF'}
+      </button>
+      {note && <span className="model-tools-note">{note}</span>}
+    </div>
   )
 }

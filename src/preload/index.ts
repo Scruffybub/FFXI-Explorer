@@ -33,6 +33,10 @@ const api = {
   saveScreenshot: (dataUrl: string, suggestedName: string): Promise<string | null> =>
     ipcRenderer.invoke('window:saveScreenshot', dataUrl, suggestedName),
 
+  /** Opens a save dialog for a file the app made (a glTF export). Resolves to the path, or null if cancelled. */
+  saveFile: (bytes: ArrayBuffer, suggestedName: string, kind: string, extension: string): Promise<string | null> =>
+    ipcRenderer.invoke('window:saveFile', new Uint8Array(bytes), suggestedName, kind, extension),
+
   version: (): Promise<string> => ipcRenderer.invoke('app:version'),
 
   /** Graphics card preference: the one this launch uses, and the saved one. */

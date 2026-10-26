@@ -4218,6 +4218,37 @@ rather than solved.
     Lua), notorious monsters, effects monsters carry (bombs' flames),
     aggro/fights (not wanted).
 
+- **glTF export — built 2026-10-25.** Models (catalogue and Character) →
+  **Export glTF**, top right of the view → a Save dialog (`window:saveFile`,
+  Documents) → one .glb. `lib/gltfExport.ts` (three's GLTFExporter):
+  - Bones `bone_<i>` from `skinning.localPose` (poseSkeleton's local half,
+    split out: the same transforms the viewer poses; its 4x4 layout is
+    three's, so `Matrix4.fromArray().decompose()`). A root node turns FFXI's
+    Y-down upright (rotation x = π); models face +X.
+  - Vertices posed into the bind pose first (two-bone vertices are
+    bone-local until posed), then skinIndex/skinWeight: bone 1 with weight
+    w1, bone 2 with w2, normalised. FFXI blends a two-bone vertex from a
+    separate local point per bone; glTF's one bind position with the same
+    weights is the usual stand-in.
+  - Every motion (motionsOf) one animation, named as the Motion list names it
+    (unnamed: its code), every driven bone's position and rotation per frame
+    at 30 x speed fps, quaternions kept on one hemisphere. Scale keys are not
+    written (the viewer does not play them).
+  - Materials: MeshStandardMaterial with its DataTexture → embedded PNG,
+    alphaTest → MASK, DoubleSide. Texture rows go out as stored, matching
+    glTF's (0,0) = top-left, so UVs need no flip.
+  - **Checked** (`?census=1` `__gltfCheck(motion?, t)`: exports, reads back
+    with GLTFLoader, compares every bone's world position in a motion with
+    poseSkeleton's, and renders the file): Goblin 12 (2.1 MB, 9 skinned
+    meshes, 56 bones, 24 motions; Walk, Attack 1, Death, Idle at frame and
+    between frames: 0 offset), a dressed Hume female with Battle (7.3 MB, 97
+    bones, 51 motions), Decorative Chair, Archaic Mirror. Rendered textured
+    and posed. The page's CSP stops GLTFLoader decoding embedded images
+    (blob: under connect-src 'self'); the check decodes them itself. Blender
+    itself not tried here: no Blender on this PC.
+  - **Not yet:** zones (stage 2: instanced prefabs, huge), NPC/monster effects,
+    the character's other motion sets in one file (only the chosen set goes).
+
 - **Zone sounds — built 2026-10-24.** Panel → **Sound** (was Music) →
   *Zone sounds* (off by default, like the music) and *Sound volume*
   (`MusicSettings.sounds` / `soundsVolume`; `?sounds=1` turns it on).
