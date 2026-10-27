@@ -4307,13 +4307,43 @@ rather than solved.
   - **Sound browser with export:** done the same day (above). list and play the game's sound
     effects and music, and export them to common audio formats (WAV at least;
     MP3/OGG/FLAC need an encoder, check licences before bundling one).
-  - **Cutscene player:** (1) pre-rendered movies: the install has one,
-    `mov/mov999.pmv` (316 MB, header "PMUS", the data after it looks
-    scrambled or compressed: format unknown, research first) and
-    `mov/music999.bgw` (77 MB, a plain RIFF WAVE). (2) "Playing" in-game
-    cutscenes: the server starts an event and the client runs it from its
-    own event data (actors, camera, motions, text). Research how those files
-    are laid out before promising anything; Ryan calls it a killer feature.
+  - **Cutscene player — research done 2026-10-26.**
+    - **Pre-rendered movie: solved.** `mov/mov999.pmv` = "PMUS" (4 bytes,
+      plain) + an **MPEG-1 video elementary stream XOR'd with the 8-byte key
+      c2 ee 9c d9 bd 6c 4d 72** (key position = file offset mod 8; found from
+      runs of encrypted zeros). After it: sequence header 00 00 01 B3, no
+      0xB5 extensions (MPEG-1, not 2). 512x336, square pixels, 29.97 fps,
+      6 Mbit/s, 848 GOPs, 12,620 pictures (848 I, 3,391 P, 8,381 B) = 7:01.
+      Its sound is `mov/music999.bgw`, a plain RIFF WAVE, 48 kHz stereo
+      16-bit, 7:00. The original opening movie. Playing it needs an MPEG-1
+      decoder: jsmpeg (phoboslab, MIT; a download Ryan must approve) or our
+      own (~1-2k lines). Chromium has none. ffmpeg is gone from
+      Temp/ffm; the header facts above came from parsing it directly.
+    - **In-game cutscenes: feasible, staged.** Facts from atom0s XiEvents
+      (AGPL-3.0: format facts only, never its code): each zone's event file
+      (zone-seed-data.csv EVENTS column; Bastok Markets ROM/21/44) = u32
+      block count, u32 sizes, then blocks: u32 actor (NPC server id; zone
+      scenes on 0x7FFFFFF0), u32 event count, u16 offsets, u16 event ids,
+      u32 immediate count + u32 immediates (string ids, item ids..), u32 code
+      size, byte code (4-aligned). Bastok Markets: 211 blocks, 1,626 events,
+      431 KB of byte code, parsed to the exact end (scratch evdat.cjs). The
+      zone's dialogue (DIALOG column; ROM/25/44): u32 size ^ 0x10000000, u32
+      offsets ^ 0x80808080, text bytes ^ 0x80 with inline codes; 15,444 lines.
+      NPC names: NPCs column (the name file NpcStations already reads).
+      The VM: ~100 opcodes documented (OpCodes/0x0000-0x0063 and more);
+      cutscenes also use "schedulers" (pre-authored camera, motion and fade
+      tracks; GordianXI #165/#166 list 0x45 camera route, 0x53/0x55 waits,
+      0x1E/0x79/0x7B talking and head-look). Others already play them:
+      kuluu-ffxi (GPL), GordianXI, and vekien/xi-tools decompiles all 293
+      zones' events to JSON (XI Model Viewer's author: the rival is heading
+      here too). Server-driven parts (choices, player name, mission state)
+      would take defaults.
+      **Proposed stages:** (1) Event reader: per zone, each NPC's events and
+      the zone scenes, the script decoded into readable steps with the
+      dialogue lines and speakers: reading a cutscene. (2) Play the text and
+      timing in the zone: message windows, waits, fades, the camera opcodes.
+      (3) Actors: NPCs and your character moving, turning, playing motions,
+      effects. (4) Schedulers for the big scripted scenes.
 - **Camera path — built 2026-10-26.** Panel → **Camera path** (closed by
   default). `lib/cameraPath.ts` (store, views, curve), `CameraPathPlayer`
   (in the zone Canvas: flies the camera, records), `CameraPathPanel`.
