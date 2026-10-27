@@ -4274,6 +4274,27 @@ rather than solved.
     **Not yet:** collision as a separate mesh, generator water, NPCs and
     monsters in the file, the lamps as glTF lights.
 
+- **Motion scrubber and skeleton overlay — built 2026-10-26.** Models panel →
+  Animation: **Frame** slider (n / total, the motion's first clip, 30 x speed
+  fps), ◀ / ▶ step one frame; dragging or stepping pauses, Play resumes from
+  there (Animator `seek` sets its clock). The frame readout updates ten
+  times a second (ModelBrowser `onFrame` throttle). Display → **Show
+  skeleton** (`ModelSettings.showSkeleton`): `SkeletonOverlay` in
+  ModelViewer, lines child→parent and joint dots from the Animator's live
+  world matrices (`poseOut`), depth test off; bones over 10x the radius from
+  the centre left out (the game parks hidden parts' bones far away). Checked
+  on Goblin 12 Attack 1 (frames 4 and 22) and a Galka in Battle.
+- **Roadmap additions 2026-10-26 (Ryan):**
+  - **Sound browser (next) with export:** list and play the game's sound
+    effects and music, and export them to common audio formats (WAV at least;
+    MP3/OGG/FLAC need an encoder, check licences before bundling one).
+  - **Cutscene player:** (1) pre-rendered movies: the install has one,
+    `mov/mov999.pmv` (316 MB, header "PMUS", the data after it looks
+    scrambled or compressed: format unknown, research first) and
+    `mov/music999.bgw` (77 MB, a plain RIFF WAVE). (2) "Playing" in-game
+    cutscenes: the server starts an event and the client runs it from its
+    own event data (actors, camera, motions, text). Research how those files
+    are laid out before promising anything; Ryan calls it a killer feature.
 - **Camera path — built 2026-10-26.** Panel → **Camera path** (closed by
   default). `lib/cameraPath.ts` (store, views, curve), `CameraPathPlayer`
   (in the zone Canvas: flies the camera, records), `CameraPathPanel`.

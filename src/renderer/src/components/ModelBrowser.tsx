@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useEffect, type ReactNode } from 'react'
+import { useState, useMemo, useCallback, useEffect, type ReactNode, useRef } from 'react'
 import { parseDatFile, hasAnimations, type ParsedDatFile } from '../lib/ffxi-dat'
 import { MODELS, MODEL_CATEGORIES, searchModels, type ModelEntry } from '../lib/modelList'
 import { ModelViewer, type ModelStats } from './ModelViewer'
@@ -47,6 +47,22 @@ export default function ModelBrowser({
   const [stats, setStats] = useState<ModelStats | null>(null)
   const [playing, setPlaying] = useState(true)
   const [speed, setSpeed] = useState(1)
+  // Models -> Frame: where the motion is (read ten times a second, not every
+  // frame, so the panel does not re-render at the frame rate) and a jump to make.
+  const [frame, setFrame] = useState<{ frame: number; total: number } | null>(null)
+  const [seek, setSeek] = useState<{ frame: number; id: number } | null>(null)
+  const lastFrame = useRef(0)
+  const onFrame = useCallback((f: number, total: number) => {
+    const now = performance.now()
+    if (now - lastFrame.current < 100) return
+    lastFrame.current = now
+    setFrame(prev => (prev && Math.floor(prev.frame) === Math.floor(f) && prev.total === total ? prev : { frame: f, total }))
+  }, [])
+  const onSeek = useCallback((f: number) => {
+    setPlaying(false)
+    setSeek(s => ({ frame: f, id: (s?.id ?? 0) + 1 }))
+    setFrame(prev => (prev ? { ...prev, frame: f } : prev))
+  }, [])
   const [settings, setSettings] = useState<ModelSettings>(DEFAULT_MODEL)
 
   const [mode, setMode] = useState<'browse' | 'character' | 'maps' | 'effects'>('browse')
@@ -389,6 +405,8 @@ export default function ModelBrowser({
                   playing={playing}
                   speed={speed}
                   motion={motion}
+                  onFrame={onFrame}
+                  seek={seek}
                 />
                 {!uiHidden && (
                   <ExportButton
@@ -446,6 +464,8 @@ export default function ModelBrowser({
               playing={playing}
               speed={speed}
               motion={motion}
+              onFrame={onFrame}
+              seek={seek}
             />
             {!uiHidden && (
               <ExportButton
@@ -487,6 +507,8 @@ export default function ModelBrowser({
           onPlayingChange={setPlaying}
           speed={speed}
           onSpeedChange={setSpeed}
+          frame={frame}
+          onSeek={onSeek}
         />
       )}
     </>

@@ -434,6 +434,8 @@ export interface ModelSettings {
   wireframe: boolean
   /** Draw a ground plane and grid, for a sense of scale and footing. */
   showGround: boolean
+  /** Draw the bones over the model, following its motion. */
+  showSkeleton: boolean
 }
 
 export const DEFAULT_MODEL: ModelSettings = {
@@ -447,6 +449,7 @@ export const DEFAULT_MODEL: ModelSettings = {
   roughness: 0.85,
   wireframe: false,
   showGround: false,
+  showSkeleton: false,
 }
 
 export const DEFAULT_LIGHTING: LightingSettings = {

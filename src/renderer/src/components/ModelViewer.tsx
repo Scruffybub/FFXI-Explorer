@@ -29,7 +29,7 @@ import { buildModel, MODEL_DEBUG, type BuiltModel } from '../lib/modelBuild'
  * skeleton, and inverting 69 matrices every frame is pure waste.
  */
 export function Animator({
-  built, model, playing, speed, motion, onFrame, onPosed,
+  built, model, playing, speed, motion, onFrame, onPosed, seek, poseOut,
 }: {
   built: BuiltModel
   model: ParsedDatFile
@@ -40,6 +40,10 @@ export function Animator({
   onFrame?: (frame: number, total: number) => void
   /** The posed model's bounds, once per motion, for framing. */
   onPosed?: (box: THREE.Box3) => void
+  /** Jump to this frame of the motion (Models -> Frame); a new `id` jumps again. */
+  seek?: { frame: number; id: number } | null
+  /** Receives each frame's bone world matrices, for the skeleton overlay. */
+  poseOut?: { current: number[][] | null }
 }) {
   const time = useRef(0)
   const measured = useRef<unknown>(null)
@@ -52,6 +56,13 @@ export function Animator({
   // together. The other motions in the file are left out.
   const clips = useMemo(() => clipsForMotion(model.animations, motion), [model.animations, motion])
 
+  // A seek sets the clock to that frame of the motion's first clip: frames run
+  // at 30 a second times the clip's own speed (poseSkeleton).
+  useEffect(() => {
+    if (!seek || !clips.length) return
+    time.current = seek.frame / (30 * (clips[0].speed || 1))
+  }, [seek, clips])
+
   useFrame((_, delta) => {
     const skeleton = model.skeleton
     if (!skeleton || !inverseBind || clips.length === 0) return
@@ -61,6 +72,7 @@ export function Animator({
 
     const pose = poseSkeleton(skeleton, clips, inverseBind, time.current)
     skinMeshes(built.skinTargets, pose)
+    if (poseOut) poseOut.current = pose.worldMats
 
     for (const mesh of built.meshes) {
       const attr = mesh.geometry.getAttribute('position')
@@ -157,7 +169,7 @@ export interface ModelStats {
 }
 
 export function ModelViewer({
-  model, settings, onStats, playing = true, speed = 1, motion = null, onFrame,
+  model, settings, onStats, playing = true, speed = 1, motion = null, onFrame, seek = null,
 }: {
   model: ParsedDatFile | null
   settings: ModelSettings
@@ -166,7 +178,11 @@ export function ModelViewer({
   speed?: number
   motion?: string | null
   onFrame?: (frame: number, total: number) => void
+  /** Models -> Frame: jump the motion to a frame. */
+  seek?: { frame: number; id: number } | null
 }) {
+  // The latest pose's bone matrices, shared by the Animator and the skeleton overlay.
+  const pose = useRef<number[][] | null>(null)
   // Build and dispose in the *same* effect, so the two are always paired.
   //
   // The obvious version — useMemo to build, useEffect to dispose — is broken
@@ -279,6 +295,8 @@ export function ModelViewer({
           motion={motion}
           onFrame={onFrame}
           onPosed={onPosed}
+          seek={seek}
+          poseOut={pose}
         />
       )}
 
@@ -290,6 +308,9 @@ export function ModelViewer({
             {built.meshes.map((mesh, i) => (
               <primitive key={i} object={mesh} />
             ))}
+            {settings.showSkeleton && model?.skeleton && (
+              <SkeletonOverlay skeleton={model.skeleton} pose={pose} center={center!} radius={built.radius} />
+            )}
           </group>
         </group>
       )}
@@ -301,5 +322,67 @@ export function ModelViewer({
         maxDistance={dist * 6}
       />
     </Canvas>
+  )
+}
+
+/**
+ * Models -> Show skeleton: a line from each bone to its parent and a dot at
+ * each joint, in the model's own space (inside its centring and flip), drawn
+ * over the model and following the motion. Bones parked far off (the game
+ * hides parts by moving their bones away; Elvaan M 12 sends some 80,000 units
+ * out) are left out, or one line would fill the screen.
+ */
+function SkeletonOverlay({ skeleton, pose, center, radius }: {
+  skeleton: NonNullable<ParsedDatFile['skeleton']>
+  pose: { current: number[][] | null }
+  center: THREE.Vector3
+  radius: number
+}) {
+  const count = skeleton.bones.length
+  const { lines, points } = useMemo(() => {
+    const lineGeo = new THREE.BufferGeometry()
+    lineGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(count * 6), 3))
+    const pointGeo = new THREE.BufferGeometry()
+    pointGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(count * 3), 3))
+    const lines = new THREE.LineSegments(lineGeo, new THREE.LineBasicMaterial({ color: '#f0c860', depthTest: false, transparent: true, opacity: 0.9 }))
+    const points = new THREE.Points(pointGeo, new THREE.PointsMaterial({ color: '#ffffff', size: 5, sizeAttenuation: false, depthTest: false }))
+    lines.renderOrder = points.renderOrder = 10
+    lines.frustumCulled = points.frustumCulled = false
+    return { lines, points }
+  }, [count])
+  useEffect(() => () => {
+    lines.geometry.dispose(); (lines.material as THREE.Material).dispose()
+    points.geometry.dispose(); (points.material as THREE.Material).dispose()
+  }, [lines, points])
+
+  useFrame(() => {
+    const mats = pose.current ?? skeleton.matrices
+    const lp = lines.geometry.getAttribute('position') as THREE.BufferAttribute
+    const pp = points.geometry.getAttribute('position') as THREE.BufferAttribute
+    const far = radius * 10
+    const near = (m: number[]) => Math.hypot(m[12] - center.x, m[13] - center.y, m[14] - center.z) <= far
+    let l = 0, p = 0
+    for (let i = 0; i < count; i++) {
+      const m = mats[i]
+      if (!m || !near(m)) continue
+      pp.setXYZ(p++, m[12], m[13], m[14])
+      const parent = skeleton.bones[i].parentIndex
+      const pm = parent >= 0 ? mats[parent] : null
+      if (pm && near(pm)) {
+        lp.setXYZ(l++, pm[12], pm[13], pm[14])
+        lp.setXYZ(l++, m[12], m[13], m[14])
+      }
+    }
+    lines.geometry.setDrawRange(0, l)
+    points.geometry.setDrawRange(0, p)
+    lp.needsUpdate = true
+    pp.needsUpdate = true
+  })
+
+  return (
+    <>
+      <primitive object={lines} />
+      <primitive object={points} />
+    </>
   )
 }

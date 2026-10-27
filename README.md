@@ -48,7 +48,8 @@ grading, vignette, and a choice of tone-mapping curves.
 
 **Model viewer** — 2,467 NPC, monster and object models with their animations,
 plus a character builder that assembles a player character from a race skeleton
-and eight equipment slots, with real item names. The character you build is the
+and eight equipment slots, with real item names. Scrub any motion frame by
+frame, and show the skeleton over the model. The character you build is the
 one you walk zones as.
 
 **Export glTF** — the model on screen (a monster, an NPC, an object or your

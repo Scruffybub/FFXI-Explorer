@@ -22,7 +22,7 @@ const TONE_OPTIONS: { value: ToneMappingMode; label: string }[] = [
 ]
 
 function Slider({
-  label, value, min, max, step, onChange, info,
+  label, value, min, max, step, onChange, info, format,
 }: {
   label: string
   value: number
@@ -31,12 +31,14 @@ function Slider({
   step: number
   onChange: (v: number) => void
   info?: string
+  /** The readout; two decimals when not given. */
+  format?: (v: number) => string
 }) {
   return (
     <label className="control">
       <span className="control-row">
         <Label text={label} info={info} />
-        <span className="value">{value.toFixed(2)}</span>
+        <span className="value">{format ? format(value) : value.toFixed(2)}</span>
       </span>
       <input
         type="range" min={min} max={max} step={step} value={value}
@@ -49,7 +51,7 @@ function Slider({
 export default function ModelPanel({
   settings, onChange,
   animations, motion, onMotionChange,
-  playing, onPlayingChange, speed, onSpeedChange,
+  playing, onPlayingChange, speed, onSpeedChange, frame, onSeek,
 }: {
   settings: ModelSettings
   onChange: (patch: Partial<ModelSettings>) => void
@@ -60,6 +62,10 @@ export default function ModelPanel({
   onPlayingChange: (v: boolean) => void
   speed: number
   onSpeedChange: (v: number) => void
+  /** Where the motion is, frame of total (0-based); null before it plays. */
+  frame?: { frame: number; total: number } | null
+  /** Pause and jump to a frame. */
+  onSeek?: (frame: number) => void
 }) {
   const motions = motionsOf(animations)
   return (
@@ -86,10 +92,25 @@ export default function ModelPanel({
             </label>
 
             <div className="anim-buttons">
+              {frame && onSeek && (
+                <button onClick={() => onSeek(Math.max(0, Math.floor(frame.frame) - 1))} title="Back one frame (pauses)">◀</button>
+              )}
               <button onClick={() => onPlayingChange(!playing)}>
                 {playing ? 'Pause' : 'Play'}
               </button>
+              {frame && onSeek && (
+                <button onClick={() => onSeek(Math.min(frame.total, Math.floor(frame.frame) + 1))} title="Forward one frame (pauses)">▶</button>
+              )}
             </div>
+
+            {frame && onSeek && (
+              <Slider
+                label="Frame" value={Math.floor(frame.frame)} min={0} max={frame.total} step={1}
+                format={v => `${v} / ${frame.total}`}
+                onChange={onSeek}
+                info="Where the motion is, in the game's frames (30 a second at normal speed). Drag to scrub through it; dragging or stepping pauses it, Play carries on from there."
+              />
+            )}
 
             <Slider
               label="Speed" value={speed} min={0.1} max={3} step={0.1}
@@ -181,6 +202,16 @@ export default function ModelPanel({
             <Label
               text="Wireframe"
               info="Draw the model as edges only, which is the quickest way to see how its mesh is built and where the seams between equipment pieces fall."
+            />
+          </label>
+          <label className="control toggle">
+            <input
+              type="checkbox" checked={settings.showSkeleton}
+              onChange={e => onChange({ showSkeleton: e.target.checked })}
+            />
+            <Label
+              text="Show skeleton"
+              info="Draw the model's bones over it, a line from each bone to the one it hangs from, moving with the motion. It shows how the model is rigged, which is what an exported glTF file carries."
             />
           </label>
         </div>
