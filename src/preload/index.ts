@@ -29,6 +29,10 @@ const api = {
 
   isFullscreen: (): Promise<boolean> => ipcRenderer.invoke('window:isFullscreen'),
 
+  /** Names in a folder of the install (folders end in /); [] when it does not exist. */
+  listDir: (rootPath: string, relativePath: string): Promise<string[]> =>
+    ipcRenderer.invoke('ffxi:listDir', rootPath, relativePath),
+
   /** Opens a save dialog for a PNG data URL. Resolves to the path, or null if cancelled. */
   saveScreenshot: (dataUrl: string, suggestedName: string): Promise<string | null> =>
     ipcRenderer.invoke('window:saveScreenshot', dataUrl, suggestedName),

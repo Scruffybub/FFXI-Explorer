@@ -64,6 +64,12 @@ own use.
 **Zone music** — the game's own BGW tracks, decoded in-app. Both codecs play:
 PS-ADPCM, and ATRAC3 via a from-source decoder validated against ffmpeg.
 
+**Sounds** — every music track and sound effect in your install, in
+**Models → Sounds**: tracks are named by the zones that play them, with a
+waveform to click through, looping as in game. **Export** any of them as WAV,
+FLAC (lossless, about half the size) or Ogg Opus (small); music can be saved
+the usual way game music is ripped, the loop twice and then a fade-out.
+
 **Zone sounds** — the sounds each zone places itself: waterfalls, rivers and
 canals, fountains, birds, insects, machinery. Each carries only as far as the
 game lets it, so you hear what is around the point you orbit, or around you

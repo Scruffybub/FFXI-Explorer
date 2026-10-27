@@ -190,6 +190,21 @@ app.whenReady().then(() => {
     return buffer
   })
 
+  // The sound browser lists the game's music and sound-effect folders. Read
+  // only, names only, and like readDat never outside the game directory.
+  ipcMain.handle('ffxi:listDir', async (_evt, rootPath: string, relativePath: string) => {
+    const normalized = relativePath.replace(/\\/g, '/')
+    if (normalized.split('/').some(seg => seg === '..')) {
+      throw new Error(`Invalid path: ${relativePath}`)
+    }
+    try {
+      const entries = await fs.readdir(join(rootPath, ...normalized.split('/').filter(Boolean)), { withFileTypes: true })
+      return entries.map(e => (e.isDirectory() ? e.name + '/' : e.name))
+    } catch {
+      return []
+    }
+  })
+
   ipcMain.handle('ffxi:fileExists', async (_evt, rootPath: string, relativePath: string) => {
     try {
       await fs.stat(join(rootPath, ...relativePath.replace(/\\/g, '/').split('/')))

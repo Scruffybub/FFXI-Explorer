@@ -667,7 +667,7 @@ select {
   backdrop-filter: blur(4px);
 }
 
-.mode-switch { display: flex; gap: 4px; }
+.mode-switch { display: flex; gap: 4px; flex-wrap: wrap; }
 .mode-switch button {
   flex: 1;
   background: var(--panel-2);
@@ -1160,3 +1160,17 @@ select {
 .camera-seconds.end { width: 64px; justify-content: center; }
 .camera-actions { display: flex; gap: 6px; margin-top: 6px; }
 .camera-actions .place-btn { flex: 1; }
+
+/* Models -> Sounds: the player. */
+.sound-view { grid-column: 2 / -1; display: flex; align-items: center; justify-content: center; overflow: auto; }
+.sound-player { width: min(760px, 92%); display: flex; flex-direction: column; gap: 10px; }
+.sound-player h2 { margin: 0; font-size: 18px; }
+.sound-wave { position: relative; height: 120px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; cursor: pointer; color: var(--accent); overflow: hidden; }
+.sound-wave canvas { width: 100%; height: 100%; display: block; }
+.sound-head { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--text); pointer-events: none; }
+.sound-loop { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1px dashed var(--muted); pointer-events: none; }
+.sound-controls, .sound-export { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.sound-controls .place-btn, .sound-export .place-btn { width: auto; padding: 6px 16px; }
+.sound-time { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 12px; }
+.sound-volume { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.sound-export .category-select { width: auto; }

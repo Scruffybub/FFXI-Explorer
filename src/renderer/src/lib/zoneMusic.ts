@@ -64,6 +64,33 @@ export type MusicStatus =
  * One track at a time. Loading is generation-guarded because zone switches can
  * outrun a decode — a 4-minute track is ~23M samples and takes a moment.
  */
+/**
+ * Decodes a music file (BGW): PS-ADPCM (codec 0) or ATRAC3 (codec 3). The
+ * codec number when it is neither; null when decoding fails. Shared by zone
+ * music and the sound browser.
+ */
+export function decodeTrack(bytes: Uint8Array): DecodedAudio | number | null {
+  const header = readBgwHeader(bytes)
+  if (header && header.codec === 3) {
+    const at3 = decodeAtrac3Bgw(bytes)
+    if (!at3) return null
+    // ATRAC3 carries an encoder delay of 1024*2 + 69*2 samples before
+    // the real audio, and this file's loop point is in samples measured
+    // against the undelayed stream. Trim both together or the loop lands
+    // 2186 samples late.
+    const trimmed = at3.channels.map(c => c.subarray(ATRAC3_ENCODER_DELAY))
+    return {
+      channels: trimmed,
+      sampleRate: at3.sampleRate,
+      loopStartSample: header.loopStart > 0
+        ? Math.max(0, header.loopStart - ATRAC3_ENCODER_DELAY)
+        : null,
+    }
+  }
+  if (header && header.codec !== 0) return header.codec
+  return decodeBgw(bytes)
+}
+
 export class ZoneMusicPlayer {
   private ctx: AudioContext | null = null
   private gain: GainNode | null = null
@@ -120,30 +147,12 @@ export class ZoneMusicPlayer {
       if (gen !== this.generation) return
       const bytes = new Uint8Array(raw)
 
-      const header = readBgwHeader(bytes)
-      let decoded: DecodedAudio | null = null
-      if (header && header.codec === 3) {
-        const at3 = decodeAtrac3Bgw(bytes)
-        if (at3) {
-          // ATRAC3 carries an encoder delay of 1024*2 + 69*2 samples before
-          // the real audio, and this file's loop point is in samples measured
-          // against the undelayed stream. Trim both together or the loop lands
-          // 2186 samples late.
-          const trimmed = at3.channels.map(c => c.subarray(ATRAC3_ENCODER_DELAY))
-          decoded = {
-            channels: trimmed,
-            sampleRate: at3.sampleRate,
-            loopStartSample: header.loopStart > 0
-              ? Math.max(0, header.loopStart - ATRAC3_ENCODER_DELAY)
-              : null,
-          }
-        }
-      } else if (header && header.codec !== 0) {
-        onStatus({ state: 'unsupported', track, codec: header.codec })
+      const result = decodeTrack(bytes)
+      if (typeof result === 'number') {
+        onStatus({ state: 'unsupported', track, codec: result })
         return
-      } else {
-        decoded = decodeBgw(bytes)
       }
+      const decoded = result
       if (gen !== this.generation) return
       if (!decoded) { onStatus({ state: 'error', track, message: 'decode failed' }); return }
 

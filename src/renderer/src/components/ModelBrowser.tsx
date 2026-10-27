@@ -9,6 +9,7 @@ import { RACES, type CharacterSpec, type ComposedCharacter } from '../lib/charac
 import MapViewer from './MapViewer'
 import { ZONES, type ZoneEntry } from '../lib/zoneList'
 import EffectBrowser from './EffectBrowser'
+import SoundBrowser from './SoundBrowser'
 import { exportGlb } from '../lib/gltfExport'
 import { motionsOf } from '../lib/motions'
 import { invertRigidMatrix4, poseSkeleton } from '../lib/skinning'
@@ -65,7 +66,7 @@ export default function ModelBrowser({
   }, [])
   const [settings, setSettings] = useState<ModelSettings>(DEFAULT_MODEL)
 
-  const [mode, setMode] = useState<'browse' | 'character' | 'maps' | 'effects'>('browse')
+  const [mode, setMode] = useState<'browse' | 'character' | 'maps' | 'effects' | 'sounds'>('browse')
 
   // Models -> Export glTF (lib/gltfExport): the model on screen, rigged, with its motions.
   const [exporting, setExporting] = useState(false)
@@ -249,8 +250,18 @@ export default function ModelBrowser({
             >
               Effects
             </button>
+            <button
+              className={mode === 'sounds' ? 'active' : ''}
+              onClick={() => setMode('sounds')}
+            >
+              Sounds
+            </button>
           </div>
   )
+
+  if (mode === 'sounds') {
+    return <SoundBrowser ffxiPath={ffxiPath} head={<>{viewSwitch}{modeSwitch}</>} />
+  }
 
   if (mode === 'effects') {
     return (

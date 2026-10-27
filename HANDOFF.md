@@ -4284,8 +4284,27 @@ rather than solved.
   world matrices (`poseOut`), depth test off; bones over 10x the radius from
   the centre left out (the game parks hidden parts' bones far away). Checked
   on Goblin 12 Attack 1 (frames 4 and 22) and a Galka in Battle.
+- **Sound browser — built 2026-10-26.** Models → **Sounds** (5th tab; the
+  mode switch now wraps). `lib/soundLibrary.ts` lists via the new
+  `ffxi:listDir` IPC (read-only, never outside the install): 222 music
+  tracks (`<sound dir>/win/music/data/musicNNN.bgw`, first dir wins), 10,842
+  effects in 425 folders (`win/se/seFFF/seNNNNNN.spw`; listing them all takes
+  ~0.4 s). Tracks are named by zone-music.json's zones (day, night, battle,
+  party battle). Decoding shared with zone music (`zoneMusic decodeTrack`,
+  split out). `SoundBrowser.tsx`: waveform (min/max per pixel), click to
+  seek, loop (from the header's loop point), volume. **Export**
+  (`lib/audioExport.ts`): WAV 16-bit; FLAC written here (fixed predictors
+  0-4, Rice partitions, each parameter chosen by exact bit count; no MD5);
+  Ogg Opus via WebCodecs AudioEncoder at 48 kHz (OfflineAudioContext
+  resample) in Ogg pages written here (pre-skip 312, last granule trims).
+  Music option: intro + loop x2 + 10 s fade (`arrange`). **Checked** (Music
+  152, 2:28): WAV 26.2 MB, FLAC 16.2 MB in 1.3 s and identical to the WAV
+  over all 13,087,520 samples when Chromium decodes both, loop-twice FLAC
+  5:07, Opus 3.2 MB at the right length; a sound effect (12034) too. MP3 not
+  offered: it needs a bundled third-party encoder. Census: `__soundChoose`,
+  `__soundExport(format, twice)`.
 - **Roadmap additions 2026-10-26 (Ryan):**
-  - **Sound browser (next) with export:** list and play the game's sound
+  - **Sound browser with export:** done the same day (above). list and play the game's sound
     effects and music, and export them to common audio formats (WAV at least;
     MP3/OGG/FLAC need an encoder, check licences before bundling one).
   - **Cutscene player:** (1) pre-rendered movies: the install has one,
