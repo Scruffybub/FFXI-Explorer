@@ -29,6 +29,12 @@ const api = {
 
   isFullscreen: (): Promise<boolean> => ipcRenderer.invoke('window:isFullscreen'),
 
+  /** `length` bytes of a file from `offset`, and the file's size. */
+  readRange: async (rootPath: string, relativePath: string, offset: number, length: number): Promise<{ bytes: ArrayBuffer; size: number }> => {
+    const r: { bytes: Uint8Array; size: number } = await ipcRenderer.invoke('ffxi:readRange', rootPath, relativePath, offset, length)
+    return { bytes: r.bytes.buffer.slice(r.bytes.byteOffset, r.bytes.byteOffset + r.bytes.byteLength) as ArrayBuffer, size: r.size }
+  },
+
   /** Names in a folder of the install (folders end in /); [] when it does not exist. */
   listDir: (rootPath: string, relativePath: string): Promise<string[]> =>
     ipcRenderer.invoke('ffxi:listDir', rootPath, relativePath),

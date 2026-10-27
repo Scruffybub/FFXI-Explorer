@@ -10,6 +10,7 @@ import MapViewer from './MapViewer'
 import { ZONES, type ZoneEntry } from '../lib/zoneList'
 import EffectBrowser from './EffectBrowser'
 import SoundBrowser from './SoundBrowser'
+import CutsceneBrowser from './CutsceneBrowser'
 import { exportGlb } from '../lib/gltfExport'
 import { motionsOf } from '../lib/motions'
 import { invertRigidMatrix4, poseSkeleton } from '../lib/skinning'
@@ -66,7 +67,7 @@ export default function ModelBrowser({
   }, [])
   const [settings, setSettings] = useState<ModelSettings>(DEFAULT_MODEL)
 
-  const [mode, setMode] = useState<'browse' | 'character' | 'maps' | 'effects' | 'sounds'>('browse')
+  const [mode, setMode] = useState<'browse' | 'character' | 'maps' | 'effects' | 'sounds' | 'cutscenes'>('browse')
 
   // Models -> Export glTF (lib/gltfExport): the model on screen, rigged, with its motions.
   const [exporting, setExporting] = useState(false)
@@ -256,8 +257,18 @@ export default function ModelBrowser({
             >
               Sounds
             </button>
+            <button
+              className={mode === 'cutscenes' ? 'active' : ''}
+              onClick={() => setMode('cutscenes')}
+            >
+              Cutscenes
+            </button>
           </div>
   )
+
+  if (mode === 'cutscenes') {
+    return <CutsceneBrowser ffxiPath={ffxiPath} head={<>{viewSwitch}{modeSwitch}</>} />
+  }
 
   if (mode === 'sounds') {
     return <SoundBrowser ffxiPath={ffxiPath} head={<>{viewSwitch}{modeSwitch}</>} />

@@ -28,6 +28,17 @@ What this means in practice:
   port that runs in the app. `ffmpeg` is used only as a development-time oracle
   to verify the port, and is not a dependency of the shipped application.
 
+## MPEG-1 video decoder — jsmpeg (MIT)
+
+**Files:** `src/renderer/src/vendor/jsmpeg/` (built by `scripts/build-jsmpeg.cjs`)
+
+The opening movie is decoded by [jsmpeg](https://github.com/phoboslab/jsmpeg)
+by Dominic Szablewski, Copyright (c) 2017, MIT licensed (its `LICENSE` ships
+beside it). It is modified: a slice-end fix and B-picture decoding were added,
+and parts the app doesn't use were left out; `vendor/jsmpeg/README.md` lists
+the changes. As with FFmpeg above, `ffmpeg` was used only during development to
+check the decoded frames and is not part of the app.
+
 ## DAT parsing — Vanalytics (MIT)
 
 **Files:** most of `src/renderer/src/lib/ffxi-dat/`, and `resources/*.json`
@@ -115,6 +126,18 @@ reference to
 GPL-3.0. Their source was read as a description of the file formats and of the
 game's behaviour; no code was copied, and these implementations were written
 independently. This notice records that research.
+
+## Event scripts — XiEvents (AGPL-3.0, reference only)
+
+**Files:** `src/renderer/src/lib/eventScript.ts`
+
+The layout of the zones' event files and their dialogue files, the size of
+each event opcode and what it does, and how event operands are read were
+worked out with reference to atom0s'
+[XiEvents](https://github.com/atom0s/XiEvents) documentation, AGPL-3.0. It was
+read as a description of the file format and of the game's behaviour; no code
+was copied, and the reader was written independently. This notice records that
+research.
 
 ---
 

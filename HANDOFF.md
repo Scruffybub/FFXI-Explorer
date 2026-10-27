@@ -4315,10 +4315,32 @@ rather than solved.
       0xB5 extensions (MPEG-1, not 2). 512x336, square pixels, 29.97 fps,
       6 Mbit/s, 848 GOPs, 12,620 pictures (848 I, 3,391 P, 8,381 B) = 7:01.
       Its sound is `mov/music999.bgw`, a plain RIFF WAVE, 48 kHz stereo
-      16-bit, 7:00. The original opening movie. Playing it needs an MPEG-1
-      decoder: jsmpeg (phoboslab, MIT; a download Ryan must approve) or our
-      own (~1-2k lines). Chromium has none. ffmpeg is gone from
-      Temp/ffm; the header facts above came from parsing it directly.
+      16-bit, 7:00. The original opening movie.
+    - **Movie player — built 2026-10-26.** Models → **Cutscenes** → Movies.
+      `lib/moviePlayer.ts` + `components/CutsceneBrowser.tsx`; main's
+      `ffxi:readRange` reads byte ranges so the 320 MB file is never held
+      whole. Opening the movie scans it once (about 4 s) for each GOP's
+      offset and its keyframe's display number (GOP's first coded picture
+      number + the I's temporal reference). The WAV is the clock; the video
+      decodes up to it each frame. Seeking restarts the decoder at the GOP
+      and decodes to the exact frame (~0.1 s). Frames are counted as they're
+      shown (the decoder's render callback), not as decoded.
+      - **Decoder:** jsmpeg, vendored and modified, built from its readable
+        sources by `scripts/build-jsmpeg.cjs` (vendor/jsmpeg/README.md). Two
+        fixes this movie needed: (1) jsmpeg ended a slice only on a
+        byte-aligned 00 00 01; this encoder zero-pads before start codes, so
+        slices ran on into garbage; now "next 23 bits zero", the spec's rule.
+        (2) jsmpeg skipped B-pictures (8,381 of 12,620); added backward and
+        averaged prediction, a third reference buffer, display reordering,
+        and skipping the open GOP's leading Bs after a seek.
+      - **Verified** against ffmpeg: 90 frames at the start and 90 halfway
+        within rounding (mean diff < 0.25/255); four seeks in the app
+        side by side with ffmpeg's frames, identical; 6 s of playback stays
+        within one frame of the sound.
+      - **ffmpeg** (9.0.2 essentials, 115 MB) sits at
+        `%TEMP%/ffm-dl` as a dev-only oracle; never shipped. To compare:
+        decrypt the .pmv (XOR from offset 4), then
+        `ffmpeg -i full.m1v -vf select='eq(n\,N)' ...`.
     - **In-game cutscenes: feasible, staged.** Facts from atom0s XiEvents
       (AGPL-3.0: format facts only, never its code): each zone's event file
       (zone-seed-data.csv EVENTS column; Bastok Markets ROM/21/44) = u32
@@ -4338,6 +4360,31 @@ rather than solved.
       zones' events to JSON (XI Model Viewer's author: the rival is heading
       here too). Server-driven parts (choices, player name, mission state)
       would take defaults.
+    - **Event reader (stage 1) — built 2026-10-26.** Models → Cutscenes →
+      **Events**: pick a zone; its sources (Zone scenes first, then NPCs by
+      name from `npcNames`) and their events; the chosen event as steps.
+      `lib/eventScript.ts` (parse, opcode sizes, describe, readEvent),
+      `components/EventReader.tsx`; zone-seed EVENTS/DIALOG now on ZoneEntry.
+      - **Sizes:** FIXED[] (0x00-0xD9) generated from XiEvents' tables;
+        VARIABLE{} per sub-code, read off each handler's `ExecPointer +=`.
+        0x5B/0x66 are 15 (17 only via 0x5F). **Checked on all 293 zones:**
+        208,360 events, 7.08 M reachable instructions, 90 unknown (data
+        reached through branches: ff ff, f0 ff..). A straight sweep stops
+        on sub-code 0x80 in ~1.2k places: unreachable data, not code.
+      - **readEvent** follows every branch both ways (outcome = server
+        state) and lists the reachable steps in address order; jump targets
+        get address labels. Calls (0x1A) are listed, not inlined.
+      - **Operands:** u16 with 0x8000 = reference (constant), else a work
+        variable (local<80, zone 4096+, saved 4352+, 0x7F00 npc/0x7F80 player
+        fields). Actors are u32: 0x7FFFFFF0/C0/F9 = you, F8 = the event's
+        own entity, else NPC id (low 12 bits = name index).
+      - **Text codes** (found by surveying three zones): 07 newline, 00 or
+        7F 31 end of window, 08 player, 18/1C n a name, 0A n number, 01 L ..
+        (L+2 bytes) a table value, 0C n / 7F 92 n / 7F 85 pick from the
+        [a/b] after, 0B choices follow, 1E/1F n colour, EF n element icon,
+        SJIS pairs. Rendered with {player}/{name}/{#}/{…} placeholders.
+      - **Action tags** are 4-char: fdo/fdi fade, tlk/thk gestures, z000..
+        and s0xx on the player = camera shots (to confirm in stage 2).
       **Proposed stages:** (1) Event reader: per zone, each NPC's events and
       the zone scenes, the script decoded into readable steps with the
       dialogue lines and speakers: reading a cutscene. (2) Play the text and

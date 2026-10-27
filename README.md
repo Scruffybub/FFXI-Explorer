@@ -70,6 +70,12 @@ waveform to click through, looping as in game. **Export** any of them as WAV,
 FLAC (lossless, about half the size) or Ogg Opus (small); music can be saved
 the usual way game music is ripped, the loop twice and then a fade-out.
 
+**Cutscenes** — in **Models → Cutscenes**: **Movies** plays the game's
+pre-rendered opening movie with its soundtrack, seekable to any frame.
+**Events** reads every zone's scripts: each NPC's conversations and the zone's
+own cutscenes, step by step, with who says what, the choices you're offered and
+where each answer leads, waits, music, camera shots and actor actions.
+
 **Zone sounds** — the sounds each zone places itself: waterfalls, rivers and
 canals, fountains, birds, insects, machinery. Each carries only as far as the
 game lets it, so you hear what is around the point you orbit, or around you

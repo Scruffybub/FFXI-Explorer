@@ -7,6 +7,9 @@ export interface ZoneEntry {
   modelPath: string
   /** Semicolon-separated ROM paths for the minimap tiles. */
   mapPaths: string[]
+  /** The zone's event scripts and their dialogue (Cutscenes -> Events), when it has them. */
+  events?: string
+  dialog?: string
 }
 
 /**
@@ -49,6 +52,8 @@ export const ZONES: ZoneEntry[] = (() => {
     name: header.indexOf('NAME'),
     model: header.indexOf('MODEL'),
     maps: header.indexOf('MAP_PATHS'),
+    events: header.indexOf('EVENTS'),
+    dialog: header.indexOf('DIALOG'),
   }
 
   const zones: ZoneEntry[] = []
@@ -66,6 +71,8 @@ export const ZONES: ZoneEntry[] = (() => {
       name,
       modelPath,
       mapPaths: (f[idx.maps] ?? '').split(';').map(s => s.trim()).filter(Boolean),
+      events: f[idx.events]?.trim() || undefined,
+      dialog: f[idx.dialog]?.trim() || undefined,
     })
   }
 

@@ -190,6 +190,24 @@ app.whenReady().then(() => {
     return buffer
   })
 
+  // Part of a large file (the 316 MB opening movie is read a few MB at a time).
+  ipcMain.handle('ffxi:readRange', async (_evt, rootPath: string, relativePath: string, offset: number, length: number) => {
+    const normalized = relativePath.replace(/\\/g, '/')
+    if (normalized.split('/').some(seg => seg === '..')) {
+      throw new Error(`Invalid path: ${relativePath}`)
+    }
+    const handle = await fs.open(join(rootPath, ...normalized.split('/')), 'r')
+    try {
+      const size = (await handle.stat()).size
+      const n = Math.max(0, Math.min(length, size - offset))
+      const buffer = Buffer.alloc(n)
+      await handle.read(buffer, 0, n, offset)
+      return { bytes: buffer, size }
+    } finally {
+      await handle.close()
+    }
+  })
+
   // The sound browser lists the game's music and sound-effect folders. Read
   // only, names only, and like readDat never outside the game directory.
   ipcMain.handle('ffxi:listDir', async (_evt, rootPath: string, relativePath: string) => {
