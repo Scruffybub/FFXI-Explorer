@@ -66,6 +66,8 @@ export interface NpcModel {
   idle: ParsedAnimation[]
   /** Its walk, for a roaming monster (mobSpawns); empty when it has none (it glides in its idle). */
   walk: ParsedAnimation[]
+  /** Its talking jaw (mou4: one bone, a two-second open and close), laid over it while it speaks in a cutscene. */
+  mouth: ParsedAnimation[]
   /**
    * The file read as a small zone when it carries generators that run by
    * themselves: a Home Point crystal's glow and motes (model 51, `bind`),
@@ -93,7 +95,7 @@ async function loadLook(root: string, look: number | number[]): Promise<NpcModel
       if (spawns.length) effects = { ...zone, spawns }
     } catch { /* a model without effects */ }
     const walk = model.animations.filter(c => c.name.startsWith('wlk'))
-    return { model, idle: clipsForMotion(model.animations, null), walk, effects }
+    return { model, idle: clipsForMotion(model.animations, null), walk, mouth: model.animations.filter(c => c.name.startsWith('mou')), effects }
   }
   const [race, face, ...gear] = look
   const paths = {
@@ -108,10 +110,26 @@ async function loadLook(root: string, look: number | number[]): Promise<NpcModel
   if (!model.meshes.length) return null
   if (own) {
     const clips = parseAnimationDat(await window.ffxi.readDat(root, own))
-    return { model, idle: clips.filter(c => c.name.startsWith('idl')), walk: clips.filter(c => c.name.startsWith('wlk')), effects: null }
+    return { model, idle: clips.filter(c => c.name.startsWith('idl')), walk: clips.filter(c => c.name.startsWith('wlk')), mouth: clips.filter(c => c.name.startsWith('mou')), effects: null }
   }
   const moves = await loadMovementClips(root, race)
-  return { model, idle: moves?.idle ?? [], walk: moves?.walk ?? [], effects: null }
+  return { model, idle: moves?.idle ?? [], walk: moves?.walk ?? [], mouth: await raceMouth(root, race), effects: null }
+}
+
+const mouths = new Map<string, Promise<ParsedAnimation[]>>()
+
+/** A player race's talking jaw (mou4), from its race file (SKELETON_PATHS): NPCs dressed as one, and you. */
+export function raceMouth(root: string, race: number): Promise<ParsedAnimation[]> {
+  const key = root + '|' + race
+  let p = mouths.get(key)
+  if (!p) {
+    const path = SKELETON_PATHS[race]
+    p = path
+      ? window.ffxi.readDat(root, path).then(b => parseAnimationDat(b).filter(c => c.name.startsWith('mou'))).catch(() => [])
+      : Promise.resolve([])
+    mouths.set(key, p)
+  }
+  return p
 }
 
 /** Routines an NPC runs as it appears and stands (xim: efon and pop0 on spawn, @scd looped). */

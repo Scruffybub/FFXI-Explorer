@@ -126,9 +126,10 @@ export function poseSkeleton(
   animations: ParsedAnimation[],
   inverseBind: number[][],
   time: number,
+  overlay?: PoseOverlay,
 ): PoseResult {
   const boneCount = skeleton.bones.length
-  const localMats = localPose(skeleton, animations, time)
+  const localMats = localPose(skeleton, animations, time, overlay)
 
   // Cascade to world space. Bones are ordered parents-first, so a single
   // forward pass suffices.
@@ -154,10 +155,17 @@ export function poseSkeleton(
  * as three.js's Matrix4 elements (translation in 12..14), so glTF export
  * (lib/gltfExport) decomposes it directly.
  */
+/**
+ * Clips laid over the pose on their own clock, overwriting only the bones
+ * they drive: a talking jaw (the race's mou4) over whatever the body plays.
+ */
+export interface PoseOverlay { animations: ParsedAnimation[]; time: number }
+
 export function localPose(
   skeleton: ParsedSkeleton,
   animations: ParsedAnimation[],
   time: number,
+  overlay?: PoseOverlay,
 ): number[][] {
   const boneCount = skeleton.bones.length
 
@@ -171,11 +179,12 @@ export function localPose(
     )
   }
 
-  for (const anim of animations) {
+  const apply = (list: ParsedAnimation[], t: number) => {
+  for (const anim of list) {
     let j = 0, n = 0, j1 = 0
     if (anim.frameCount > 1) {
       const total = anim.frameCount - 1
-      const frame = ((time * anim.speed * 30) % total + total) % total
+      const frame = ((t * anim.speed * 30) % total + total) % total
       j = Math.floor(frame)
       n = frame - j
       j1 = Math.min(j + 1, total)
@@ -220,6 +229,9 @@ export function localPose(
       )
     }
   }
+  }
+  apply(animations, time)
+  if (overlay) apply(overlay.animations, overlay.time)
   return localMats
 }
 

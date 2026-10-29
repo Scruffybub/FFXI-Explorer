@@ -10,7 +10,7 @@ import { buildModel, type BuiltModel } from '../lib/modelBuild'
 import { invertRigidMatrix4, poseSkeleton, skinMeshes, type SkinTarget } from '../lib/skinning'
 import { clearNpcModels, loadNpcModel, npcNames, npcStations, sceneActors, type NpcModel } from '../lib/npcStations'
 import { mobSpawns, outAt, pointInRegion, regionHeight } from '../lib/mobSpawns'
-import { cutsceneMotion, cutsceneNpcPose, cutsceneStore } from '../lib/cutscene'
+import { cutsceneMotion, cutsceneNpcPose, cutsceneStore, cutsceneTalkTime } from '../lib/cutscene'
 
 /** Diagnostics: ?npcfx=<n> runs only the nth NPC effect set (__npcFx), ?npcfxdrop=a,b leaves those generators out. */
 const FXDBG = new URLSearchParams(window.location.search).get('npcfx')
@@ -100,6 +100,8 @@ interface Placed {
   facing: number
   /** The motion it plays now: its idle, or a monster's walk. */
   clips: ParsedAnimation[]
+  /** A cutscene line it speaks: its jaw's clock (the model's mou4 laid over its pose). */
+  talk?: number | null
   roam?: Roam
   /** A stationed NPC's post: its index (the id's low 12 bits, which cutscenes name it by) and where it stands. */
   post?: { index: number; at: [number, number, number]; facing: number; sceneOnly: boolean }
@@ -265,6 +267,8 @@ function followScene(npc: Placed): boolean {
   const clips = pose?.moving && model.walk.length ? model.walk : motion ? motion.clips : model.idle
   if (npc.clips !== clips) { npc.clips = clips; npc.posed = false }
   if (motion) { npc.t = motion.time; npc.since = MOTION_STEP }
+  npc.talk = pose && model.mouth.length ? cutsceneTalkTime(pose) : null
+  if (npc.talk !== null) npc.since = MOTION_STEP
   return pose ? !!pose.hidden : post.sceneOnly
 }
 
@@ -559,7 +563,8 @@ export function NpcStations({ root, zoneId, world, effectRange = null, npcs = tr
       npc.since += delta
       if (npc.posed && distance > SMOOTH_RANGE && npc.since < MOTION_STEP) continue
       npc.since %= MOTION_STEP
-      skinMeshes(npc.skins, poseSkeleton(skeleton, npc.clips, inverseBind, npc.t))
+      const jaw = npc.talk != null ? { animations: npc.template.model.mouth, time: npc.talk } : undefined
+      skinMeshes(npc.skins, poseSkeleton(skeleton, npc.clips, inverseBind, npc.t, jaw))
       for (const g of npc.geometries) g.getAttribute('position').needsUpdate = true
       npc.posed = true
     }

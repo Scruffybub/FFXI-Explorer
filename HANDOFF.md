@@ -4518,6 +4518,20 @@ rather than solved.
       - **Not yet:** talking mouths (`mou` motions / NpcSpeechFrame),
         0x63 (event entity animation by number), weather from 0x77,
         0x5D's fade time, music slots 2-7.
+    - **Talking mouths — built 2026-10-29.** Every model carries `mou4`
+      (one bone, the jaw: 31 frames at speed 0.5, a two-second open and
+      close) and `eye3` (two eyelid bones, a blink): standard NPC models in
+      their own file, player races in the race file (SKELETON_PATHS;
+      `raceMouth`). The speaker of a line (0x1D: the thread's actor; 0x2B
+      at 1; 0xB0 the listener at 6, which the game makes MouthIndex) talks
+      from the line's start for text length / 15 s (1-6 s) or until it's
+      read. `skinning.localPose/poseSkeleton` take an optional
+      `PoseOverlay` (clips on their own clock, applied after the pose,
+      overwriting only their bones): NpcStations and the avatar (`jaw`)
+      lay the jaw over idle, walk or action. Checked on Malene in close-up:
+      the mouth opens and closes while she speaks; silent, the bind pose is
+      the rest (the mouth is painted on the face). Not used yet: `eye3`
+      (blinks).
     - **Town interiors — added 2026-10-28** (found through stage 2: scenes
       in shops were black). Shop and house insides are separate files the
       game opens as you walk in (0x75 = XiZone::OpenIndoor(100 + n)). Each

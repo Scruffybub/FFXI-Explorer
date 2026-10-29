@@ -276,6 +276,11 @@ export function cutsceneMotion(pose: ActorPose): { clips: ParsedAnimation[]; tim
   }
   return { clips: seg.clips, time }
 }
+/** How long `pose` has been speaking its line (its jaw's clock), or null when it isn't. */
+export function cutsceneTalkTime(pose: ActorPose): number | null {
+  return current?.talkTime(pose) ?? null
+}
+
 /** Your character's motion now (cutsceneMotion), or null. */
 export function cutscenePlayerMotion(): { clips: ParsedAnimation[]; time: number } | null {
   const p = current?.poses.get(PLAYER)
@@ -517,15 +522,26 @@ export class CutsceneRun {
   }
 
   // ── Messages ──
-  private say(lineIndex: number, speaker: string | null) {
+  /** Who speaks the line on screen, and till when their jaw moves (the game's MouthIndex; it stops when the line is read). */
+  private talking: { actor: number; start: number; until: number } | null = null
+  /** The jaw's time for `pose` while it speaks, else null. */
+  talkTime(pose: ActorPose): number | null {
+    const t = this.talking
+    if (!t || this.now >= t.until || this.poses.get(t.actor) !== pose) return null
+    return this.now - t.start
+  }
+
+  private say(lineIndex: number, speaker: string | null, who?: number) {
     const text = this.r.lines[lineIndex] ?? ''
+    // A line takes about 15 characters a second to say; at least one cycle of the jaw, at most six seconds.
+    this.talking = who !== undefined ? { actor: who, start: this.now, until: this.now + Math.min(6, Math.max(1, text.length / 15)) } : null
     const [body, options] = text.split('\u0001')
     this.emit({ message: options !== undefined ? { speaker, text: body, choices: options.split('\n').filter(Boolean) } : { speaker, text } })
   }
   /** The player read the message. */
   advance() {
     const th = this.threads.find(t => t.waiting === 'read')
-    if (th) { th.waiting = null; this.emit({ message: null }) }
+    if (th) { th.waiting = null; this.talking = null; this.emit({ message: null }) }
   }
   /** The player picked choice `i`. */
   choose(i: number) {
@@ -751,10 +767,10 @@ export class CutsceneRun {
         th.waitUntil = this.now + Math.max(0, this.val(th, 1)) / FPS
         return 'yield'
       }
-      case 0x1d: this.say(this.val(th, 1), th.actor === PLAYER ? null : this.name(th.actor) ?? this.r.actorName); break
-      case 0x2b: this.say(this.val(th, 5), this.name(this.who(th, 1))); break
+      case 0x1d: this.say(this.val(th, 1), th.actor === PLAYER ? null : this.name(th.actor) ?? this.r.actorName, th.actor); break
+      case 0x2b: this.say(this.val(th, 5), this.name(this.who(th, 1)), this.who(th, 1)); break
       case 0x48: case 0x49: this.say(this.val(th, op === 0x48 ? 1 : 5), null); break
-      case 0xb0: if (!sub) this.say(this.val(th, 10), this.name(this.who(th, 2))); break
+      case 0xb0: if (!sub) this.say(this.val(th, 10), this.name(this.who(th, 2)), this.who(th, 6)); break
       case 0x23: th.pc += size; th.waiting = 'read'; return 'yield'
       case 0x24: this.say(this.val(th, 1), null); break
       case 0x25: case 0x7f: th.pc += size; th.waiting = 'choice'; return 'yield'
