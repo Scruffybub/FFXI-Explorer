@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
 import * as THREE from 'three'
 import { Html } from '@react-three/drei'
@@ -8,8 +8,9 @@ import type { GeneratorSpawn } from '../lib/ffxi-dat/types'
 import { ZoneEffects } from './WeatherParticles'
 import { buildModel, type BuiltModel } from '../lib/modelBuild'
 import { invertRigidMatrix4, poseSkeleton, skinMeshes, type SkinTarget } from '../lib/skinning'
-import { clearNpcModels, loadNpcModel, npcNames, npcStations, type NpcModel } from '../lib/npcStations'
+import { clearNpcModels, loadNpcModel, npcNames, npcStations, sceneActors, type NpcModel } from '../lib/npcStations'
 import { mobSpawns, outAt, pointInRegion, regionHeight } from '../lib/mobSpawns'
+import { cutsceneMotion, cutsceneNpcPose, cutsceneStore } from '../lib/cutscene'
 
 /** Diagnostics: ?npcfx=<n> runs only the nth NPC effect set (__npcFx), ?npcfxdrop=a,b leaves those generators out. */
 const FXDBG = new URLSearchParams(window.location.search).get('npcfx')
@@ -100,6 +101,8 @@ interface Placed {
   /** The motion it plays now: its idle, or a monster's walk. */
   clips: ParsedAnimation[]
   roam?: Roam
+  /** A stationed NPC's post: its index (the id's low 12 bits, which cutscenes name it by) and where it stands. */
+  post?: { index: number; at: [number, number, number]; facing: number; sceneOnly: boolean }
 }
 
 /** A monster's wandering: where it may go, where it is going, and when. */
@@ -243,6 +246,26 @@ function moveTo(npc: Placed, x: number, y: number, z: number, facing: number): v
   npc.group.rotation.y = facing
   npc.group.updateMatrix()
   npc.sphere.center.set(x, -y, -z)
+}
+
+/**
+ * Cutscenes -> Play in zone (lib/cutscene): while a scene has placed, turned
+ * or walked this NPC it stands where the scene says, walking when it walks;
+ * otherwise at its post. True while the scene hides it.
+ */
+function followScene(npc: Placed): boolean {
+  const post = npc.post!
+  const pose = cutsceneNpcPose(post.index)
+  const [x, y, z] = pose ? [pose.x, pose.y, pose.z] : post.at
+  const facing = pose ? pose.yaw : post.facing
+  if (x !== npc.at[0] || y !== npc.at[1] || z !== npc.at[2] || facing !== npc.facing) moveTo(npc, x, y, z, facing)
+  const model = npc.template.model
+  // Walking, its walk; an action (tlk0, thk1..), the action's motion at the scene's time; else its idle.
+  const motion = pose && !pose.moving ? cutsceneMotion(pose) : null
+  const clips = pose?.moving && model.walk.length ? model.walk : motion ? motion.clips : model.idle
+  if (npc.clips !== clips) { npc.clips = clips; npc.posed = false }
+  if (motion) { npc.t = motion.time; npc.since = MOTION_STEP }
+  return pose ? !!pose.hidden : post.sceneOnly
 }
 
 /** One frame of a monster's wandering: rest, pick somewhere, walk there. */
@@ -389,23 +412,32 @@ export function NpcStations({ root, zoneId, world, effectRange = null, npcs = tr
   const camera = useThree(st => st.camera)
 
   const showMonsters = monsters !== null
+  // While a scene plays here, its scene-only NPCs are placed too (hidden until it shows them). In another
+  // zone the scene opened (a flashback), the game clears everyone: only the event zone's actors, as the scene shows them.
+  const sceneHere = useSyncExternalStore(cutsceneStore.subscribe, () => { const s = cutsceneStore.get(); return !!s.request && s.sceneZone === zoneId })
+  const eventZone = useSyncExternalStore(cutsceneStore.subscribe, () => cutsceneStore.get().request?.zone.id ?? null)
+  const elsewhere = sceneHere && eventZone !== null && eventZone !== zoneId
   const worldRef = useRef(world)
   worldRef.current = world
   useEffect(() => {
     let cancelled = false
-    const stations = npcs ? npcStations(zoneId) : []
-    const mobs = showMonsters ? mobSpawns(zoneId) : { r: [] as number[][], m: [] as ReturnType<typeof mobSpawns>['m'] }
+    const from = elsewhere ? eventZone! : zoneId
+    const stations = !npcs ? [] : elsewhere
+      ? [...npcStations(from), ...sceneActors(from)].map(s => [...s, true] as const)
+      : [...npcStations(zoneId), ...(sceneHere ? sceneActors(zoneId).map(s => [...s, true] as const) : [])]
+    const mobs = showMonsters && !elsewhere ? mobSpawns(zoneId) : { r: [] as number[][], m: [] as ReturnType<typeof mobSpawns>['m'] }
     const templates = new Map<NpcModel, Template>()
     const all: Placed[] = []
     const failed: unknown[] = []
-    const names = npcNames(root, zoneId).catch(() => new Map<number, string>())
-    void Promise.all(stations.map(async ([index, x, y, z, facing, look]) => {
+    const names = npcNames(root, from).catch(() => new Map<number, string>())
+    void Promise.all(stations.map(async ([index, x, y, z, facing, look, sceneOnly]) => {
       const model = await loadNpcModel(root, look)
       if (cancelled) return
       if (!model) { failed.push([index, look]); return }
       let template = templates.get(model)
       if (!template) { template = makeTemplate(model); templates.set(model, template) }
       const npc = place(template, x, y, z, facing)
+      npc.post = { index, at: [x, y, z], facing: npc.facing, sceneOnly: !!sceneOnly }
       npc.name = (await names).get(index) ?? ''
       if (cancelled) return
       holder.add(npc.group)
@@ -488,7 +520,7 @@ export function NpcStations({ root, zoneId, world, effectRange = null, npcs = tr
       setPlaced([])
       clearNpcModels()
     }
-  }, [root, zoneId, holder, camera, npcs, showMonsters])
+  }, [root, zoneId, holder, camera, npcs, showMonsters, sceneHere, elsewhere])
 
   // Who is out changes with the hour; checked when it moves, not every frame.
   const hour = monsters?.hour ?? 12
@@ -504,6 +536,7 @@ export function NpcStations({ root, zoneId, world, effectRange = null, npcs = tr
     viewProjection.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse)
     frustum.setFromProjectionMatrix(viewProjection)
     for (const npc of placed) {
+      if (npc.post && followScene(npc)) { npc.group.visible = false; continue }
       let distance = npc.sphere.center.distanceTo(camera.position)
       if (npc.roam) {
         if (!npc.roam.active || npc.roam.lost) { npc.group.visible = false; continue }

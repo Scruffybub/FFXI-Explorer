@@ -6,7 +6,7 @@ import {
   DepthOfField, Autofocus,
 } from '@react-three/postprocessing'
 import * as THREE from 'three'
-import type { ParsedZone, ParsedDatFile, ZoneEnvRecord } from '../lib/ffxi-dat'
+import type { ParsedZone, ParsedDatFile, ParsedAnimation, ZoneEnvRecord } from '../lib/ffxi-dat'
 import { sampleSkyGradient, SYSTEM_SPAWN_DIR } from '../lib/ffxi-dat'
 import { sampleKeyFrames } from '../lib/ffxi-dat/GeneratorParser'
 import { buildModel, type BuiltModel } from '../lib/modelBuild'
@@ -38,6 +38,8 @@ import { NpcStations } from './NpcStations'
 import { setZoneMeshes } from '../lib/zoneExport'
 import { CameraPathPlayer } from './CameraPathPlayer'
 import { cameraPathStore } from '../lib/cameraPath'
+import { CutscenePlayer } from './CutscenePlayer'
+import { cutscenePlayerMotion, cutscenePlayerPose, cutsceneStore } from '../lib/cutscene'
 import type {
   LightingSettings, PointLightSettings, PostSettings, SceneSettings, SurfaceInfo, ToneMappingMode,
 } from '../lib/settings'
@@ -2705,9 +2707,36 @@ function FootstepCadence({ body, footsteps }: { body: React.RefObject<WalkBodySt
  * Model space is metres and the zone is thousands of units across, but they
  * share a scale: a 2-unit-tall character is right for a 2-unit eye height.
  */
+/**
+ * Cutscenes -> Play in zone: your character, where the scene puts you
+ * (lib/cutscene's player pose), walking when you walk. Hidden until the
+ * script has placed you. Zone space (Y down, facing angle a looking along
+ * cos a, -sin a) to the avatar's (world feet, facing along sin yaw, cos yaw).
+ */
+function CutsceneAvatar({ character, moves }: { character: ParsedDatFile & { footSound?: string | null }; moves: MovementClips | null }) {
+  const body = useRef<WalkBodyState>({ x: 0, y: 0, z: 0, yaw: 0, moving: false, running: false, grounded: true, terrain: 0 })
+  const holder = useRef<THREE.Group>(null)
+  useFrame(() => {
+    const p = cutscenePlayerPose()
+    if (holder.current) holder.current.visible = !!p && !p.hidden
+    if (!p) return
+    const b = body.current
+    b.x = p.x; b.y = -p.y; b.z = -p.z
+    b.yaw = Math.PI / 2 - p.yaw
+    b.moving = p.moving
+  }, -1)
+  return (
+    <group ref={holder} visible={false}>
+      <Avatar character={character} body={body} playing speed={1} motion={null} moves={moves} override={cutscenePlayerMotion} />
+    </group>
+  )
+}
+
 function Avatar({
-  character, body, playing, speed, motion, moves, footsteps,
+  character, body, playing, speed, motion, moves, footsteps, override,
 }: {
+  /** Cutscenes: a motion to play instead of the idle (clips and time), when standing. */
+  override?: () => { clips: ParsedAnimation[]; time: number } | null
   /** footSound: the feet's footstep sound suffix (characterModel). */
   character: ParsedDatFile & { footSound?: string | null }
   body: React.RefObject<WalkBodyState>
@@ -2819,9 +2848,12 @@ function Avatar({
     } else if (playing && b.moving) {
       time.current += delta * speed
     }
+    let at = time.current
+    const scene = !b.moving && override ? override() : null
+    if (scene?.clips.length) { play = scene.clips; at = scene.time }
     if (play.length === 0) return
 
-    const pose = poseSkeleton(character.skeleton, play, inverseBind, time.current)
+    const pose = poseSkeleton(character.skeleton, play, inverseBind, at)
     skinMeshes(built.skinTargets, pose)
 
     if (feet && footsteps && inner.current && state.current !== 'idle') {
@@ -3029,6 +3061,9 @@ export default function ZoneViewer({
   // Scene → Camera path: while a path plays its player owns the camera and the
   // controls step aside; each handover restarts them from where it left off.
   const cameraPath = useSyncExternalStore(cameraPathStore.subscribe, cameraPathStore.get)
+  // Cutscenes -> Play in zone owns the camera while it runs; handover remounts the controls after.
+  const cutscene = useSyncExternalStore(cutsceneStore.subscribe, cutsceneStore.get)
+  const handover = cameraPath.handover + cutscene.handover
   // Where the walking body is. Written by WalkCamera, read by Avatar.
   const walkBody = useRef<WalkBodyState>({ x: 0, y: 0, z: 0, yaw: 0, moving: false, running: false, grounded: false, terrain: 0 })
   const zoneUniforms = useRef<ZoneUniforms>({
@@ -5037,16 +5072,17 @@ export default function ZoneViewer({
           fixedUnits={scene.mapFixedScale ? scene.mapUnits : undefined}
           onScale={onMapScale}
         />
-      ) : cameraPath.playing ? null : hasCameraOverride && cameraPath.handover === 0 ? (
+      ) : cameraPath.playing || cutscene.request ? null : hasCameraOverride && handover === 0 ? (
         <CameraOrientation />
       ) : scene.cameraMode === 'orbit' ? (
-        <SmartOrbitControls key={cameraPath.handover} size={size} lookAt={(PICK || PICK_PREFAB.size > 0) && cameraPath.handover === 0 ? center : undefined} world={collisionWorld} center={center} />
+        <SmartOrbitControls key={handover} size={size} lookAt={(PICK || PICK_PREFAB.size > 0) && handover === 0 ? center : undefined} world={collisionWorld} center={center} />
       ) : scene.cameraMode === 'walk' ? (
         <WalkCamera world={collisionWorld} center={center} size={size} scene={scene} body={walkBody} />
       ) : (
-        <FlyCamera key={cameraPath.handover} center={center} size={size} onSpeedChange={onFlySpeedChange} keepPose={cameraPath.handover > 0} />
+        <FlyCamera key={handover} center={center} size={size} onSpeedChange={onFlySpeedChange} keepPose={handover > 0} />
       )}
       {!scene.mapView && <CameraPathPlayer name={zoneName} />}
+      {!scene.mapView && <CutscenePlayer zoneId={npcZone?.id ?? null} world={collisionWorld ?? null} />}
 
       {waterFocus && <CameraGoTo target={waterFocus} />}
       {CENSUS && <ProbeHook meshes={instancedMeshes} zoneData={zoneData} />}
@@ -5068,7 +5104,8 @@ export default function ZoneViewer({
         ))}
       </group>
 
-      {character && scene.cameraMode === 'walk' && (
+      {character && cutscene.request && <CutsceneAvatar character={character} moves={characterMoves} />}
+      {character && scene.cameraMode === 'walk' && !cutscene.request && (
         <Avatar
           character={character}
           body={walkBody}

@@ -131,10 +131,18 @@ export class ZoneMusicPlayer {
     zoneId: number,
     onStatus: (s: MusicStatus) => void,
   ): Promise<void> {
+    return this.playTrack(root, ambientTrackForZone(zoneId), onStatus)
+  }
+
+  /** A track by number (a cutscene's own music, op 0x5C), or silence for null. */
+  async playTrack(
+    root: string,
+    track: number | null,
+    onStatus: (s: MusicStatus) => void,
+  ): Promise<void> {
     this.stop()
     const gen = this.generation
 
-    const track = ambientTrackForZone(zoneId)
     if (track === null) { onStatus({ state: 'silent' }); return }
 
     onStatus({ state: 'loading', track })

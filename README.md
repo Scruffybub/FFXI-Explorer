@@ -75,6 +75,16 @@ pre-rendered opening movie with its soundtrack, seekable to any frame.
 **Events** reads every zone's scripts: each NPC's conversations and the zone's
 own cutscenes, step by step, with who says what, the choices you're offered and
 where each answer leads, waits, music, camera shots and actor actions.
+**Play in zone** runs an event in its zone: the message windows (in your
+chosen window style), your choices, the waits, and the game's own camera shots
+and fades. The characters take their places, turn and walk as the scene says, you
+included (in the character you built), and flashbacks go where they happen, in
+their sepia tone. They talk, think, gesture and bow with the game's own motions,
+and the scene's music plays.
+
+**Town interiors** — the inside of the towns' shops and houses, which the game
+keeps in files of their own, load with the town, so you can walk into Gwill's
+shop or Malene's bedroom.
 
 **Zone sounds** — the sounds each zone places itself: waterfalls, rivers and
 canals, fountains, birds, insects, machinery. Each carries only as far as the

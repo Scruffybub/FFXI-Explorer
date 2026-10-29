@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { ZoneEntry } from '../lib/zoneList'
 import { npcNames } from '../lib/npcStations'
+import { requestCutscene } from '../lib/cutscene'
 import { actorLabel, parseDialogue, parseEventFile, readEvent, ZONE_ACTOR, type EventBlock, type Step } from '../lib/eventScript'
 
 interface EventEntry { id: number; offset: number; steps: Step[]; lines: number; scenes: number }
@@ -19,6 +20,7 @@ const actionName = (t: string) => ACTIONS.find(([re]) => re.test(t))?.[1] ?? t
 export default function EventReader({ root, zone }: { root: string; zone: ZoneEntry }) {
   const [actors, setActors] = useState<ActorEntry[] | null>(null)
   const [lines, setLines] = useState<string[]>([])
+  const [names, setNames] = useState<Map<number, string>>(new Map())
   const [error, setError] = useState<string | null>(null)
   const [chosen, setChosen] = useState<{ actor: ActorEntry; event: EventEntry } | null>(null)
   const [all, setAll] = useState(false)
@@ -50,7 +52,7 @@ export default function EventReader({ root, zone }: { root: string; zone: ZoneEn
         if (!live) return
         // The zone's scenes first, then the NPCs by name.
         list.sort((a, b) => (a.actor === ZONE_ACTOR ? -1 : b.actor === ZONE_ACTOR ? 1 : a.name.localeCompare(b.name)))
-        setLines(text); setActors(list)
+        setLines(text); setNames(names); setActors(list)
         const first = list.find(a => a.events.some(e => e.lines))
         const ev0 = first?.events.find(e => e.lines)
         if (first && ev0) setChosen({ actor: first, event: ev0 })
@@ -101,6 +103,14 @@ export default function EventReader({ root, zone }: { root: string; zone: ZoneEn
           <>
             <div className="event-script-head">
               <h3>{chosen.actor.name} · Event {chosen.event.id}</h3>
+              <button
+                className="place-btn event-play"
+                title="Open the zone and play this event there: its messages, choices, waits, camera shots and fades. Actors don't move yet."
+                onClick={() => requestCutscene({
+                  root, zone, block: chosen.actor.block, blocks: actors.map(a => a.block), eventId: chosen.event.id, offset: chosen.event.offset,
+                  lines, names, actorName: chosen.actor.name,
+                })}
+              >Play in zone</button>
               <label className="event-toggle"><input type="checkbox" checked={!quiet} onChange={e => setQuiet(!e.target.checked)} /> Show every step</label>
             </div>
             <Script steps={chosen.event.steps} lines={lines} actor={chosen.actor} nameOf={nameOf} quiet={quiet} />

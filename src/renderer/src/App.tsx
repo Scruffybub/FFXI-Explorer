@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
+import { useState, useEffect, useMemo, useCallback, useRef, useSyncExternalStore } from 'react'
 import { ZONES, type ZoneEntry } from './lib/zoneList'
 import { expansionFor } from './lib/zoneExpansion'
 import { typicalWeather } from './lib/weatherTypes'
@@ -23,6 +23,10 @@ import { ZoneMusicPlayer, type MusicStatus } from './lib/zoneMusic'
 import { setSoundRoot } from './lib/footstepSounds'
 import { GpuSuggestion } from './components/GpuSuggestion'
 import { setRenderScale } from './lib/renderScale'
+import { cutsceneStore, setCutscenePlayerRace } from './lib/cutscene'
+import { mergeRooms, roomFileIds } from './lib/zoneRooms'
+import { fileIdPath } from './lib/fileTable'
+import { CutsceneOverlay } from './components/CutscenePlayer'
 
 const AO_QUALITY_KEY = 'ffxi-explorer.aoQuality'
 function savedAoQuality(): PostSettings['aoQuality'] {
@@ -76,18 +80,28 @@ export default function App() {
     setMusicStatusRaw(s)
   }, [])
   const musicPlayer = useRef<ZoneMusicPlayer | null>(null)
+  // A cutscene's own music (op 0x5C) and its volume (0x5D), while one runs.
+  const sceneMusic = useSyncExternalStore(cutsceneStore.subscribe, () => cutsceneStore.get().sceneMusic)
+  const sceneVolume = useSyncExternalStore(cutsceneStore.subscribe, () => cutsceneStore.get().sceneVolume)
   // Volume rides the gain node directly, so dragging the slider does not
   // reload or restart the track.
   useEffect(() => {
-    musicPlayer.current?.setVolume(music.enabled ? music.volume : 0)
-  }, [music.enabled, music.volume])
+    musicPlayer.current?.setVolume(sceneMusic !== null ? music.volume * sceneVolume : music.enabled ? music.volume : 0)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [music.enabled, music.volume, sceneVolume])
 
   // One track per zone. Keyed on the zone id rather than the parsed data, so
-  // re-parsing the same zone does not restart the music from the top.
+  // re-parsing the same zone does not restart the music from the top. A
+  // cutscene's own music (op 0x5C) plays while it runs, zone music on or off.
   useEffect(() => {
     if (!ffxiPath || !selected) return
     if (!musicPlayer.current) musicPlayer.current = new ZoneMusicPlayer()
     const player = musicPlayer.current
+    if (sceneMusic !== null) {
+      player.setVolume(music.volume * sceneVolume)
+      void player.playTrack(ffxiPath, sceneMusic, setMusicStatus)
+      return
+    }
     if (!music.enabled) {
       player.stop()
       setMusicStatus({ state: 'silent' })
@@ -95,7 +109,8 @@ export default function App() {
     }
     player.setVolume(music.volume)
     void player.playZone(ffxiPath, selected.id, setMusicStatus)
-  }, [ffxiPath, selected?.id, music.enabled])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ffxiPath, selected?.id, music.enabled, sceneMusic])
 
   useEffect(() => () => { musicPlayer.current?.dispose() }, [])
 
@@ -129,6 +144,9 @@ export default function App() {
       .catch(() => { if (!cancelled) setCharacter(null) })
     return () => { cancelled = true }
   }, [ffxiPath, charSpec])
+
+  // Cutscenes: your emotes come from your race's files.
+  useEffect(() => { setCutscenePlayerRace(charSpec.race) }, [charSpec.race])
 
   // ?census=1: set the character (__setSpec) and read which files it loaded (__character).
   useEffect(() => {
@@ -322,6 +340,21 @@ export default function App() {
         return
       }
 
+      // A town's shop and house interiors are files of their own (lib/zoneRooms).
+      // ?census=1&norooms=1 leaves them out, to compare.
+      const roomIds = new URLSearchParams(window.location.search).has('norooms') ? [] : roomFileIds(zone.id)
+      if (roomIds.length) {
+        setLoad({ status: 'loading', message: `Reading ${roomIds.length} interiors...` })
+        const rooms: ParsedZone[] = []
+        for (const id of roomIds) {
+          try {
+            const rel = await fileIdPath(ffxiPath, id)
+            if (rel) rooms.push(parseZoneFile(await window.ffxi.readDat(ffxiPath, rel)))
+          } catch { /* a room that won't read is left out */ }
+        }
+        mergeRooms(parsed, rooms)
+      }
+
       setLoad({ status: 'ready', zone: parsed })
     } catch (err) {
       setLoad({
@@ -330,6 +363,46 @@ export default function App() {
       })
     }
   }, [ffxiPath])
+
+  // Cutscenes -> Events -> Play in zone: open the event's zone with its NPCs standing.
+  const cutscene = useSyncExternalStore(cutsceneStore.subscribe, cutsceneStore.get)
+  useEffect(() => {
+    const r = cutscene.request
+    if (!r) return
+    setView('zones')
+    setScene(s => (s.npcs ? s : { ...s, npcs: true }))
+    if (selected?.id !== r.zone.id) void loadZone(r.zone)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cutscene.request])
+  // A scene that moves to another zone (a flashback) opens it, and its own again on the way back.
+  useEffect(() => {
+    const id = cutscene.sceneZone
+    if (id === null || !cutscene.request || id === selected?.id) return
+    const zone = ZONES.find(z => z.id === id)
+    if (zone) void loadZone(zone)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cutscene.sceneZone])
+  // The hour a scene sets (op 0x77), and the zone's own back after.
+  const hourBefore = useRef<number | null>(null)
+  useEffect(() => {
+    const h = cutscene.sceneHour
+    if (h !== null) {
+      if (hourBefore.current === null) hourBefore.current = scene.timeOfDay
+      setScene(s => ({ ...s, timeOfDay: h }))
+    } else if (hourBefore.current !== null) {
+      const back = hourBefore.current
+      hourBefore.current = null
+      setScene(s => ({ ...s, timeOfDay: back }))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cutscene.sceneHour])
+  // The panels step aside while a scene plays and come back as they were.
+  const panelsBefore = useRef<boolean | null>(null)
+  useEffect(() => {
+    if (cutscene.request && panelsBefore.current === null) { panelsBefore.current = uiHidden; setUiHidden(true) }
+    if (!cutscene.request && panelsBefore.current !== null) { setUiHidden(panelsBefore.current); panelsBefore.current = null }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cutscene.request])
 
   // Deep link: index.html?zone=<id>[&preset=<n>] opens straight into a zone.
   useEffect(() => {
@@ -728,6 +801,7 @@ export default function App() {
             zoneName={selected?.name}
           />
         )}
+        {load.status === 'ready' && <CutsceneOverlay />}
 
         {load.status === 'ready' && (
           <div className="view-tools">

@@ -74,7 +74,7 @@ attribution of the format research.
 `resources/zone-weather.json`, `resources/spell-effects.json`,
 `resources/ability-effects.json`, `resources/mob-skill-effects.json`,
 `resources/mob-skill-lists.json`, `resources/pet-skill-effects.json`,
-`resources/npc-stations.json`, `resources/mob-spawns.json`
+`resources/npc-stations.json`, `resources/npc-actors.json`, `resources/mob-spawns.json`
 
 Built by `scripts/build-item-names.cjs`, `scripts/build-zone-music.cjs`,
 `scripts/build-zone-weather.cjs`, `scripts/build-spell-effects.cjs` and
@@ -129,7 +129,7 @@ independently. This notice records that research.
 
 ## Event scripts — XiEvents (AGPL-3.0, reference only)
 
-**Files:** `src/renderer/src/lib/eventScript.ts`
+**Files:** `src/renderer/src/lib/eventScript.ts`, `cutscene.ts` (the event scheduler file numbers, where a choice's answer goes), `zoneRooms.ts` (that events open interiors as zone files)
 
 The layout of the zones' event files and their dialogue files, the size of
 each event opcode and what it does, and how event operands are read were

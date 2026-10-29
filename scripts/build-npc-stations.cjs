@@ -14,6 +14,11 @@
  * 0,0,1.5), doors, lifts and ships (the zone's own models), and the
  * invisible "???" markers (models 50 and 52: one mesh named "toum").
  *
+ * Also resources/npc-actors.json, the same for the NPCs left out for their
+ * status (cutscene-only and hidden ones with a position and a look): the
+ * actors only a scene shows (Cutscenes -> Play in zone), such as the
+ * children in Bastok Markets' puppet flashback.
+ *
  * Output: { "<zone id>": [[index, x, y, z, facing, look], ..] }. index is the
  * NPC id's low 12 bits, facing 0-255 a full turn, look a model number or
  * [race, face, head, body, hands, legs, feet, main, sub, ranged].
@@ -30,6 +35,7 @@ const INVISIBLE = new Set([50, 52])
 const SLOTS = ['head', 'body', 'hands', 'legs', 'feet', 'main', 'sub', 'ranged']
 
 const out = {}
+const actors = {}
 const skipped = {}
 const skip = why => { skipped[why] = (skipped[why] || 0) + 1 }
 for (const zone of fs.readdirSync(dir).sort()) {
@@ -40,7 +46,8 @@ for (const zone of fs.readdirSync(dir).sort()) {
     const id = Number(key)
     const look = e.render?.look
     if (!e.at) { skip('no position'); continue }
-    if (!SHOWN.has(e.status)) { skip('status ' + (e.status ?? 'none')); continue }
+    const shown = SHOWN.has(e.status)
+    if (!shown) skip('status ' + (e.status ?? 'none'))
     let l
     if (look?.type === 'standard') {
       if (INVISIBLE.has(look.model)) { skip('invisible marker'); continue }
@@ -49,7 +56,7 @@ for (const zone of fs.readdirSync(dir).sort()) {
       l = [look.race, look.face, ...SLOTS.map(s => (look[s] ?? 0) & 0xfff)]
     } else { skip('look ' + look?.type); continue }
     const [x, y, z, rot = 0] = e.at
-    ;(out[(id >> 12) & 0xfff] ??= []).push([id & 0xfff, x, y, z, rot, l])
+    ;((shown ? out : actors)[(id >> 12) & 0xfff] ??= []).push([id & 0xfff, x, y, z, rot, l])
   }
 }
 
@@ -58,3 +65,6 @@ fs.writeFileSync(target, JSON.stringify(out))
 const count = Object.values(out).reduce((n, v) => n + v.length, 0)
 console.log(count, 'NPCs in', Object.keys(out).length, 'zones,', fs.statSync(target).size, 'bytes')
 console.log('skipped', JSON.stringify(skipped))
+const actorsFile = path.join(__dirname, '..', 'resources', 'npc-actors.json')
+fs.writeFileSync(actorsFile, JSON.stringify(actors))
+console.log(Object.values(actors).reduce((n, v) => n + v.length, 0), 'scene-only actors,', fs.statSync(actorsFile).size, 'bytes')

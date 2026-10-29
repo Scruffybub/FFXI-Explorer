@@ -4391,6 +4391,150 @@ rather than solved.
       timing in the zone: message windows, waits, fades, the camera opcodes.
       (3) Actors: NPCs and your character moving, turning, playing motions,
       effects. (4) Schedulers for the big scripted scenes.
+    - **Play in zone (stage 2) — built 2026-10-28.** Events → **Play in
+      zone** opens the zone (NPCs on, panels hidden, both restored after) and
+      runs the script: `lib/cutscene.ts` (store + `CutsceneRun` VM),
+      `components/CutscenePlayer.tsx` (`CutscenePlayer` in the Canvas drives
+      the camera; `CutsceneOverlay` = fade, message window in the Classic
+      look's window art, choices; Enter/Space, 1-9, Esc). ZoneViewer drops
+      its controls while `cutscene.request` is set; `handover` remounts them.
+      - **VM:** real control flow (if kinds 0-9 jump on their test, kind 0
+        falls through on equal; 0x3E bit test; 0x1A/0x1B call stack; 0x00
+        and 0x21 end). Work vars in a Map, unset = 0, so server-state
+        branches take the first path. Choice answer -> zone var 0 (4096),
+        as the game's 0x25/0x7F. 0x44 "actor here?" = yes. Waits 0x1C in
+        frames/60. Backward jumps > 20,000 = a loop on server state: ends
+        with a note. Clock = frame time capped at 0.1 s/frame.
+      - **Schedulers (found this stage):** 0x45 loads file 30704 + n
+        (n >= 600: +39643, >= 300: +25937); kin 0x62 5012, 0x9F 51183,
+        0xBB 56685, 0xC5 67355, 0xCD 70435, 0xD0 70691, 0xD5 102449 (no
+        adjustment). Those files: an `evte` folder of type 6 **cameras** and
+        type 7 **schedulers**. Scheduler commands (same layout as effect
+        routines) **start, then hold for their delay**: the delays sum to
+        the header's length (1dkn: 0+0+30+20+0+30 = 80), so delay is the
+        gap *after* a command. (EffectViewer applies delay *before*; worth
+        checking against spells.) Op 0x04 = run camera <name> for duration;
+        0x0F = screen fade to RGBA over duration (0x80 = 1.0: fdo1 0,0,0,80
+        black; fdi1 80,80,80,0 clear). 0x0E (blon/1dkn) and 0x10 (ovl*)
+        not used yet. 0x2C/0x2D/0x5B/0x66 start a loaded scheduler by name;
+        0x50-0x55 and the 15-byte kin (tag at 11) stop / wait for it.
+      - **Camera block:** 16 bytes, u32 key count, 12 bytes, then 48-byte
+        keys: eye xyz + lens, target xyz + 0, time 0-1. Zone coords (Y
+        down) -> scene (x, -y, -z). Catmull-Rom between keys; lens -> FOV
+        = 2 atan(224 / lens) (350 -> 65 deg, 868 -> 29): **an estimate**,
+        not checked against the game.
+      - **NPC conversations** have no cameras: the camera frames the NPC's
+        face from 3.2 out along its facing, swung up to 80 deg either way or
+        behind until a ray finds 2.5 clear (`clearView`).
+      - **Verified:** Bastok Markets 243 (Gwill's shop, game camera shots,
+        fades), 439 (60+ lines, choice 2 took its own branch), Malene 330.
+      - **Not yet (stage 3):** actors don't move/turn/animate (0x37 places,
+        0x4A/0x4B/0x79 turn, 0x1F/0x31/0x5A walk, 0x5B motions), the player
+        isn't there, 0x5C music isn't played.
+    - **Actors (stage 3a) — built 2026-10-29.** `CutsceneRun` is now
+      threaded: one `Thread` per requested event, each with its own pc,
+      call stack, locals (<80), waits and walk speed; zone vars, messages,
+      camera and fades shared. 0x27 = ReqSet (start actor's event `tag` =
+      its index in the actor's event list, priority = byte 1), 0x28/0x29
+      start and wait for it. One thread per actor runs at a time: lowest
+      priority number, then oldest (the game's ReqStack; the event itself
+      is 16). The requested actor's script is its own block (`blocks` now
+      in the request); the player's is the zone block.
+      - **Poses** (`ActorPose`, zone space): 0x36/0x37 place (x, z, y in
+        thousandths; facing 4096ths) snapped to the collision floor nearest
+        (the game's VCalibrate); 0x39/0x4B facing; 0x1E/0x4A/0x79 face
+        another (atan2(-dz, dx)); 0x1F/0x31/0x5A walk (sub 0 goal, sub 1
+        waits), speed 0x32 x 0.1 (default 4); 0x3A/0x3B read back; live
+        values 0x7F00../0x7F80... Facing angle a looks along (cos a, -sin a)
+        in zone x/z, the same as the stations' 0-255 facing.
+      - **Who:** 0x7FFFFFF8 = the thread's own actor; F0/C0/F9 = you
+        (PLAYER). NpcStations follows `cutsceneNpcPose(index)` (walk clips
+        while moving, home after); ZoneViewer's `CutsceneAvatar` draws your
+        built character from `cutscenePlayerPose()` (yaw = PI/2 - a).
+      - **Hide flag** 0x22 (own actor) / 0x4E (named), bit 17: a flashback
+        hides you. **Scene-only NPCs:** `resources/npc-actors.json` (built
+        by build-npc-stations.cjs from the same LSB YAML: the NPCs left out
+        for their status, 5,297) load only while a scene plays there,
+        hidden until the scene shows (0x4E 0), places or walks them.
+      - **Other zones:** 0x34/0x35 open zone n for the scene (439's
+        flashback is in Aht Urhgan Whitegate, back with 0x35 235): store
+        `sceneZone`, App loads it, the thread waits until CutscenePlayer
+        mounts there (`zoneReady`). The clock now lives in the run
+        (`tick(dt)`). In the other zone only the event zone's NPCs/actors
+        are placed (the game deletes all actors on 0x34), no monsters.
+        0x77 sets the hour (App restores it after), 0x78 clears it.
+      - **Screen colour = a multiplier:** 0x0F's RGBA multiplies the
+        picture (0x80 = x1; alpha = strength): fade-out x0, fade-in x1,
+        "sepi" (the flashback) x(1.28, 1.03, 0.78). Done as an SVG
+        feColorMatrix on the zone canvas (CSS filter) while not x1.
+      - **NPC conversations:** you stand 1.8 in front of the NPC, the first
+        direction round it clear by a ray; framings tried in order: over
+        your shoulder, side-on two-shots; first with a clear line wins.
+        Tests use the **drawn zone meshes both ways**, not the collision:
+        rooms' furniture isn't in the zone's collision, and walls are
+        one-sided. The scene waits for the meshes to be drawn once
+        (their world matrices) before framing.
+      - **Verified:** 243 (Gwill turns to you; Michea and Dalzakk walk in
+        and about, 26 lines), 439 (you hidden in the flashback, the kids
+        and young Shamarhaan in Whitegate at 18:00 in sepia, back to
+        Bastok, ends), Malene 330 (over-the-shoulder in her bedroom).
+      - **Not yet (3b):** motions (0x5B event motions, 0x63, 0x6E emotes,
+        talking mouths, tlk/thk gestures), 0x5C music, weather from 0x77.
+    - **Motions, emotes, music (stage 3b) — built 2026-10-29.**
+      - **Actions** (`CutsceneRun.act`): XiActor::SetAction(tag) = the
+        scheduler `tag` from the actor's motion files (else any loaded
+        file); its op 0x05 commands play motions `abc?` = every clip named
+        abc + a body-part digit in that file, each starting and holding for
+        its delay (frames). 0x05 args: name, 0, f32 1.0 (speed), f32 1.0,
+        u32 blend (20/30), u16, u16 at +22: 1 = keeps going (loops), 0 =
+        plays once; after an action's last 0-motion the actor goes back to
+        idle. Verified: Gwill's thk1 = thk0 (hand to chin) then th10 (ease
+        back) over ~3 s, as scheduled. `cutsceneMotion(pose)` gives clips +
+        time; NpcStations and the avatar (`override`) play them.
+      - **Motion files:** 0x5B n -> n < 512: +32104, < 1024: +49135,
+        < 2048: +56345, < 3072: +59739, else +66339 (XiEvents). 0x66 n
+        ("TPC" = the player-race motions; files `mot_` with pc../tlk..):
+        **32712 + n** (found by scanning all 4,024 `mot_` files and testing
+        193 observed race|n|tags cases: n already holds the race, Hume M
+        0-9, Hume F 10-19, Elvaan M 20-29, Elvaan F 30-39, Taru 40-49,
+        Mithra 50-59, Galka 60-69; 109 fully, 43 partly explained). Old
+        table 32360 + 2n (+1) loaded too as a fallback. Not found: n >= 70
+        (those files are empty placeholders; other 210-file runs at 61241,
+        87825, 102239 don't fill them). The server fills many n (locals
+        < 8 = event params), so they read 0 here: Hume male sets.
+      - **0x2C** actor action by tag (else a scene scheduler); 0x45 family
+        schedulers with motions act on the actor at 3; 0x50-0x52 and kin
+        stop an action.
+      - **Emotes 0x6E** (actor, n): the race's "Emote" files in
+        animation-paths.json, eight each (em00-em07: bow, point, salute x3,
+        kneel, laugh, cry / no, yes, wave, wave, welcome, glare, cheer,
+        clap / ...), **index = n - 1** (scripts use 1 most; Gulzapo's
+        "Greetings and well met" is a bow). NPC race from a player-race
+        look (look[0]); yours from the builder (`setCutscenePlayerRace`).
+      - **Music:** 0x5C sub 0/1 (the idle day/night slots) = the scene's
+        song -> `ZoneMusicPlayer.playTrack`, played even with zone music
+        off; 0x5D volume /127; the zone's music (or silence) after. 243
+        plays track 124.
+      - **Not yet:** talking mouths (`mou` motions / NpcSpeechFrame),
+        0x63 (event entity animation by number), weather from 0x77,
+        0x5D's fade time, music slots 2-7.
+    - **Town interiors — added 2026-10-28** (found through stage 2: scenes
+      in shops were black). Shop and house insides are separate files the
+      game opens as you walk in (0x75 = XiZone::OpenIndoor(100 + n)). Each
+      is zone geometry named r_<n><town> in zone coordinates. `lib/zoneRooms.ts`:
+      a file-id table per town (scan of the install for MZB files named
+      r_*, each group matched to the zone whose NPC posts fall in its rooms:
+      every group matched one zone; Selbina's rooms are named r_1s like
+      Southern San d'Oria's, hence ids not names). App.loadZone merges them
+      (placed meshes only, indices shifted; rooms' lamps/lights not
+      merged) and drops the outdoor `room*` stand-ins (room_a.. black boxes
+      in Bastok Markets, room01.. Mines, room-hanyou Mhaura), which
+      otherwise cut black shapes across the rooms. Bastok Markets: 14
+      rooms, 2,280 -> 3,885 placements, loads in ~2 s. `?norooms=1` skips
+      them to compare. **Known:** rooms that reach past the outdoor walls
+      show from outside (a wooden room under Southern San d'Oria's south
+      wall); the game draws a room only while you're in it. Next: per-room
+      visibility by camera position (rooms are batched with the zone now).
 - **Camera path — built 2026-10-26.** Panel → **Camera path** (closed by
   default). `lib/cameraPath.ts` (store, views, curve), `CameraPathPlayer`
   (in the zone Canvas: flies the camera, records), `CameraPathPanel`.

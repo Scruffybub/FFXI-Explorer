@@ -1209,3 +1209,31 @@ select {
 .ev-scene, .ev-camera, .ev-actor { color: var(--text); opacity: 0.8; }
 .ev-end { color: var(--muted); }
 .ev-other, .ev-unknown { font-family: monospace; font-size: 11px; opacity: 0.6; }
+.event-play { width: auto; padding: 5px 14px; margin-left: auto; }
+
+/* Cutscenes -> Play in zone: over the zone view. */
+.cutscene-overlay { position: absolute; inset: 0; z-index: 30; pointer-events: auto; }
+.cutscene-bar { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 12px; padding: 6px 8px 6px 14px; background: rgba(0, 0, 0, 0.55); border-radius: 8px; font-size: 12px; color: #ddd; }
+.cutscene-bar button { background: rgba(255, 255, 255, 0.12); border: 1px solid rgba(255, 255, 255, 0.25); color: #eee; border-radius: 6px; padding: 3px 10px; cursor: pointer; }
+.cutscene-message { position: absolute; left: 50%; bottom: 6%; transform: translateX(-50%); width: min(760px, 86%); background: rgba(10, 14, 30, 0.82); border: 1px solid rgba(220, 200, 150, 0.55); border-radius: 10px; padding: 12px 18px 14px; color: #f3efe4; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45); cursor: pointer; }
+.cutscene-message b { display: block; color: #e8c97a; font-size: 13px; margin-bottom: 4px; }
+.cutscene-message p { margin: 0; font-size: 15px; line-height: 1.5; white-space: pre-line; }
+.cutscene-message ol { margin: 8px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; }
+.cutscene-message ol button { width: 100%; text-align: left; background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.15); color: #f3efe4; border-radius: 6px; padding: 5px 10px; font-size: 14px; cursor: pointer; }
+.cutscene-message ol button:hover { border-color: #e8c97a; }
+.cutscene-next { position: absolute; right: 12px; bottom: 6px; font-size: 10px; color: #e8c97a; animation: cutscene-blink 1s infinite; }
+@keyframes cutscene-blink { 50% { opacity: 0.2; } }
+.cutscene-end { cursor: default; text-align: center; }
+.cutscene-end .place-btn { width: auto; margin-top: 10px; padding: 6px 18px; }
+/* Classic: the message window in the game's own window art and font. */
+:root[data-look='classic'] .cutscene-message {
+  background: var(--win-bg) repeat;
+  border: 6px solid transparent;
+  border-image-source: var(--win-frame);
+  border-image-slice: 24;
+  border-image-width: 24px;
+  border-image-repeat: stretch;
+  border-radius: 0;
+  padding: 14px 22px 16px;
+}
+:root[data-look='classic'][data-look-font='game'] .cutscene-message :is(p, b, button) { font-family: var(--ui-font); font-size: 16px; }

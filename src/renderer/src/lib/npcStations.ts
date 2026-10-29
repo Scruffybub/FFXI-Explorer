@@ -1,4 +1,5 @@
 import rawStations from '../../../../resources/npc-stations.json'
+import rawActors from '../../../../resources/npc-actors.json'
 import { parseAnimationDat, parseDatFile, parseZoneFile, SKELETON_PATHS, type ParsedAnimation, type ParsedDatFile, type ParsedZone } from './ffxi-dat'
 import { composeCharacter, loadMovementClips } from './characterModel'
 import { appearancePath, raceFilePath } from './equipTable'
@@ -38,6 +39,15 @@ import { clipsForMotion } from './motions'
 export type NpcStation = [number, number, number, number, number, number | number[]]
 
 const STATIONS = rawStations as unknown as Record<string, NpcStation[]>
+const ACTORS = rawActors as unknown as Record<string, NpcStation[]>
+
+/**
+ * The zone's scene-only NPCs (cutscene-only and hidden in LandSandBoat's
+ * data): hidden in the town, shown only when a scene shows them.
+ */
+export function sceneActors(zoneId: number): NpcStation[] {
+  return ACTORS[String(zoneId)] ?? []
+}
 
 export function npcStations(zoneId: number): NpcStation[] {
   return STATIONS[String(zoneId)] ?? []
