@@ -7,7 +7,7 @@ import type { ParsedAnimation, ParsedZone } from '../lib/ffxi-dat'
 import type { GeneratorSpawn } from '../lib/ffxi-dat/types'
 import { ZoneEffects } from './WeatherParticles'
 import { buildModel, type BuiltModel } from '../lib/modelBuild'
-import { invertRigidMatrix4, poseSkeleton, skinMeshes, type SkinTarget } from '../lib/skinning'
+import { blinkOverlay, invertRigidMatrix4, newBlinker, poseSkeleton, skinMeshes, type Blinker, type PoseOverlay, type SkinTarget } from '../lib/skinning'
 import { clearNpcModels, loadNpcModel, npcNames, npcStations, sceneActors, type NpcModel } from '../lib/npcStations'
 import { mobSpawns, outAt, pointInRegion, regionHeight } from '../lib/mobSpawns'
 import { cutsceneMotion, cutsceneNpcPose, cutsceneStore, cutsceneTalkTime } from '../lib/cutscene'
@@ -102,6 +102,8 @@ interface Placed {
   clips: ParsedAnimation[]
   /** A cutscene line it speaks: its jaw's clock (the model's mou4 laid over its pose). */
   talk?: number | null
+  /** Its blinks (the model's eye3 every few seconds). */
+  blinker: Blinker
   roam?: Roam
   /** A stationed NPC's post: its index (the id's low 12 bits, which cutscenes name it by) and where it stands. */
   post?: { index: number; at: [number, number, number]; facing: number; sceneOnly: boolean }
@@ -221,7 +223,7 @@ function place(template: Template, x: number, y: number, z: number, facing: numb
   group.matrixAutoUpdate = false
   // The zone's group turns Y and Z over; the sphere is tested in the world.
   const sphere = new THREE.Sphere(new THREE.Vector3(x, -y, -z), Math.max(template.built.radius * 1.5, 1))
-  return { template, group, geometries, skins, sphere, t: Math.random() * 10, posed: false, since: Math.random() * MOTION_STEP, name: '', at: [x, y, z], facing: group.rotation.y, clips: template.model.idle }
+  return { template, group, geometries, skins, sphere, t: Math.random() * 10, posed: false, since: Math.random() * MOTION_STEP, name: '', at: [x, y, z], facing: group.rotation.y, clips: template.model.idle, blinker: newBlinker() }
 }
 
 /**
@@ -421,14 +423,17 @@ export function NpcStations({ root, zoneId, world, effectRange = null, npcs = tr
   const sceneHere = useSyncExternalStore(cutsceneStore.subscribe, () => { const s = cutsceneStore.get(); return !!s.request && s.sceneZone === zoneId })
   const eventZone = useSyncExternalStore(cutsceneStore.subscribe, () => cutsceneStore.get().request?.zone.id ?? null)
   const elsewhere = sceneHere && eventZone !== null && eventZone !== zoneId
+  // Of the actors with no post, only the scene's cast (sceneCast) is loaded.
+  const cast = useSyncExternalStore(cutsceneStore.subscribe, () => cutsceneStore.get().cast)
+  const castOf = (z: number) => sceneActors(z).filter(s => s[4] !== -1 || cast.has(s[0]))
   const worldRef = useRef(world)
   worldRef.current = world
   useEffect(() => {
     let cancelled = false
     const from = elsewhere ? eventZone! : zoneId
     const stations = !npcs ? [] : elsewhere
-      ? [...npcStations(from), ...sceneActors(from)].map(s => [...s, true] as const)
-      : [...npcStations(zoneId), ...(sceneHere ? sceneActors(zoneId).map(s => [...s, true] as const) : [])]
+      ? [...npcStations(from), ...castOf(from)].map(s => [...s, true] as const)
+      : [...npcStations(zoneId), ...(sceneHere ? castOf(zoneId).map(s => [...s, true] as const) : [])]
     const mobs = showMonsters && !elsewhere ? mobSpawns(zoneId) : { r: [] as number[][], m: [] as ReturnType<typeof mobSpawns>['m'] }
     const templates = new Map<NpcModel, Template>()
     const all: Placed[] = []
@@ -524,7 +529,7 @@ export function NpcStations({ root, zoneId, world, effectRange = null, npcs = tr
       setPlaced([])
       clearNpcModels()
     }
-  }, [root, zoneId, holder, camera, npcs, showMonsters, sceneHere, elsewhere])
+  }, [root, zoneId, holder, camera, npcs, showMonsters, sceneHere, elsewhere, cast])
 
   // Who is out changes with the hour; checked when it moves, not every frame.
   const hour = monsters?.hour ?? 12
@@ -535,8 +540,9 @@ export function NpcStations({ root, zoneId, world, effectRange = null, npcs = tr
 
   const frustum = useMemo(() => new THREE.Frustum(), [])
   const viewProjection = useMemo(() => new THREE.Matrix4(), [])
-  useFrame(({ camera }, delta) => {
+  useFrame(({ camera, clock }, delta) => {
     if (!placed.length) return
+    const now = clock.elapsedTime
     viewProjection.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse)
     frustum.setFromProjectionMatrix(viewProjection)
     for (const npc of placed) {
@@ -563,8 +569,12 @@ export function NpcStations({ root, zoneId, world, effectRange = null, npcs = tr
       npc.since += delta
       if (npc.posed && distance > SMOOTH_RANGE && npc.since < MOTION_STEP) continue
       npc.since %= MOTION_STEP
-      const jaw = npc.talk != null ? { animations: npc.template.model.mouth, time: npc.talk } : undefined
-      skinMeshes(npc.skins, poseSkeleton(skeleton, npc.clips, inverseBind, npc.t, jaw))
+      // The face over the pose: the jaw while it speaks a cutscene line, the eyelids when it blinks.
+      const face: PoseOverlay[] = []
+      if (npc.talk != null) face.push({ animations: npc.template.model.mouth, time: npc.talk })
+      const blink = near ? blinkOverlay(npc.blinker, now, npc.template.model.blink) : null
+      if (blink) face.push(blink)
+      skinMeshes(npc.skins, poseSkeleton(skeleton, npc.clips, inverseBind, npc.t, face))
       for (const g of npc.geometries) g.getAttribute('position').needsUpdate = true
       npc.posed = true
     }

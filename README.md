@@ -79,9 +79,12 @@ where each answer leads, waits, music, camera shots and actor actions.
 chosen window style), your choices, the waits, and the game's own camera shots
 and fades. The characters take their places, turn and walk as the scene says, you
 included (in the character you built), and flashbacks go where they happen, in
-their sepia tone. They talk (their mouths move as they speak), think, gesture
+their sepia tone. They talk (their mouths move as they speak, and everyone blinks), think, gesture
 and bow with the game's own motions,
-and the scene's music plays.
+and the scene's music plays. Quest and mission scenes carry their names
+(5,541 of them, e.g. "Puppetmaster Blues · Aht Urhgan quest"), and **Only quest
+and mission scenes** narrows a zone's list to them. The game's files only number
+their scenes; the names come from LandSandBoat's server scripts.
 
 **Town interiors** — the inside of the towns' shops and houses, which the game
 keeps in files of their own, load with the town, so you can walk into Gwill's

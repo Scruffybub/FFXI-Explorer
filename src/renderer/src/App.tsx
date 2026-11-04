@@ -154,6 +154,8 @@ export default function App() {
     const w = window as unknown as Record<string, unknown>
     w.__character = character ? { loaded: character.loaded, failed: character.failed } : null
     w.__setSpec = (patch: Partial<CharacterSpec>) => setCharSpec(s => ({ ...s, ...patch }))
+    // The scene sweep (scripts/cutscene-sweep.cjs): a zone's events run headless.
+    w.__sweep = (root: string, zoneId: number) => import('./lib/cutsceneSweep').then(m => m.sweepZone(root, zoneId))
   }, [character])
 
   // Walk mode's idle, walk and run, for the character's race.

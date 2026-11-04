@@ -4530,8 +4530,56 @@ rather than solved.
       overwriting only their bones): NpcStations and the avatar (`jaw`)
       lay the jaw over idle, walk or action. Checked on Malene in close-up:
       the mouth opens and closes while she speaks; silent, the bind pose is
-      the rest (the mouth is painted on the face). Not used yet: `eye3`
-      (blinks).
+      the rest (the mouth is painted on the face).
+    - **Blinks — built 2026-10-29.** `eye3` (the eyelids, ~0.2-0.3 s) every
+      2-6 s at random (`skinning.blinkOverlay`, a `Blinker` per character):
+      every NPC within ANIMATE_RANGE, in town as in scenes, and the avatar
+      in walk mode and in scenes (your race's clips via `raceFace`, which
+      replaced raceMouth). Overlays are now a list (jaw and eyelids
+      together). Checked: Malene caught mid-blink in 2 of 40 frames, eyes
+      open between.
+    - **Scene sweep and scene names — 2026-10-30..11-02.** Real counts:
+      208,360 event entries are ~33,000 numbered events (zone, id; the same
+      id sits in several actors' blocks); the Events list's "scene" test
+      gives ~22,000 with lines. **Names:** `scripts/build-scene-names.cjs
+      <LSB checkout>` (quests/, missions/, zones/, globals/quests.lua and
+      missions.lua; facts only, credited) -> `resources/scene-names.json`,
+      5,541 (zone:event) -> title, quest|mission, log, NPC; missions over
+      quests over zone-script guesses (an event started within 12 lines of
+      a quest/mission test). `lib/sceneNames.ts`; EventReader shows them
+      and filters to them; the overlay title leads with the name.
+      **Sweep:** `scripts/cutscene-sweep.cjs <port> <outDir>` drives
+      `window.__sweep(root, zoneId)` (?census=1; `lib/cutsceneSweep.ts`):
+      every event headless (`CutsceneRun(request, probe)` keeps its zone,
+      hour and music to itself), messages read, first choice taken, 15
+      scene-minute cap; ~5 min for all 293 zones. rows.jsonl + report.json
+      (notes by kind, with named examples). Scored per scene (a one-off
+      scratch script over rows.jsonl, notes other than "ignored op"): 18,677 of 21,998 scenes with lines raise
+      nothing; quest/mission 3,379 of 4,545. Base-game logs 85-95% clean;
+      Wings of the Goddess 13/132, RoV 11/49, ToAU missions 32/75.
+      **Fixed through it:** `fileTable` read only VTABLE.DAT; each
+      expansion's ROMn/VTABLEn.DAT + FTABLEn.DAT holds its own (3,234 files,
+      no overlaps) — app-wide: NPC names in expansion zones, CoP cutscene
+      and motion files. Unplaced cutscene-only NPCs (LSB has a look, no
+      position: 11,608) are in npc-actors.json at 0,0,0 facing -1; a scene
+      loads only its cast (`sceneCast`: ids in the code of the event and
+      the events it starts, transitively; Whitegate has 288). Gestures:
+      an actor's own files (`ownLib`: a model NPC's model file holds
+      tlk0/hap0/dead..; a race NPC's race file holds corp/res0/cast..; plus
+      the motion files its own block loads, since an earlier event loads
+      them in game). Opcodes from XiEvents' notes: 0x0F-0x17 maths and
+      sin/cos, 0x3C/0x3D/0x40/0x41 bit words, 0x3F, 0x64, 0x6F short pause,
+      0x2A wait for an actor's priority, 0x47 moves you, 0x5E/0x6B back to
+      idle, 0x7B stops talking, 0x6C actor fade (waits; faded out = hidden);
+      `UNSEEN` lists the ones with nothing to show (not reported).
+      Missing gestures 44k -> 6k notes, missing actors 62k -> 12.8k.
+      **Open, by size:** "shown, not placed" (7,308 scene notes): the
+      server places these actors and LSB has no position — the scene runs
+      with them hidden (Xarcabard [S] "Prelude to a Storm": Lilisette
+      speaks, nobody visible). Missing actors (ids LSB lacks: Mog Garden,
+      dynamic ids). 0xB6 looks/gear, 0x59, 0x73/0xC4 spells, 0x4C/0x4D
+      doors, 0x7A, 0x80/0x70/0x76 yields, 32 zone ids we don't have (541..).
+      **A clean sweep row is not a correct-looking scene:** check by eye.
     - **Town interiors — added 2026-10-28** (found through stage 2: scenes
       in shops were black). Shop and house insides are separate files the
       game opens as you walk in (0x75 = XiZone::OpenIndoor(100 + n)). Each

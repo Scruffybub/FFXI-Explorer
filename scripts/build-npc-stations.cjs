@@ -17,7 +17,10 @@
  * Also resources/npc-actors.json, the same for the NPCs left out for their
  * status (cutscene-only and hidden ones with a position and a look): the
  * actors only a scene shows (Cutscenes -> Play in zone), such as the
- * children in Bastok Markets' puppet flashback.
+ * children in Bastok Markets' puppet flashback. With them, the NPCs with a
+ * look and no position at all (cutscene-only ones the scene places itself),
+ * at 0, 0, 0 with facing -1 for "unplaced": a scene loads one only when its
+ * scripts name it (lib/cutscene sceneCast).
  *
  * Output: { "<zone id>": [[index, x, y, z, facing, look], ..] }. index is the
  * NPC id's low 12 bits, facing 0-255 a full turn, look a model number or
@@ -45,8 +48,7 @@ for (const zone of fs.readdirSync(dir).sort()) {
   for (const [key, e] of Object.entries(npcs)) {
     const id = Number(key)
     const look = e.render?.look
-    if (!e.at) { skip('no position'); continue }
-    const shown = SHOWN.has(e.status)
+    const shown = !!e.at && SHOWN.has(e.status)
     if (!shown) skip('status ' + (e.status ?? 'none'))
     let l
     if (look?.type === 'standard') {
@@ -55,7 +57,8 @@ for (const zone of fs.readdirSync(dir).sort()) {
     } else if (look?.type === 'equipped') {
       l = [look.race, look.face, ...SLOTS.map(s => (look[s] ?? 0) & 0xfff)]
     } else { skip('look ' + look?.type); continue }
-    const [x, y, z, rot = 0] = e.at
+    const [x, y, z, rot = 0] = e.at ?? [0, 0, 0, -1]
+    if (!e.at) skip('unplaced (scene actor)')
     ;((shown ? out : actors)[(id >> 12) & 0xfff] ??= []).push([id & 0xfff, x, y, z, rot, l])
   }
 }

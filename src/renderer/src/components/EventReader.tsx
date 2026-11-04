@@ -3,8 +3,9 @@ import type { ZoneEntry } from '../lib/zoneList'
 import { npcNames } from '../lib/npcStations'
 import { requestCutscene } from '../lib/cutscene'
 import { actorLabel, parseDialogue, parseEventFile, readEvent, ZONE_ACTOR, type EventBlock, type Step } from '../lib/eventScript'
+import { sceneKind, sceneName, type SceneName } from '../lib/sceneNames'
 
-interface EventEntry { id: number; offset: number; steps: Step[]; lines: number; scenes: number }
+interface EventEntry { id: number; offset: number; steps: Step[]; lines: number; scenes: number; name: SceneName | null }
 interface ActorEntry { actor: number; name: string; block: EventBlock; events: EventEntry[] }
 
 /** Readable names for the common actions; the rest show their four-letter tag. */
@@ -16,6 +17,7 @@ const actionName = (t: string) => ACTIONS.find(([re]) => re.test(t))?.[1] ?? t
  * and the zone's own scenes, read as steps: who says what, the player's
  * choices, waits, camera and actor actions. Branches rest on the server's
  * state (quests, missions, the player's answers), so every path is listed.
+ * Quest and mission scenes carry their names (lib/sceneNames).
  */
 export default function EventReader({ root, zone }: { root: string; zone: ZoneEntry }) {
   const [actors, setActors] = useState<ActorEntry[] | null>(null)
@@ -25,6 +27,7 @@ export default function EventReader({ root, zone }: { root: string; zone: ZoneEn
   const [chosen, setChosen] = useState<{ actor: ActorEntry; event: EventEntry } | null>(null)
   const [all, setAll] = useState(false)
   const [quiet, setQuiet] = useState(true)
+  const [namedOnly, setNamedOnly] = useState(false)
 
   useEffect(() => {
     let live = true
@@ -45,6 +48,7 @@ export default function EventReader({ root, zone }: { root: string; zone: ZoneEn
               id: e.id, offset: e.offset, steps,
               lines: steps.filter(s => s.kind === 'say' || s.kind === 'choice').length,
               scenes: steps.filter(s => s.kind === 'scene' || s.kind === 'camera').length,
+              name: sceneName(zone.id, e.id),
             }
           })
           return { actor: block.actor, name, block, events }
@@ -73,8 +77,9 @@ export default function EventReader({ root, zone }: { root: string; zone: ZoneEn
   if (!actors) return <div className="placeholder"><h2>Reading {zone.name}…</h2></div>
 
   // 65534/65535 are default handlers: listed when they speak, or with everything.
-  const shown = actors.map(a => ({ ...a, events: a.events.filter(e => all || e.lines || (e.scenes && e.id < 0xfffe)) })).filter(a => a.events.length)
+  const shown = actors.map(a => ({ ...a, events: a.events.filter(e => (namedOnly ? e.name : all || e.lines || (e.scenes && e.id < 0xfffe))) })).filter(a => a.events.length)
   const total = actors.reduce((n, a) => n + a.events.length, 0)
+  const named = actors.reduce((n, a) => n + a.events.filter(e => e.name).length, 0)
 
   return (
     <div className="event-view">
@@ -82,6 +87,7 @@ export default function EventReader({ root, zone }: { root: string; zone: ZoneEn
         <h2>{zone.name}</h2>
         <p className="event-note">{total} events from {actors.length} sources. Only the server knows which a player sees when; every path is shown.</p>
         <label className="event-toggle"><input type="checkbox" checked={all} onChange={e => setAll(e.target.checked)} /> Include events with no lines</label>
+        <label className="event-toggle" title="Quest and mission scenes, named from LandSandBoat's server scripts (the game's files only number them)."><input type="checkbox" checked={namedOnly} onChange={e => setNamedOnly(e.target.checked)} /> Only quest and mission scenes ({named})</label>
         {shown.map(a => (
           <div key={a.actor} className="event-actor">
             <div className="event-actor-name">{a.name}</div>
@@ -91,7 +97,7 @@ export default function EventReader({ root, zone }: { root: string; zone: ZoneEn
                 className={chosen?.event === e ? 'active' : ''}
                 onClick={() => setChosen({ actor: a, event: e })}
               >
-                Event {e.id}
+                <div>Event {e.id}{e.name && <small title={sceneKind(e.name)}>{e.name.title}</small>}</div>
                 <span>{e.lines ? `${e.lines} line${e.lines === 1 ? '' : 's'}` : ''}{e.lines && e.scenes ? ' · ' : ''}{e.scenes ? 'scene' : ''}</span>
               </button>
             ))}
@@ -102,7 +108,7 @@ export default function EventReader({ root, zone }: { root: string; zone: ZoneEn
         {chosen ? (
           <>
             <div className="event-script-head">
-              <h3>{chosen.actor.name} · Event {chosen.event.id}</h3>
+              <h3>{chosen.actor.name} · Event {chosen.event.id}{chosen.event.name && <small>{chosen.event.name.title} · {sceneKind(chosen.event.name)}</small>}</h3>
               <button
                 className="place-btn event-play"
                 title="Open the zone and play this event there: its messages, choices, waits, camera shots and fades. Actors don't move yet."

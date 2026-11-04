@@ -68,6 +68,8 @@ export interface NpcModel {
   walk: ParsedAnimation[]
   /** Its talking jaw (mou4: one bone, a two-second open and close), laid over it while it speaks in a cutscene. */
   mouth: ParsedAnimation[]
+  /** Its eyelids (eye3: two bones, a blink), laid over it every few seconds. */
+  blink: ParsedAnimation[]
   /**
    * The file read as a small zone when it carries generators that run by
    * themselves: a Home Point crystal's glow and motes (model 51, `bind`),
@@ -95,7 +97,7 @@ async function loadLook(root: string, look: number | number[]): Promise<NpcModel
       if (spawns.length) effects = { ...zone, spawns }
     } catch { /* a model without effects */ }
     const walk = model.animations.filter(c => c.name.startsWith('wlk'))
-    return { model, idle: clipsForMotion(model.animations, null), walk, mouth: model.animations.filter(c => c.name.startsWith('mou')), effects }
+    return { model, idle: clipsForMotion(model.animations, null), walk, mouth: model.animations.filter(c => c.name.startsWith('mou')), blink: model.animations.filter(c => c.name.startsWith('eye')), effects }
   }
   const [race, face, ...gear] = look
   const paths = {
@@ -110,24 +112,30 @@ async function loadLook(root: string, look: number | number[]): Promise<NpcModel
   if (!model.meshes.length) return null
   if (own) {
     const clips = parseAnimationDat(await window.ffxi.readDat(root, own))
-    return { model, idle: clips.filter(c => c.name.startsWith('idl')), walk: clips.filter(c => c.name.startsWith('wlk')), mouth: clips.filter(c => c.name.startsWith('mou')), effects: null }
+    return { model, idle: clips.filter(c => c.name.startsWith('idl')), walk: clips.filter(c => c.name.startsWith('wlk')), mouth: clips.filter(c => c.name.startsWith('mou')), blink: clips.filter(c => c.name.startsWith('eye')), effects: null }
   }
   const moves = await loadMovementClips(root, race)
-  return { model, idle: moves?.idle ?? [], walk: moves?.walk ?? [], mouth: await raceMouth(root, race), effects: null }
+  const faceClips = await raceFace(root, race)
+  return { model, idle: moves?.idle ?? [], walk: moves?.walk ?? [], mouth: faceClips.mouth, blink: faceClips.blink, effects: null }
 }
 
-const mouths = new Map<string, Promise<ParsedAnimation[]>>()
+export interface RaceFace { mouth: ParsedAnimation[]; blink: ParsedAnimation[] }
+const faces = new Map<string, Promise<RaceFace>>()
 
-/** A player race's talking jaw (mou4), from its race file (SKELETON_PATHS): NPCs dressed as one, and you. */
-export function raceMouth(root: string, race: number): Promise<ParsedAnimation[]> {
+/** A player race's talking jaw (mou4) and blink (eye3), from its race file (SKELETON_PATHS): NPCs dressed as one, and you. */
+export function raceFace(root: string, race: number): Promise<RaceFace> {
   const key = root + '|' + race
-  let p = mouths.get(key)
+  let p = faces.get(key)
   if (!p) {
     const path = SKELETON_PATHS[race]
+    const none: RaceFace = { mouth: [], blink: [] }
     p = path
-      ? window.ffxi.readDat(root, path).then(b => parseAnimationDat(b).filter(c => c.name.startsWith('mou'))).catch(() => [])
-      : Promise.resolve([])
-    mouths.set(key, p)
+      ? window.ffxi.readDat(root, path).then(b => {
+        const clips = parseAnimationDat(b)
+        return { mouth: clips.filter(c => c.name.startsWith('mou')), blink: clips.filter(c => c.name.startsWith('eye')) }
+      }).catch(() => none)
+      : Promise.resolve(none)
+    faces.set(key, p)
   }
   return p
 }

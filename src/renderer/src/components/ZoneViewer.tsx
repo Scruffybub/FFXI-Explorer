@@ -10,7 +10,7 @@ import type { ParsedZone, ParsedDatFile, ParsedAnimation, ZoneEnvRecord } from '
 import { sampleSkyGradient, SYSTEM_SPAWN_DIR } from '../lib/ffxi-dat'
 import { sampleKeyFrames } from '../lib/ffxi-dat/GeneratorParser'
 import { buildModel, type BuiltModel } from '../lib/modelBuild'
-import { invertRigidMatrix4, poseSkeleton, skinMeshes, type PoseOverlay } from '../lib/skinning'
+import { blinkOverlay, invertRigidMatrix4, newBlinker, poseSkeleton, skinMeshes, type PoseOverlay } from '../lib/skinning'
 import { CollisionWorld } from '../lib/CollisionWorld'
 import type { MovementClips } from '../lib/characterModel'
 import { clipsForMotion } from '../lib/motions'
@@ -40,7 +40,7 @@ import { CameraPathPlayer } from './CameraPathPlayer'
 import { cameraPathStore } from '../lib/cameraPath'
 import { CutscenePlayer } from './CutscenePlayer'
 import { cutscenePlayerMotion, cutscenePlayerPose, cutsceneStore, cutsceneTalkTime } from '../lib/cutscene'
-import { raceMouth } from '../lib/npcStations'
+import { raceFace, type RaceFace } from '../lib/npcStations'
 import type {
   LightingSettings, PointLightSettings, PostSettings, SceneSettings, SurfaceInfo, ToneMappingMode,
 } from '../lib/settings'
@@ -2714,17 +2714,23 @@ function FootstepCadence({ body, footsteps }: { body: React.RefObject<WalkBodySt
  * script has placed you. Zone space (Y down, facing angle a looking along
  * cos a, -sin a) to the avatar's (world feet, facing along sin yaw, cos yaw).
  */
+/** Your race's face clips (jaw and eyelids), for the avatar: the race the Character builder chose. */
+function useRaceFace(root: string | null): RaceFace {
+  const race = useSyncExternalStore(cutsceneStore.subscribe, () => cutsceneStore.get().playerRace)
+  const [face, setFace] = useState<RaceFace>({ mouth: [], blink: [] })
+  useEffect(() => { if (root) void raceFace(root, race).then(setFace) }, [root, race])
+  return face
+}
+
 function CutsceneAvatar({ character, moves, root }: { character: ParsedDatFile & { footSound?: string | null }; moves: MovementClips | null; root: string | null }) {
   const body = useRef<WalkBodyState>({ x: 0, y: 0, z: 0, yaw: 0, moving: false, running: false, grounded: true, terrain: 0 })
   // Your jaw while you speak a line: your race's mou4.
-  const race = useSyncExternalStore(cutsceneStore.subscribe, () => cutsceneStore.get().playerRace)
-  const [mouth, setMouth] = useState<ParsedAnimation[]>([])
-  useEffect(() => { if (root) void raceMouth(root, race).then(setMouth) }, [root, race])
+  const face = useRaceFace(root)
   const jaw = useCallback(() => {
     const p = cutscenePlayerPose()
-    const t = p && mouth.length ? cutsceneTalkTime(p) : null
-    return t !== null ? { animations: mouth, time: t } : null
-  }, [mouth])
+    const t = p && face.mouth.length ? cutsceneTalkTime(p) : null
+    return t !== null ? { animations: face.mouth, time: t } : null
+  }, [face])
   const holder = useRef<THREE.Group>(null)
   useFrame(() => {
     const p = cutscenePlayerPose()
@@ -2737,18 +2743,20 @@ function CutsceneAvatar({ character, moves, root }: { character: ParsedDatFile &
   }, -1)
   return (
     <group ref={holder} visible={false}>
-      <Avatar character={character} body={body} playing speed={1} motion={null} moves={moves} override={cutscenePlayerMotion} jaw={jaw} />
+      <Avatar character={character} body={body} playing speed={1} motion={null} moves={moves} override={cutscenePlayerMotion} jaw={jaw} blink={face.blink} />
     </group>
   )
 }
 
 function Avatar({
-  character, body, playing, speed, motion, moves, footsteps, override, jaw,
+  character, body, playing, speed, motion, moves, footsteps, override, jaw, blink,
 }: {
   /** Cutscenes: a motion to play instead of the idle (clips and time), when standing. */
   override?: () => { clips: ParsedAnimation[]; time: number } | null
   /** Cutscenes: the jaw laid over the pose while you speak. */
   jaw?: () => PoseOverlay | null
+  /** Your race's eyelids (eye3): a blink every few seconds. */
+  blink?: ParsedAnimation[]
   /** footSound: the feet's footstep sound suffix (characterModel). */
   character: ParsedDatFile & { footSound?: string | null }
   body: React.RefObject<WalkBodyState>
@@ -2762,6 +2770,7 @@ function Avatar({
   const group = useRef<THREE.Group>(null)
   const inner = useRef<THREE.Group>(null)
   const time = useRef(0)
+  const blinker = useRef(newBlinker())
   const [built, setBuilt] = useState<BuiltModel | null>(null)
 
   // Build and dispose in one effect — the StrictMode trap documented in
@@ -2865,7 +2874,12 @@ function Avatar({
     if (scene?.clips.length) { play = scene.clips; at = scene.time }
     if (play.length === 0) return
 
-    const pose = poseSkeleton(character.skeleton, play, inverseBind, at, jaw?.() ?? undefined)
+    const face: PoseOverlay[] = []
+    const talking = jaw?.()
+    if (talking) face.push(talking)
+    const eyes = blink ? blinkOverlay(blinker.current, clock.elapsedTime, blink) : null
+    if (eyes) face.push(eyes)
+    const pose = poseSkeleton(character.skeleton, play, inverseBind, at, face)
     skinMeshes(built.skinTargets, pose)
 
     if (feet && footsteps && inner.current && state.current !== 'idle') {
@@ -3076,6 +3090,8 @@ export default function ZoneViewer({
   // Cutscenes -> Play in zone owns the camera while it runs; handover remounts the controls after.
   const cutscene = useSyncExternalStore(cutsceneStore.subscribe, cutsceneStore.get)
   const handover = cameraPath.handover + cutscene.handover
+  // Your race's eyelids, for the walking avatar's blinks.
+  const walkFace = useRaceFace(npcZone?.root ?? null)
   // Where the walking body is. Written by WalkCamera, read by Avatar.
   const walkBody = useRef<WalkBodyState>({ x: 0, y: 0, z: 0, yaw: 0, moving: false, running: false, grounded: false, terrain: 0 })
   const zoneUniforms = useRef<ZoneUniforms>({
@@ -5126,6 +5142,7 @@ export default function ZoneViewer({
           motion={characterMotion}
           moves={characterMoves}
           footsteps={footsteps}
+          blink={walkFace.blink}
         />
       )}
       {(scene.npcs || scene.monsters) && !scene.mapView && npcZone && (

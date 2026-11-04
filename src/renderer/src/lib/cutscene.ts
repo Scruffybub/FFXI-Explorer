@@ -1,11 +1,12 @@
 import * as THREE from 'three'
 import { fileIdPath } from './fileTable'
-import { opSize, ZONE_ACTOR, type EventBlock } from './eventScript'
+import { opSize, readEvent, ZONE_ACTOR, type EventBlock } from './eventScript'
 import type { ZoneEntry } from './zoneList'
-import { npcStations, sceneActors } from './npcStations'
+import { npcModelFileId, npcStations, sceneActors } from './npcStations'
 import type { CollisionWorld } from './CollisionWorld'
-import { parseAnimationDat, type ParsedAnimation } from './ffxi-dat'
+import { parseAnimationDat, SKELETON_PATHS, type ParsedAnimation } from './ffxi-dat'
 import animationPaths from '../../../../resources/animation-paths.json'
+import { sceneName } from './sceneNames'
 
 /**
  * Cutscenes -> Events -> Play in zone: runs an event script in its zone.
@@ -40,6 +41,21 @@ const LOADERS: Record<number, number> = { 0x45: 30704, 0x62: 5012, 0x9f: 51183, 
 /** 15-byte waits and stops: the scheduler's name is at 11 (the 13-byte ones keep it at 9). */
 const WAITS_15 = new Set([0x55, 0xa0, 0xa2, 0xbc, 0xc6, 0xce, 0xd1, 0xd6])
 const STOPS_15 = new Set([0x52, 0xa1, 0xa3, 0xbd, 0xc7, 0xcf, 0xd2, 0xd7])
+/**
+ * Instructions with nothing to show here (XiEvents' notes): the server told
+ * of progress (0x43, 0x47's answer), flags for the player's controls, the
+ * menu and render state (0x20, 0x2E, 0x2F, 0x30, 0x38, 0x42, 0x61, 0x7C,
+ * 0x84, 0x86, 0x90, 0x92, 0x94, 0xA4, 0xA5, 0xAB, 0xC0), the HUD (0x67,
+ * 0x68), map windows and markers (0x89-0x8B, 0x8D, 0xA8, 0xB8, 0xB9, 0xC8,
+ * 0xD4), sound volumes (0x69, 0x6A), wind (0x97), the music loader (0x9A),
+ * one-frame yields (0x26, 0x99), positions recalibrated (0xBA), rooms (0x75,
+ * merged on load), the language (0x9C) and game timers (0xA9, 0xC9). The
+ * sweep doesn't list these; the rest it does.
+ */
+const UNSEEN = new Set([
+  0x20, 0x26, 0x2e, 0x2f, 0x30, 0x38, 0x42, 0x43, 0x61, 0x67, 0x68, 0x69, 0x6a, 0x75, 0x7c, 0x84, 0x86, 0x89, 0x8a, 0x8b, 0x8d,
+  0x90, 0x92, 0x94, 0x97, 0x99, 0x9a, 0x9c, 0x9e, 0xa4, 0xa5, 0xa6, 0xa8, 0xa9, 0xab, 0xb8, 0xb9, 0xba, 0xc0, 0xc8, 0xc9, 0xd4,
+])
 /** Instructions run per frame at most, and backward jumps per event, before it's taken for a loop on server state. */
 const STEP_BUDGET = 2000
 const LOOP_LIMIT = 20000
@@ -100,8 +116,10 @@ interface State {
   /** The music the scene set (0x5C, the idle slots), and its volume 0-1 (0x5D). */
   sceneMusic: number | null
   sceneVolume: number
+  /** The unplaced scene actors the scene's scripts name (sceneCast): NpcStations loads these. */
+  cast: Set<number>
 }
-let state: State = { request: null, view: null, handover: 0, sceneZone: null, sceneHour: null, sceneMusic: null, sceneVolume: 1, playerRace: 1 }
+let state: State = { request: null, view: null, handover: 0, sceneZone: null, sceneHour: null, sceneMusic: null, sceneVolume: 1, playerRace: 1, cast: new Set() }
 
 /** App tells the scene which race you are (the Character builder's). */
 export function setCutscenePlayerRace(race: number): void {
@@ -122,10 +140,57 @@ export const cutsceneStore = {
 }
 let current: CutsceneRun | null = null
 
+/**
+ * What a run notes as it goes, for the scene sweep (lib/cutsceneSweep):
+ * whatever it couldn't read, find or follow. A run with a probe is headless:
+ * it keeps its zone, hour and music to itself instead of the app's store.
+ */
+export interface CutsceneProbe { note(kind: string, detail: string): void }
+const hex = (n: number) => '0x' + n.toString(16).padStart(2, '0')
+
 /** Asks the app to open the zone and play the event there. */
 export function requestCutscene(r: CutsceneRequest): void {
   current = null
-  set({ request: r, view: null, sceneZone: r.zone.id, sceneHour: null, sceneMusic: null, sceneVolume: 1 })
+  set({ request: r, view: null, sceneZone: r.zone.id, sceneHour: null, sceneMusic: null, sceneVolume: 1, cast: sceneCast(r) })
+}
+
+/**
+ * The unplaced scene actors (npc-actors.json, facing -1: cutscene-only NPCs
+ * the scene places itself) a scene's scripts name. A town has up to 288 of
+ * them, so only these are loaded: an actor counts when its id is in the
+ * code of the event, of the events it starts on other actors (0x27-0x29: the
+ * actor at 2, its event list's place at 6), and theirs in turn, or when the
+ * event is its own.
+ */
+export function sceneCast(r: CutsceneRequest): Set<number> {
+  const unplaced = new Set(sceneActors(r.zone.id).filter(s => s[4] === -1).map(s => s[0]))
+  const cast = new Set<number>()
+  if (!unplaced.size) return cast
+  const zoneBits = 0x1000 + r.zone.id
+  const seen = new Set<string>()
+  const todo: [EventBlock, number][] = [[r.block, r.offset]]
+  while (todo.length) {
+    const [block, offset] = todo.pop()!
+    const key = block.actor + ':' + offset
+    if (seen.has(key)) continue
+    seen.add(key)
+    if (block.actor >>> 12 === zoneBits && unplaced.has(block.actor & 0xfff)) cast.add(block.actor & 0xfff)
+    for (const s of readEvent(block, offset)) {
+      const b = s.bytes
+      for (let i = 1; i + 4 <= b.length; i++) {
+        const v = (b[i] | (b[i + 1] << 8) | (b[i + 2] << 16) | (b[i + 3] << 24)) >>> 0
+        if (v >>> 12 === zoneBits && unplaced.has(v & 0xfff)) cast.add(v & 0xfff)
+      }
+      if (s.op >= 0x27 && s.op <= 0x29 && b.length >= 7) {
+        let id = (b[2] | (b[3] << 8) | (b[4] << 16) | (b[5] << 24)) >>> 0
+        if (id === 0x7ffffff8) id = block.actor
+        const other = r.blocks.find(x => (isPlayer(id) ? x.actor === ZONE_ACTOR : x.actor === id))
+        const ev = other?.events[b[6]]
+        if (other && ev) todo.push([other, ev.offset])
+      }
+    }
+  }
+  return cast
 }
 /** The run, made when the zone is ready (the player calls it). */
 export function cutsceneRun(): CutsceneRun | null {
@@ -143,6 +208,8 @@ export function advanceCutscene(): void { current?.advance() }
 export function chooseCutscene(i: number): void { current?.choose(i) }
 
 const fileCache = new Map<number | string, Promise<Lib | null>>()
+/** Lets the parsed files go (the sweep, between zones). */
+export function clearCutsceneFiles(): void { fileCache.clear() }
 
 /** A file's cameras, schedulers (by name) and animations: event files, motion files, emote files (by path). */
 function loadEventFile(root: string, id: number | string): Promise<Lib | null> {
@@ -231,6 +298,8 @@ export interface ActorPose {
   hidden?: boolean
   /** A scene-only NPC; `flagged` once the script has set its hide flag itself. */
   sceneOnly?: boolean
+  /** One with no post of its own (npc-actors facing -1): unseen until the scene places it. */
+  unplaced?: boolean
   flagged?: boolean
   /** A player race (1-8) for an NPC dressed as one, or you: emotes come from the race's files. */
   race?: number
@@ -315,6 +384,13 @@ interface Thread {
   main: boolean
 }
 
+/** Motion files by number (0x5B: the number's range picks the table; 0x66: you and the player races, 32712 + n, then the old pair). */
+function motionFileIds(op: number, n: number): number[] {
+  return op === 0x66
+    ? [32712 + n, 32360 + n * 2, 32361 + n * 2]
+    : [n < 512 ? n + 32104 : n < 1024 ? n + 49135 : n < 2048 ? n + 56345 : n < 3072 ? n + 59739 : n + 66339]
+}
+
 export class CutsceneRun {
   view: CutsceneView
   private vars = new Map<number, number>()
@@ -341,8 +417,26 @@ export class CutsceneRun {
   restShots: CameraPose[] = []
   restCleared = false
 
-  constructor(private r: CutsceneRequest) {
-    this.view = { title: `${r.actorName} · Event ${r.eventId}`, message: null, fade: [1, 1, 1, 0], ended: false, note: null }
+  /** A headless run's own scene state (CutsceneProbe), else null for the app's store. */
+  private local: State | null = null
+  private get st(): State { return this.local ?? state }
+  private out(s: Partial<State>) { if (this.local) Object.assign(this.local, s); else set(s) }
+  /** File loads under way: the sweep waits for them between ticks. */
+  private pending = new Set<Promise<unknown>>()
+  private track<T>(p: Promise<T>): Promise<T> {
+    this.pending.add(p)
+    void p.finally(() => this.pending.delete(p))
+    return p
+  }
+  async settle(): Promise<void> { while (this.pending.size) await Promise.all([...this.pending]) }
+  /** What the live scripts wait on (the sweep answers messages and choices itself). */
+  waitingOn(): Thread['waiting'][] { return this.threads.filter(t => !t.done).map(t => t.waiting) }
+  get sceneZone(): number | null { return this.st.sceneZone }
+
+  constructor(private r: CutsceneRequest, private probe?: CutsceneProbe) {
+    if (probe) this.local = { ...state, request: null, view: null, sceneZone: r.zone.id, sceneHour: null, sceneMusic: null, sceneVolume: 1 }
+    const named = sceneName(r.zone.id, r.eventId)
+    this.view = { title: `${named ? named.title + " · " : ""}${r.actorName} · Event ${r.eventId}`, message: null, fade: [1, 1, 1, 0], ended: false, note: null }
     this.threads.push(this.thread(r.block.actor, r.block, r.offset, true))
     if (r.block.actor !== ZONE_ACTOR) {
       const st = npcStations(r.zone.id).find(s => s[0] === (r.block.actor & 0xfff))
@@ -377,6 +471,7 @@ export class CutsceneRun {
     const dx = Math.cos(a), dz = -Math.sin(a)
     const px = x + dx * 1.8, pz = z + dz * 1.8
     this.poses.set(PLAYER, { x: px, y: this.floor(px, y, pz) ?? y, z: pz, yaw: 0, moving: false })
+    this.ownLib(PLAYER, [this.st.playerRace])
     this.face(PLAYER, this.r.block.actor)
     const mx = (x + px) / 2, mz = (z + pz) / 2
     this.restShots = [
@@ -405,7 +500,7 @@ export class CutsceneRun {
 
   private emit(v: Partial<CutsceneView>) {
     this.view = { ...this.view, ...v }
-    set({ view: this.view })
+    this.out({ view: this.view })
   }
 
   // ── Operands ──
@@ -432,6 +527,12 @@ export class CutsceneRun {
     if (x < 80) th.locals.set(x, value | 0)
     else this.vars.set(x, value | 0)
   }
+  /** Writes variable `x` (a number, not an operand). */
+  private store(th: Thread, x: number, value: number) {
+    if (x & 0x8000) return
+    if (x < 80) th.locals.set(x, value | 0)
+    else this.vars.set(x, value | 0)
+  }
   private tag(th: Thread, i: number) { const n = this.u32(th, i); return String.fromCharCode(n & 255, (n >> 8) & 255, (n >> 16) & 255, n >>> 24).replace(/\0.*$/, '') }
   /** An actor operand as the actor it means: "this actor", "you", or an NPC's id. */
   private who(th: Thread, i: number): number {
@@ -445,6 +546,13 @@ export class CutsceneRun {
     return this.r.names.get(id & 0xfff) ?? null
   }
 
+  /** A speaker's name; the sweep hears of the ones it has none for. */
+  private speaker(id: number): string | null {
+    const n = this.name(id)
+    if (n === null) this.probe?.note('unnamed speaker', hex(id))
+    return n
+  }
+
   // ── Actors ──
   /** The actor's pose, starting from its post the first time the scene touches it. */
   private pose(id: number): ActorPose | null {
@@ -452,17 +560,60 @@ export class CutsceneRun {
     if (!p && id === PLAYER) {
       p = { x: 0, y: 0, z: 0, yaw: 0, moving: false, hidden: true }
       this.poses.set(id, p)
+      this.ownLib(id, [this.st.playerRace])
     }
     if (!p && id !== PLAYER) {
       // A town NPC from its post; a scene-only one hidden until the scene shows, places or walks it.
       const st = npcStations(this.r.zone.id).find(s => s[0] === (id & 0xfff))
       const actor = st ? null : sceneActors(this.r.zone.id).find(s => s[0] === (id & 0xfff))
       const at = st ?? actor
-      if (!at) return null
-      p = { x: at[1], y: at[2], z: at[3], yaw: (at[4] / 256) * Math.PI * 2, moving: false, hidden: !!actor, sceneOnly: !!actor, race: Array.isArray(at[5]) ? at[5][0] : undefined }
+      if (!at) {
+        if (!this.missing.has(id)) { this.missing.add(id); this.probe?.note('missing actor', hex(id)) }
+        return null
+      }
+      p = { x: at[1], y: at[2], z: at[3], yaw: Math.max(0, at[4] / 256) * Math.PI * 2, moving: false, hidden: !!actor, sceneOnly: !!actor, unplaced: at[4] === -1, race: Array.isArray(at[5]) ? at[5][0] : undefined }
       this.poses.set(id, p)
+      this.ownLib(id, at[5])
     }
     return p ?? null
+  }
+  private missing = new Set<number>()
+
+  /**
+   * An actor's own gestures (tlk0, hap0, dead, corp..), where the game keeps
+   * them: a model NPC's model file, a player race's race file (casting,
+   * kneeling, collapsing), and the motion files the actor's own scripts load
+   * (0x5B/0x66 on itself: an earlier event loads them in the game, and the
+   * scene may come later).
+   */
+  private own = new Map<number, { libs: Lib[] | null; ready: Promise<Lib[]> }>()
+  private ownLib(id: number, look: number | number[] | undefined) {
+    if (this.own.has(id)) return
+    const files: (number | string)[] = []
+    if (typeof look === 'number') files.push(npcModelFileId(look))
+    else if (look && SKELETON_PATHS[look[0]]) files.push(SKELETON_PATHS[look[0]])
+    if (id !== PLAYER) files.push(...this.motionFilesOf(id))
+    const ready = this.track(Promise.all(files.map(f => loadEventFile(this.r.root, f)))).then(l => l.filter((x): x is Lib => !!x))
+    const entry: { libs: Lib[] | null; ready: Promise<Lib[]> } = { libs: null, ready }
+    void ready.then(libs => { entry.libs = libs })
+    this.own.set(id, entry)
+  }
+  /** The motion files actor `id`'s block loads on itself, the newest table first, at most twelve. */
+  private motionFilesOf(id: number): number[] {
+    const block = this.r.blocks.find(b => b.actor === id)
+    if (!block) return []
+    const out = new Set<number>()
+    for (const e of block.events) {
+      for (const s of readEvent(block, e.offset)) {
+        if ((s.op !== 0x5b && s.op !== 0x66) || s.bytes.length < 7) continue
+        const b = s.bytes, who = (b[3] | (b[4] << 8) | (b[5] << 16) | (b[6] << 24)) >>> 0
+        const x = b[1] | (b[2] << 8)
+        if ((who !== 0x7ffffff8 && who !== id) || !(x & 0x8000)) continue
+        for (const f of motionFileIds(s.op, block.refs[x & 0x7fff] | 0)) out.add(f)
+        if (out.size >= 12) return [...out]
+      }
+    }
+    return [...out]
   }
   npcPose(index: number): ActorPose | null {
     for (const [id, p] of this.poses) if (id !== PLAYER && (id & 0xfff) === index) return p
@@ -476,6 +627,7 @@ export class CutsceneRun {
     if (id === PLAYER && fresh) p.hidden = false
     // A scene-only NPC the script places is part of the scene, unless it hides it itself (the server may show it too).
     if (p.sceneOnly && !p.flagged) p.hidden = false
+    if (p.unplaced) { p.unplaced = false; if (!p.flagged) p.hidden = false }
     p.x = x; p.z = z; p.y = this.floor(x, y, z) ?? y
     if (yaw !== undefined) p.yaw = yaw
     p.walk = undefined; p.moving = false
@@ -532,6 +684,7 @@ export class CutsceneRun {
   }
 
   private say(lineIndex: number, speaker: string | null, who?: number) {
+    if (this.r.lines[lineIndex] === undefined) this.probe?.note('missing line', String(lineIndex))
     const text = this.r.lines[lineIndex] ?? ''
     // A line takes about 15 characters a second to say; at least one cycle of the jaw, at most six seconds.
     this.talking = who !== undefined ? { actor: who, start: this.now, until: this.now + Math.min(6, Math.max(1, text.length / 15)) } : null
@@ -555,8 +708,9 @@ export class CutsceneRun {
   // ── Schedulers ──
   private async load(th: Thread, id: number) {
     th.waiting = 'load'
-    const f = await loadEventFile(this.r.root, id)
+    const f = await this.track(loadEventFile(this.r.root, id))
     if (f) this.files.push(f)
+    else this.probe?.note('missing file', String(id))
     if (th.waiting === 'load') th.waiting = null
     return f
   }
@@ -567,12 +721,20 @@ export class CutsceneRun {
    * body part's tlk clip in that file) played in turn, each starting and then
    * holding for its delay. False if no file has it.
    */
-  private act(actor: number, tag: string, extra: Lib[] = []): boolean {
+  private act(actor: number, tag: string, extra: Lib[] = [], retry = true): boolean {
     const p = this.pose(actor)
     if (!p) return false
-    const libs = [...extra, ...[...(this.libs.get(actor) ?? [])].reverse(), ...[...this.files].reverse()]
+    const own = this.own.get(actor)
+    const libs = [...extra, ...[...(this.libs.get(actor) ?? [])].reverse(), ...(own?.libs ?? []), ...[...this.files].reverse()]
     const lib = libs.find(l => l.schedulers.has(tag))
-    if (!lib) return false
+    if (!lib) {
+      // Its own files still on their way: again once they're in.
+      if (retry && own && !own.libs) {
+        void own.ready.then(() => { if (!this.act(actor, tag, extra, false)) this.startScheduler(tag, actor, 'missing action') })
+        return true
+      }
+      return false
+    }
     const segments: Segment[] = []
     let t = this.now
     for (const c of lib.schedulers.get(tag)!) {
@@ -592,10 +754,9 @@ export class CutsceneRun {
   /** Loads an actor's motion file (0x5B: the file number's range picks the table; 0x66: you and the player races, 32712 + n). */
   private async loadMotions(th: Thread, actor: number, op: number, n: number) {
     th.waiting = 'load'
-    const ids = op === 0x66
-      ? [32712 + n, 32360 + n * 2, 32361 + n * 2]
-      : [n < 512 ? n + 32104 : n < 1024 ? n + 49135 : n < 2048 ? n + 56345 : n < 3072 ? n + 59739 : n + 66339]
-    const libs = (await Promise.all(ids.map(id => loadEventFile(this.r.root, id)))).filter((l): l is Lib => !!l)
+    const ids = motionFileIds(op, n)
+    const libs = (await this.track(Promise.all(ids.map(id => loadEventFile(this.r.root, id))))).filter((l): l is Lib => !!l)
+    if (!libs.length) this.probe?.note('missing motion file', ids.join('/'))
     const list = this.libs.get(actor) ?? []
     // The newer table first; the old pair only fills in what it lacks.
     list.push(...libs.reverse())
@@ -604,19 +765,23 @@ export class CutsceneRun {
   }
 
   /** Starts a scheduler by name from the files loaded so far; its motions, if any, go to `actor`. */
-  private startScheduler(name: string, actor?: number) {
+  private startScheduler(name: string, actor?: number, kind = 'missing scheduler') {
     let cmds: SchedCommand[] | undefined, cams: Map<string, CameraKey[]> | undefined, lib: Lib | undefined
     for (let i = this.files.length - 1; i >= 0 && !cmds; i--) {
       const f = this.files[i]
       if (f?.schedulers.has(name)) { cmds = f.schedulers.get(name); cams = f.cameras; lib = f }
     }
-    if (!cmds) return
+    if (!cmds) {
+      if (name && name !== 'xxxx') this.probe?.note(kind, name)
+      return
+    }
     if (actor !== undefined && lib && cmds.some(c => c.op === 0x05)) this.act(actor, name, [lib])
     let t = this.now
     for (const c of cmds) {
       if (c.op === 0x04) {
         const keys = cams?.get(c.name)
         if (keys?.length) this.camera = { keys, start: t, end: t + c.duration / FPS }
+        else this.probe?.note('missing camera', c.name)
       } else if (c.op === 0x0f) {
         this.fadeFrom = this.fadeNow()
         // A multiplier on the picture: 0x80 = x1, alpha 0x80 = full strength.
@@ -654,15 +819,19 @@ export class CutsceneRun {
 
   /** The zone the scene asked for (0x34/0x35) is up: scripts waiting for it go on. */
   zoneReady(zoneId: number) {
-    if (state.sceneZone !== zoneId) return
+    if (this.st.sceneZone !== zoneId) return
     for (const th of this.threads) if (th.waiting === 'zone') th.waiting = null
   }
+
+  /** Actors fading out (0x6C to alpha 0): hidden when the fade ends. */
+  private fadeOuts: { pose: ActorPose; at: number }[] = []
 
   /** Advances the scene by `dt` seconds: walks, fades, and every actor's script to its next wait. */
   tick(dt: number) {
     const t = this.now + dt
     this.now = t
     this.stepWalks(dt)
+    this.fadeOuts = this.fadeOuts.filter(f => (t >= f.at ? ((f.pose.hidden = true), false) : true))
     const fade = this.fadeNow()
     if (fade.some((x, i) => Math.abs(x - this.view.fade[i]) > 0.002)) this.emit({ fade })
     if (this.view.ended) return
@@ -682,6 +851,7 @@ export class CutsceneRun {
         if (th.waiting || t < th.waitUntil) break
         const code = th.block.code
         if (th.pc >= code.length || !opSize(code, th.pc)) {
+          this.probe?.note('unreadable op', (th.pc >= code.length ? 'past the end' : hex(code[th.pc])) + (th.main ? '' : ' (another actor)'))
           if (th.main) return this.end('The script stopped on something this player can’t read yet.')
           th.done = true
           break
@@ -726,6 +896,7 @@ export class CutsceneRun {
     const size = opSize(code, th.pc)
     const goTo = (target: number) => {
       if (target <= th.pc && ++th.loops > LOOP_LIMIT) {
+        this.probe?.note('server loop', th.main ? 'the scene' : 'another actor')
         if (th.main) this.end('The script waits on the game server here, so it stops.')
         return 'end' as const
       }
@@ -761,6 +932,60 @@ export class CutsceneRun {
       case 0x0c: this.put(th, 1, this.val(th, 1) - 1); break
       case 0x0d: this.put(th, 1, this.val(th, 1) & this.val(th, 3)); break
       case 0x0e: this.put(th, 1, this.val(th, 1) | this.val(th, 3)); break
+      case 0x0f: this.put(th, 1, this.val(th, 1) ^ this.val(th, 3)); break
+      case 0x10: this.put(th, 1, this.val(th, 1) << this.val(th, 3)); break
+      case 0x11: this.put(th, 1, this.val(th, 1) >> this.val(th, 3)); break
+      case 0x12: this.put(th, 1, Math.floor(Math.random() * 32768)); break
+      case 0x13: this.put(th, 1, Math.floor(Math.random() * (this.val(th, 3) + 1))); break
+      case 0x14: this.put(th, 1, this.val(th, 1) * this.val(th, 3)); break
+      case 0x15: { const d = this.val(th, 3); this.put(th, 1, d ? Math.trunc(this.val(th, 1) / d) : 0); break }
+      // A length (5) along an angle (3, 4096ths of a turn): -r sin a and r cos a, as the game's are.
+      case 0x16: this.put(th, 1, -this.val(th, 5) * Math.sin(this.val(th, 3) * ((Math.PI * 2) / 4096))); break
+      case 0x17: this.put(th, 1, this.val(th, 5) * Math.cos(this.val(th, 3) * ((Math.PI * 2) / 4096))); break
+      case 0x3f: { const a = this.val(th, 3), b = this.val(th, 5); this.put(th, 1, a && b ? a % b : 0); break }
+      // A bit (3) set (0x3C) or cleared (0x3D) in the words from 1, when it falls inside the count (5).
+      case 0x3c: case 0x3d: {
+        const bit = this.val(th, 3)
+        if (bit >> 5 < this.val(th, 5)) {
+          const x = this.u16(th, 1) + (bit >> 5), word = this.get(th, x), m = 1 << (bit & 31)
+          this.store(th, x, op === 0x3c ? word | m : word & ~m)
+        }
+        break
+      }
+      // Bits lo (1) to hi (3) of a word: 0x40 writes the value at 7 into the word at 5, 0x41 reads the word at 5 into 7.
+      case 0x40: case 0x41: {
+        const lo = this.val(th, 1), hi = this.val(th, 3)
+        let mask = 0
+        for (let b = lo; b <= hi && b < 32; b++) mask |= 1 << b
+        if (op === 0x40) this.put(th, 5, (~mask & this.val(th, 5)) | (mask & (this.val(th, 7) << lo)))
+        else this.put(th, 7, (mask & this.val(th, 5)) >>> lo)
+        break
+      }
+      // The distance between two points (x 3, z 5 and x 7, z 9).
+      case 0x64: this.put(th, 1, Math.hypot(this.val(th, 9) - this.val(th, 5), this.val(th, 7) - this.val(th, 3))); break
+      // A short pause (the game's ReqStack wait: 16 of its 60ths of a second).
+      case 0x6f: th.pc += size; th.waitUntil = this.now + 16 / FPS; return 'yield'
+      // Waits until the actor at 2 runs nothing as urgent as the priority at 1.
+      case 0x2a: {
+        const other = this.who(th, 2)
+        if (this.threads.some(x => x !== th && !x.done && x.actor === other && x.priority <= sub)) return 'yield'
+        break
+      }
+      // You, moved (sub-code 0: x, z, y and facing; the game tells the server, 1 waits for its answer).
+      case 0x47: if (sub === 0) this.place(PLAYER, this.val(th, 2) / 1000, this.val(th, 6) / 1000, this.val(th, 4) / 1000, (this.val(th, 8) / 4096) * Math.PI * 2); break
+      // Back to its idle: the actor's action stops (0x5E the event's actor, 0x6B the one at 5).
+      case 0x5e: { const p = this.pose(th.actor); if (p) p.action = undefined; break }
+      case 0x6b: { const p = this.pose(this.who(th, 5)); if (p) p.action = undefined; break }
+      case 0x7b: if (this.talking?.actor === this.who(th, 1)) this.talking = null; break
+      // An actor fades to an alpha (5) over frames (7) while the script waits: shown as it fades in, hidden once faded out.
+      case 0x6c: {
+        const p = this.pose(this.who(th, 1)), alpha = this.val(th, 5), end = this.now + Math.max(1, this.val(th, 7)) / FPS
+        if (p && alpha > 0 && !p.unplaced) p.hidden = false
+        if (p && alpha <= 0) this.fadeOuts.push({ pose: p, at: end })
+        th.pc += size
+        th.waitUntil = end
+        return 'yield'
+      }
       case 0x1c: {
         // Wait (frames): the first visit sets the time, the next finds it passed.
         th.pc += size
@@ -768,9 +993,9 @@ export class CutsceneRun {
         return 'yield'
       }
       case 0x1d: this.say(this.val(th, 1), th.actor === PLAYER ? null : this.name(th.actor) ?? this.r.actorName, th.actor); break
-      case 0x2b: this.say(this.val(th, 5), this.name(this.who(th, 1)), this.who(th, 1)); break
+      case 0x2b: this.say(this.val(th, 5), this.speaker(this.who(th, 1)), this.who(th, 1)); break
       case 0x48: case 0x49: this.say(this.val(th, op === 0x48 ? 1 : 5), null); break
-      case 0xb0: if (!sub) this.say(this.val(th, 10), this.name(this.who(th, 2)), this.who(th, 6)); break
+      case 0xb0: if (!sub) this.say(this.val(th, 10), this.speaker(this.who(th, 2)), this.who(th, 6)); break
       case 0x23: th.pc += size; th.waiting = 'read'; return 'yield'
       case 0x24: this.say(this.val(th, 1), null); break
       case 0x25: case 0x7f: th.pc += size; th.waiting = 'choice'; return 'yield'
@@ -800,39 +1025,47 @@ export class CutsceneRun {
       case 0x34: case 0x35: {
         const zone = this.val(th, 1)
         th.pc += size
-        if (zone !== state.sceneZone) { set({ sceneZone: zone }); th.waiting = 'zone'; return 'yield' }
+        if (zone !== this.st.sceneZone) { this.out({ sceneZone: zone }); th.waiting = 'zone'; return 'yield' }
         return 'go'
       }
       // The hour (and weather, not kept) for the scene; 255 leaves it.
-      case 0x77: { const h = this.val(th, 1); if (h !== 255) set({ sceneHour: h }); break }
-      case 0x78: set({ sceneHour: null }); break
+      case 0x77: { const h = this.val(th, 1); if (h !== 255) this.out({ sceneHour: h }); break }
+      case 0x78: this.out({ sceneHour: null }); break
       // Music: 0x5C sets a slot's song (0 day, 1 night idle; the rest are battle, mount, death); 0x5D the volume, of 127.
-      case 0x5c: if ((sub & 7) <= 1) { const song = this.val(th, 2); if (song > 0 && song !== state.sceneMusic) set({ sceneMusic: song }) } break
-      case 0x5d: set({ sceneVolume: Math.max(0, Math.min(1, this.val(th, 1) / 127)) }); break
+      case 0x5c: if ((sub & 7) <= 1) { const song = this.val(th, 2); if (song > 0 && song !== this.st.sceneMusic) this.out({ sceneMusic: song }) } break
+      case 0x5d: this.out({ sceneVolume: Math.max(0, Math.min(1, this.val(th, 1) / 127)) }); break
       // An emote: the actor's race's emote files list them bow, point, salute, kneel, laugh, cry, no, yes,
       // wave.. eight a file (em00-em07); the scripts count from 1 (1 = bow, their most used).
       case 0x6e: {
         const actor = this.who(th, 1), n = Math.max(0, this.val(th, 5) - 1)
-        const race = actor === PLAYER ? state.playerRace : this.pose(actor)?.race
+        const race = actor === PLAYER ? this.st.playerRace : this.pose(actor)?.race
         const path = race ? emoteFile(race, n) : null
-        if (path) void loadEventFile(this.r.root, path).then(lib => { if (lib) this.act(actor, 'em0' + (n % 8), [lib]) })
+        if (path) void this.track(loadEventFile(this.r.root, path)).then(lib => { if (lib) this.act(actor, 'em0' + (n % 8), [lib]); else this.probe?.note('missing file', path) })
+        else this.probe?.note('emote with no race', hex(actor))
         break
       }
-      case 0x22: { const p = this.pose(th.actor); if (p) { p.hidden = !!(sub & 1); p.flagged = true } break }
-      case 0x4e: { const p = this.pose(this.who(th, 2)); if (p) { p.hidden = !!(sub & 1); p.flagged = true } break }
+      // Shown or hidden; one with no post stays hidden until the scene places it (the server knows where it stands, LandSandBoat doesn't).
+      case 0x22: case 0x4e: {
+        const id = op === 0x22 ? th.actor : this.who(th, 2), p = this.pose(id)
+        if (!p) break
+        if (!(sub & 1) && p.unplaced) this.probe?.note('shown, not placed', hex(id))
+        p.hidden = !!(sub & 1) || !!p.unplaced
+        p.flagged = true
+        break
+      }
       // Walks: sub-code 0 sets the goal (x, z, y; 0x31 a time too), 1 waits until there.
       case 0x1f: case 0x31: case 0x5a:
         if (sub === 0) this.walkTo(th, this.val(th, 2) / 1000, this.val(th, 6) / 1000, this.val(th, 4) / 1000, op === 0x31 ? this.val(th, 8) / 1000 : undefined)
         else { th.pc += size; if (this.pose(th.actor)?.walk) { th.waiting = 'walk'; return 'yield' } return 'go' }
         break
       // An actor's action by name (0x2C); a zone's (0x2D) are scene schedulers.
-      case 0x2c: if (!this.act(this.who(th, 1), this.tag(th, 9))) this.startScheduler(this.tag(th, 9), this.who(th, 1)); break
+      case 0x2c: if (!this.act(this.who(th, 1), this.tag(th, 9))) this.startScheduler(this.tag(th, 9), this.who(th, 1), 'missing action'); break
       case 0x2d: this.startScheduler(this.tag(th, 9)); break
       // Motion files for an actor, then its action from them ("xxxx" = load only).
       case 0x5b: case 0x66: {
         const actor = this.who(th, 3), tag = this.tag(th, 11), n = this.val(th, 1)
         th.pc += size
-        void this.loadMotions(th, actor, op, n).then(() => { if (tag && tag !== 'xxxx') this.act(actor, tag) })
+        void this.loadMotions(th, actor, op, n).then(() => { if (tag && tag !== 'xxxx' && !this.act(actor, tag)) this.probe?.note('missing action', tag) })
         return 'yield'
       }
       case 0x50: case 0x51: this.stopScheduler(this.tag(th, 9), this.who(th, 1)); break
@@ -850,7 +1083,8 @@ export class CutsceneRun {
         }
         if (WAITS_15.has(op)) return this.waitScheduler(th, this.tag(th, 11), size)
         if (STOPS_15.has(op)) this.stopScheduler(this.tag(th, 11), this.who(th, 3))
-        if (op === 0x46 && sub === 0) this.camera = null
+        else if (op === 0x46) { if (sub === 0) this.camera = null }
+        else if (!UNSEEN.has(op)) this.probe?.note('ignored op', hex(op))
     }
     th.pc += size
     return 'go'

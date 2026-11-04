@@ -126,7 +126,7 @@ export function poseSkeleton(
   animations: ParsedAnimation[],
   inverseBind: number[][],
   time: number,
-  overlay?: PoseOverlay,
+  overlay?: PoseOverlay | PoseOverlay[],
 ): PoseResult {
   const boneCount = skeleton.bones.length
   const localMats = localPose(skeleton, animations, time, overlay)
@@ -157,15 +157,34 @@ export function poseSkeleton(
  */
 /**
  * Clips laid over the pose on their own clock, overwriting only the bones
- * they drive: a talking jaw (the race's mou4) over whatever the body plays.
+ * they drive: a talking jaw (mou4) or a blink (eye3) over whatever the body plays.
  */
 export interface PoseOverlay { animations: ParsedAnimation[]; time: number }
+
+/** When the next blink is due, and when the last began (seconds on the caller's clock). */
+export interface Blinker { next: number; start: number }
+
+export function newBlinker(now = 0): Blinker {
+  return { next: now + Math.random() * 4, start: -Infinity }
+}
+
+/**
+ * The eyelids (eye3, about a quarter of a second) every two to six
+ * seconds, as the game's characters blink: the overlay while one runs.
+ */
+export function blinkOverlay(b: Blinker, now: number, eyes: ParsedAnimation[]): PoseOverlay | null {
+  if (!eyes.length) return null
+  if (now >= b.next) { b.start = now; b.next = now + 2 + Math.random() * 4 }
+  const length = Math.max(...eyes.map(c => (c.frameCount - 1) / (30 * (c.speed || 1))))
+  const t = now - b.start
+  return t >= 0 && t < length ? { animations: eyes, time: t } : null
+}
 
 export function localPose(
   skeleton: ParsedSkeleton,
   animations: ParsedAnimation[],
   time: number,
-  overlay?: PoseOverlay,
+  overlay?: PoseOverlay | PoseOverlay[],
 ): number[][] {
   const boneCount = skeleton.bones.length
 
@@ -231,7 +250,7 @@ export function localPose(
   }
   }
   apply(animations, time)
-  if (overlay) apply(overlay.animations, overlay.time)
+  for (const o of Array.isArray(overlay) ? overlay : overlay ? [overlay] : []) apply(o.animations, o.time)
   return localMats
 }
 
