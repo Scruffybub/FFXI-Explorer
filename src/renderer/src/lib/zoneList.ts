@@ -78,3 +78,20 @@ export const ZONES: ZoneEntry[] = (() => {
 
   return zones.sort((a, b) => a.name.localeCompare(b.name))
 })()
+
+/**
+ * Places only scenes open (op 0x34), kept off the zone list: no zone id the
+ * server knows, no NPCs of their own. Their file numbers are 100 + the id, the
+ * rule of the first 256 zones. Scenes also ask for ids 542, 594 and 700-745,
+ * which have no drawable geometry there; those scenes stay where they are.
+ */
+const SCENE_ZONE_FILES: Record<number, string> = {
+  516: 'ROM2/15/122', 517: 'ROM2/15/123', 519: 'ROM2/16/2',
+  540: 'ROM3/0/47', 541: 'ROM3/0/48', 543: 'ROM3/0/50', 544: 'ROM3/0/51', 545: 'ROM3/0/52', 546: 'ROM3/3/83',
+  559: 'ROM4/5/7', 584: 'ROM9/5/48', 593: 'ROM9/6/116',
+}
+/** A zone by id, the scene-only places too. */
+export function zoneById(id: number): ZoneEntry | undefined {
+  const path = SCENE_ZONE_FILES[id]
+  return ZONES.find(z => z.id === id) ?? (path ? { id, name: 'Scene area ' + id, modelPath: path + '.DAT', mapPaths: [] } : undefined)
+}

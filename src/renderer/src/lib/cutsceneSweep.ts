@@ -68,10 +68,7 @@ export async function sweepZone(root: string, zoneId: number): Promise<SweepRow[
             if (++choices > MAX_CHOICES) { row.result = 'menu'; break }
             run.choose(0)
           }
-          if (waits.includes('zone') && run.sceneZone !== null) {
-            if (!ZONES.some(z => z.id === run.sceneZone)) notes.add(`unknown zone: ${run.sceneZone}`)
-            run.zoneReady(run.sceneZone)
-          }
+          if (waits.includes('zone') && run.sceneZone !== null) run.zoneReady(run.sceneZone)
         }
         row.time = t
         // Shown before it was placed is fine when the scene places it later.

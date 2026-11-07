@@ -1,8 +1,8 @@
 import * as THREE from 'three'
 import { fileIdPath } from './fileTable'
 import { opSize, readEvent, ZONE_ACTOR, type EventBlock } from './eventScript'
-import type { ZoneEntry } from './zoneList'
-import { npcModelFileId, npcStations, sceneActors } from './npcStations'
+import { zoneById, type ZoneEntry } from './zoneList'
+import { npcMarks, npcModelFileId, npcStations, sceneActors } from './npcStations'
 import type { CollisionWorld } from './CollisionWorld'
 import { parseAnimationDat, SKELETON_PATHS, type ParsedAnimation } from './ffxi-dat'
 import animationPaths from '../../../../resources/animation-paths.json'
@@ -15,10 +15,11 @@ import { sceneName } from './sceneNames'
  * text and timing, and the actors' places. Message windows wait for a click,
  * choices wait for a pick (the answer goes to zone variable 0, as the
  * game's does), waits wait, and the event's schedulers run their cameras
- * and screen fades. Every actor whose event the scene starts (0x27-0x29)
- * runs its own script alongside, as the game does: actors are placed
- * (0x36/0x37), turned (0x39, 0x4B, 0x1E, 0x4A, 0x79) and walked (0x1F,
- * 0x31, 0x5A) on the collision's floor. NpcStations and the zone's avatar
+ * and screen fades. Every actor with an event of the scene's number runs it
+ * alongside, as does every actor whose event the scene starts (0x27-0x29),
+ * as the game does: actors are placed (0x36/0x37, 0xBA for any actor),
+ * turned (0x39, 0x4B, 0x1E, 0x4A, 0x79) and walked (0x1F, 0x31, 0x5A) on the
+ * collision's floor. NpcStations and the zone's avatar
  * follow the poses. Their motions and gestures are stage 3b.
  *
  * Schedulers live in event files (an "evte" folder): type 6 blocks are
@@ -48,13 +49,13 @@ const STOPS_15 = new Set([0x52, 0xa1, 0xa3, 0xbd, 0xc7, 0xcf, 0xd2, 0xd7])
  * 0x84, 0x86, 0x90, 0x92, 0x94, 0xA4, 0xA5, 0xAB, 0xC0), the HUD (0x67,
  * 0x68), map windows and markers (0x89-0x8B, 0x8D, 0xA8, 0xB8, 0xB9, 0xC8,
  * 0xD4), sound volumes (0x69, 0x6A), wind (0x97), the music loader (0x9A),
- * one-frame yields (0x26, 0x99), positions recalibrated (0xBA), rooms (0x75,
- * merged on load), the language (0x9C) and game timers (0xA9, 0xC9). The
- * sweep doesn't list these; the rest it does.
+ * one-frame yields (0x26, 0x99), rooms (0x75, merged on load), the language
+ * (0x9C) and game timers (0xA9, 0xC9). The sweep doesn't list these; the rest
+ * it does.
  */
 const UNSEEN = new Set([
   0x20, 0x26, 0x2e, 0x2f, 0x30, 0x38, 0x42, 0x43, 0x61, 0x67, 0x68, 0x69, 0x6a, 0x75, 0x7c, 0x84, 0x86, 0x89, 0x8a, 0x8b, 0x8d,
-  0x90, 0x92, 0x94, 0x97, 0x99, 0x9a, 0x9c, 0x9e, 0xa4, 0xa5, 0xa6, 0xa8, 0xa9, 0xab, 0xb8, 0xb9, 0xba, 0xc0, 0xc8, 0xc9, 0xd4,
+  0x90, 0x92, 0x94, 0x97, 0x99, 0x9a, 0x9c, 0x9e, 0xa4, 0xa5, 0xa6, 0xa8, 0xa9, 0xab, 0xb8, 0xb9, 0xc0, 0xc8, 0xc9, 0xd4,
 ])
 /** Instructions run per frame at most, and backward jumps per event, before it's taken for a loop on server state. */
 const STEP_BUDGET = 2000
@@ -160,7 +161,7 @@ export function requestCutscene(r: CutsceneRequest): void {
  * them, so only these are loaded: an actor counts when its id is in the
  * code of the event, of the events it starts on other actors (0x27-0x29: the
  * actor at 2, its event list's place at 6), and theirs in turn, or when the
- * event is its own.
+ * event is its own. Other actors' events of the scene's number count too.
  */
 export function sceneCast(r: CutsceneRequest): Set<number> {
   const unplaced = new Set(sceneActors(r.zone.id).filter(s => s[4] === -1).map(s => s[0]))
@@ -168,7 +169,7 @@ export function sceneCast(r: CutsceneRequest): Set<number> {
   if (!unplaced.size) return cast
   const zoneBits = 0x1000 + r.zone.id
   const seen = new Set<string>()
-  const todo: [EventBlock, number][] = [[r.block, r.offset]]
+  const todo: [EventBlock, number][] = [[r.block, r.offset], ...alongside(r).map(([b, tag]): [EventBlock, number] => [b, b.events[tag].offset])]
   while (todo.length) {
     const [block, offset] = todo.pop()!
     const key = block.actor + ':' + offset
@@ -191,6 +192,21 @@ export function sceneCast(r: CutsceneRequest): Set<number> {
     }
   }
   return cast
+}
+/**
+ * The other blocks with an event of the scene's number, and its place in their
+ * lists: the game starts them with it (InitEvent2 readies every actor that
+ * has the number; 0xFFFE, its fallback, is empty in every file). The number
+ * 0xFFFF marks events only a script starts.
+ */
+function alongside(r: CutsceneRequest): [EventBlock, number][] {
+  if (r.eventId >= 0xfffe) return []
+  const out: [EventBlock, number][] = []
+  for (const b of r.blocks) {
+    const tag = b.actor === r.block.actor ? -1 : b.events.findIndex(e => e.id === r.eventId)
+    if (tag >= 0) out.push([b, tag])
+  }
+  return out
 }
 /** The run, made when the zone is ready (the player calls it). */
 export function cutsceneRun(): CutsceneRun | null {
@@ -301,6 +317,10 @@ export interface ActorPose {
   /** One with no post of its own (npc-actors facing -1): unseen until the scene places it. */
   unplaced?: boolean
   flagged?: boolean
+  /** The script showed it before it had a place: it appears once placed. */
+  shown?: boolean
+  /** Nothing to draw: a marker, door or ship the scene only points at. */
+  mark?: boolean
   /** A player race (1-8) for an NPC dressed as one, or you: emotes come from the race's files. */
   race?: number
   /** The action it plays (tlk0, thk1..): its motions in turn. */
@@ -438,6 +458,11 @@ export class CutsceneRun {
     const named = sceneName(r.zone.id, r.eventId)
     this.view = { title: `${named ? named.title + " · " : ""}${r.actorName} · Event ${r.eventId}`, message: null, fade: [1, 1, 1, 0], ended: false, note: null }
     this.threads.push(this.thread(r.block.actor, r.block, r.offset, true))
+    for (const [b, tag] of alongside(r)) {
+      const th = this.thread(b.actor, b, b.events[tag].offset)
+      th.tag = tag
+      this.threads.push(th)
+    }
     if (r.block.actor !== ZONE_ACTOR) {
       const st = npcStations(r.zone.id).find(s => s[0] === (r.block.actor & 0xfff))
       if (st) {
@@ -567,6 +592,12 @@ export class CutsceneRun {
       const st = npcStations(this.r.zone.id).find(s => s[0] === (id & 0xfff))
       const actor = st ? null : sceneActors(this.r.zone.id).find(s => s[0] === (id & 0xfff))
       const at = st ?? actor
+      const mark = at ? null : npcMarks(this.r.zone.id).find(s => s[0] === (id & 0xfff))
+      if (mark) {
+        p = { x: mark[1], y: mark[2], z: mark[3], yaw: Math.max(0, mark[4] / 256) * Math.PI * 2, moving: false, hidden: true, mark: true, unplaced: mark[4] === -1 }
+        this.poses.set(id, p)
+        return p
+      }
       if (!at) {
         if (!this.missing.has(id)) { this.missing.add(id); this.probe?.note('missing actor', hex(id)) }
         return null
@@ -627,7 +658,7 @@ export class CutsceneRun {
     if (id === PLAYER && fresh) p.hidden = false
     // A scene-only NPC the script places is part of the scene, unless it hides it itself (the server may show it too).
     if (p.sceneOnly && !p.flagged) p.hidden = false
-    if (p.unplaced) { p.unplaced = false; if (!p.flagged) p.hidden = false }
+    if (p.unplaced) { p.unplaced = false; if (!p.flagged || p.shown) p.hidden = false }
     p.x = x; p.z = z; p.y = this.floor(x, y, z) ?? y
     if (yaw !== undefined) p.yaw = yaw
     p.walk = undefined; p.moving = false
@@ -645,12 +676,14 @@ export class CutsceneRun {
   /** Turns actor `a` toward actor `b` (the game's atan2(-dz, dx)). */
   private face(a: number, b: number) {
     const pa = this.pose(a), pb = this.pose(b)
-    if (!pa || !pb || (pa.x === pb.x && pa.z === pb.z)) return
+    if (!pa || !pb || pb.unplaced || (pa.x === pb.x && pa.z === pb.z)) return
     pa.yaw = Math.atan2(-(pb.z - pa.z), pb.x - pa.x)
   }
   private walkTo(th: Thread, x: number, y: number, z: number, seconds?: number) {
     const p = this.pose(th.actor)
     if (!p) return
+    // One with no post starts on the way: the walk's goal is the nearest the script says of where it stands.
+    if (p.unplaced) return this.place(th.actor, x, y, z)
     if (p.sceneOnly && !p.flagged) p.hidden = false
     p.walk = { x, y, z, speed: th.speed, until: seconds ? this.now + seconds : Infinity }
   }
@@ -980,7 +1013,7 @@ export class CutsceneRun {
       // An actor fades to an alpha (5) over frames (7) while the script waits: shown as it fades in, hidden once faded out.
       case 0x6c: {
         const p = this.pose(this.who(th, 1)), alpha = this.val(th, 5), end = this.now + Math.max(1, this.val(th, 7)) / FPS
-        if (p && alpha > 0 && !p.unplaced) p.hidden = false
+        if (p && alpha > 0) { if (p.unplaced) p.shown = true; else p.hidden = false }
         if (p && alpha <= 0) this.fadeOuts.push({ pose: p, at: end })
         th.pc += size
         th.waitUntil = end
@@ -988,8 +1021,8 @@ export class CutsceneRun {
       }
       case 0x1c: {
         // Wait (frames): the first visit sets the time, the next finds it passed.
-        th.pc += size
         th.waitUntil = this.now + Math.max(0, this.val(th, 1)) / FPS
+        th.pc += size
         return 'yield'
       }
       case 0x1d: this.say(this.val(th, 1), th.actor === PLAYER ? null : this.name(th.actor) ?? this.r.actorName, th.actor); break
@@ -1009,6 +1042,8 @@ export class CutsceneRun {
       // Positions: x, z, y in thousandths; facing in 4096ths of a turn.
       case 0x36: this.place(th.actor, this.val(th, 1) / 1000, this.val(th, 5) / 1000, this.val(th, 3) / 1000); break
       case 0x37: this.place(th.actor, this.val(th, 1) / 1000, this.val(th, 5) / 1000, this.val(th, 3) / 1000, (this.val(th, 7) / 4096) * Math.PI * 2); break
+      // Any actor, set on its mark: where most scenes stage their casts (x, z, y, facing).
+      case 0xba: this.place(this.who(th, 1), this.val(th, 5) / 1000, this.val(th, 9) / 1000, this.val(th, 7) / 1000, (this.val(th, 11) / 4096) * Math.PI * 2); break
       case 0x39: { const p = this.pose(th.actor); if (p) p.yaw = (this.val(th, 1) / 4096) * Math.PI * 2; break }
       case 0x4b: { const p = this.pose(this.who(th, 1)); if (p) p.yaw = (this.val(th, 5) / 4096) * Math.PI * 2; break }
       case 0x1e: this.face(th.actor, this.who(th, 1)); break
@@ -1022,11 +1057,15 @@ export class CutsceneRun {
       }
       case 0x32: th.speed = this.val(th, 1) / 10 || WALK_SPEED; break
       // Another zone for the scene (0x34; 0x35 the same without closing the first): the app opens it, the script waits.
+      // One we have no files for: the scene goes on where it is, so its lines still play.
       case 0x34: case 0x35: {
         const zone = this.val(th, 1)
         th.pc += size
-        if (zone !== this.st.sceneZone) { this.out({ sceneZone: zone }); th.waiting = 'zone'; return 'yield' }
-        return 'go'
+        if (zone === this.st.sceneZone) return 'go'
+        if (!zoneById(zone)) { this.probe?.note('unknown zone', String(zone)); return 'go' }
+        this.out({ sceneZone: zone })
+        th.waiting = 'zone'
+        return 'yield'
       }
       // The hour (and weather, not kept) for the scene; 255 leaves it.
       case 0x77: { const h = this.val(th, 1); if (h !== 255) this.out({ sceneHour: h }); break }
@@ -1044,12 +1083,13 @@ export class CutsceneRun {
         else this.probe?.note('emote with no race', hex(actor))
         break
       }
-      // Shown or hidden; one with no post stays hidden until the scene places it (the server knows where it stands, LandSandBoat doesn't).
+      // Shown or hidden; one with no post stays hidden until the scene places it.
       case 0x22: case 0x4e: {
         const id = op === 0x22 ? th.actor : this.who(th, 2), p = this.pose(id)
         if (!p) break
-        if (!(sub & 1) && p.unplaced) this.probe?.note('shown, not placed', hex(id))
+        if (!(sub & 1) && p.unplaced && !p.mark) this.probe?.note('shown, not placed', hex(id))
         p.hidden = !!(sub & 1) || !!p.unplaced
+        p.shown = !(sub & 1)
         p.flagged = true
         break
       }

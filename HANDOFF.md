@@ -4573,12 +4573,61 @@ rather than solved.
       idle, 0x7B stops talking, 0x6C actor fade (waits; faded out = hidden);
       `UNSEEN` lists the ones with nothing to show (not reported).
       Missing gestures 44k -> 6k notes, missing actors 62k -> 12.8k.
-      **Open, by size:** "shown, not placed" (7,308 scene notes): the
-      server places these actors and LSB has no position — the scene runs
-      with them hidden (Xarcabard [S] "Prelude to a Storm": Lilisette
-      speaks, nobody visible). Missing actors (ids LSB lacks: Mog Garden,
-      dynamic ids). 0xB6 looks/gear, 0x59, 0x73/0xC4 spells, 0x4C/0x4D
-      doors, 0x7A, 0x80/0x70/0x76 yields, 32 zone ids we don't have (541..).
+      **Cast staging — 2026-11-03.** "Shown, not placed" (7,308 notes,
+      1,626 scenes) looked like server-placed actors LSB had no position
+      for. It wasn't: the positions are in the event files. Three causes.
+      (1) 0xBA sets any actor on its mark (x, z, y, facing), usually a long
+      run of them at a scene's start; it was in `UNSEEN` as "recalibrate".
+      (2) Every actor with an event of the scene's number starts it with
+      the scene (XiEvents, InitEvent2/NowEventChar; `alongside` in
+      cutscene.ts, and sceneCast follows them). That is why one id sits in
+      several blocks: the others are the cast's own scripts, mostly lineless
+      placing and walking. The 0xFFFE fallback is empty in every file.
+      (3) An unplaced actor's first walk goal now places it. Result: 187
+      notes, 74 scenes. Prelude to a Storm now shows its 28-strong army.
+      `resources/npc-marks.json` (14,193) holds actors with no body:
+      invisible markers, doors, lifts, ships. Scenes face them and read
+      their positions; they were most of the "missing actor" notes (6,955
+      -> 915 cinematic), so the old people score was inflated.
+      **The wait bug:** op 0x1C read its length after moving pc, so it got
+      the next instruction's operand. Every timed wait in every scene was
+      wrong since stage 2; one scene sat black 36 s. Cinematic timeouts
+      fell from 599 to 241, the rest mostly battlefield entry scripts on
+      server variables (only 29:32001 read by hand).
+      **Unknown zones:** 0x34 to a zone we have no files for used to wait
+      forever on black. It now notes it and the scene goes on where it is.
+      **Scene-only zones — 2026-11-06.** Ids past 500 are places only scenes
+      open (the Adoulin council chamber 584, the Empress's throne room 559).
+      Their model file is 100 + the id, the rule of the first 256 zones:
+      `SCENE_ZONE_FILES` / `zoneById` in zoneList.ts, off the zone list,
+      named "Scene area N"; `?zone=N` opens one. 12 ids: 516, 517, 519,
+      540, 541, 543-546, 559, 584, 593. Test: the script's cast must land on
+      floors. 584 11/11, 593 3/3, 541 5/5, 559 10/10, 540 9/9, 516 30/31.
+      543-546 load but only appear in lineless 65535 events, unchecked. 517
+      and 519 load; their scene stayed dark when sampled, unconfirmed.
+      **Rejected:** 725-740 = 83891 + id are 16 r_2t rooms of one town, but
+      Leafallia, a library, Paradox and San d'Oria ask for them and the
+      coordinates miss (735's stage is 780,20,0, the rooms -470,150), so
+      that was coincidence. 542 (`opd_`) has an MZB but no drawable mesh and
+      opening it replaces the scene with the load error. **A failed zone
+      load strands a scene; every id in the table must be load-tested.**
+      Open: 700-745 and 594 (138 scenes with 0; 700 and 701 are 65 of those:
+      op 0x35, mostly no lines after, files bp_m/bp_d with no MZB, so
+      possibly a blank stage). Zone id 0 (21) is a server variable.
+      **Open, actors left over:** 0x34 deletes every actor in the game
+      (ObjectDelete); we keep their poses, so one can stand in the wrong
+      area (Monarch Linn 15 in 540).
+      Scores now: 19,859 of 21,998 raise nothing; quest/mission 3,878 of
+      4,545 (scripts roll random numbers, so runs differ by a few).
+      WotG 53/132, Crystal War 282/395, CoP 234/279, Adoulin 95/192.
+      Checked by eye: Metalworks 857, Xarcabard [S] 21, North Gustaberg [S]
+      77, Nyzul Isle 306, Eastern Adoulin 1535, Western Adoulin 5019,
+      Whitegate 504.
+      **Open, by size:** gestures (1,321 scenes; WotG sta1-4, atp0/1, at00,
+      eca0/1). 0xB6 looks/gear, 0x59, 0x73/0xC4 spells, 0x4C/0x4D doors,
+      0x7A, 0x80/0x70/0x76 yields. Automaton and chocobo NPCs (267 notes)
+      aren't drawn; 90 notes are ids LSB lacks. ~150 "missing actor" ids are
+      garbage (Pso'Xja, Shrouded Maw), so some script misreads there.
       **A clean sweep row is not a correct-looking scene:** check by eye.
     - **Town interiors — added 2026-10-28** (found through stage 2: scenes
       in shops were black). Shop and house insides are separate files the

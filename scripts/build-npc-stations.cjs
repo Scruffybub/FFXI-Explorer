@@ -25,6 +25,11 @@
  * Output: { "<zone id>": [[index, x, y, z, facing, look], ..] }. index is the
  * NPC id's low 12 bits, facing 0-255 a full turn, look a model number or
  * [race, face, head, body, hands, legs, feet, main, sub, ranged].
+ *
+ * Also resources/npc-marks.json: { "<zone id>": [[index, x, y, z, facing], ..] },
+ * the actors with nothing to draw (the invisible markers; doors, lifts and
+ * ships, which are the zone's own models). Scenes turn people toward them and
+ * read where they are. Facing -1 for one with no position.
  */
 const fs = require('fs')
 const path = require('path')
@@ -36,9 +41,11 @@ if (!dir) { console.error('usage: node scripts/build-npc-stations.cjs <LandSandB
 const SHOWN = new Set(['normal', 'update'])
 const INVISIBLE = new Set([50, 52])
 const SLOTS = ['head', 'body', 'hands', 'legs', 'feet', 'main', 'sub', 'ranged']
+const NO_BODY = new Set(['door', 'elevator', 'ship'])
 
 const out = {}
 const actors = {}
+const marks = {}
 const skipped = {}
 const skip = why => { skipped[why] = (skipped[why] || 0) + 1 }
 for (const zone of fs.readdirSync(dir).sort()) {
@@ -50,13 +57,17 @@ for (const zone of fs.readdirSync(dir).sort()) {
     const look = e.render?.look
     const shown = !!e.at && SHOWN.has(e.status)
     if (!shown) skip('status ' + (e.status ?? 'none'))
+    const mark = () => {
+      const [x, y, z, rot = 0] = e.at ?? [0, 0, 0, -1]
+      ;(marks[(id >> 12) & 0xfff] ??= []).push([id & 0xfff, +x.toFixed(2), +y.toFixed(2), +z.toFixed(2), rot])
+    }
     let l
     if (look?.type === 'standard') {
-      if (INVISIBLE.has(look.model)) { skip('invisible marker'); continue }
+      if (INVISIBLE.has(look.model)) { skip('invisible marker'); mark(); continue }
       l = look.model
     } else if (look?.type === 'equipped') {
       l = [look.race, look.face, ...SLOTS.map(s => (look[s] ?? 0) & 0xfff)]
-    } else { skip('look ' + look?.type); continue }
+    } else { skip('look ' + look?.type); if (NO_BODY.has(look?.type)) mark(); continue }
     const [x, y, z, rot = 0] = e.at ?? [0, 0, 0, -1]
     if (!e.at) skip('unplaced (scene actor)')
     ;((shown ? out : actors)[(id >> 12) & 0xfff] ??= []).push([id & 0xfff, x, y, z, rot, l])
@@ -71,3 +82,6 @@ console.log('skipped', JSON.stringify(skipped))
 const actorsFile = path.join(__dirname, '..', 'resources', 'npc-actors.json')
 fs.writeFileSync(actorsFile, JSON.stringify(actors))
 console.log(Object.values(actors).reduce((n, v) => n + v.length, 0), 'scene-only actors,', fs.statSync(actorsFile).size, 'bytes')
+const marksFile = path.join(__dirname, '..', 'resources', 'npc-marks.json')
+fs.writeFileSync(marksFile, JSON.stringify(marks))
+console.log(Object.values(marks).reduce((n, v) => n + v.length, 0), 'marks,', fs.statSync(marksFile).size, 'bytes')

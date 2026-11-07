@@ -74,7 +74,7 @@ attribution of the format research.
 `resources/zone-weather.json`, `resources/spell-effects.json`,
 `resources/ability-effects.json`, `resources/mob-skill-effects.json`,
 `resources/mob-skill-lists.json`, `resources/pet-skill-effects.json`,
-`resources/npc-stations.json`, `resources/npc-actors.json`, `resources/mob-spawns.json`,
+`resources/npc-stations.json`, `resources/npc-actors.json`, `resources/npc-marks.json`, `resources/mob-spawns.json`,
 `resources/scene-names.json`
 
 Built by `scripts/build-item-names.cjs`, `scripts/build-zone-music.cjs`,

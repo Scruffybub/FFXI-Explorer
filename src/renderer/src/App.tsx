@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef, useSyncExternalStore } from 'react'
-import { ZONES, type ZoneEntry } from './lib/zoneList'
+import { ZONES, zoneById, type ZoneEntry } from './lib/zoneList'
 import { expansionFor } from './lib/zoneExpansion'
 import { typicalWeather } from './lib/weatherTypes'
 import { parseZoneFile, parseTexturesFromDat, parseMinimapDat, parseSystemEffects, type ParsedZone, type SystemEffects } from './lib/ffxi-dat'
@@ -380,7 +380,7 @@ export default function App() {
   useEffect(() => {
     const id = cutscene.sceneZone
     if (id === null || !cutscene.request || id === selected?.id) return
-    const zone = ZONES.find(z => z.id === id)
+    const zone = zoneById(id)
     if (zone) void loadZone(zone)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cutscene.sceneZone])
@@ -412,7 +412,7 @@ export default function App() {
     const params = new URLSearchParams(window.location.search)
     const zoneId = params.get('zone')
     if (!zoneId) return
-    const zone = ZONES.find(z => z.id === Number(zoneId))
+    const zone = zoneById(Number(zoneId))
     if (zone) void loadZone(zone)
   }, [ffxiPath, selected, loadZone])
 
