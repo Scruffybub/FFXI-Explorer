@@ -4628,6 +4628,34 @@ rather than solved.
       0x7A, 0x80/0x70/0x76 yields. Automaton and chocobo NPCs (267 notes)
       aren't drawn; 90 notes are ids LSB lacks. ~150 "missing actor" ids are
       garbage (Pso'Xja, Shrouded Maw), so some script misreads there.
+      **Gestures and leftovers — 2026-11-07.** Leftover actors: on a real
+      zone change (0x34/0x35, both ObjectDelete every actor) `poses` is
+      cleared, so each is back at its post or unseen until placed again.
+      The sweep now clears "shown, not placed" by `run.placed` (every actor
+      ever placed), else zone changes inflate it. Race motion files (0x66,
+      ReadTpcEventMotionRes): 70 numbers a table, seven races of ten (Hume
+      m, Hume f, Elvaan m, Elvaan f, Taru, Mithra, Galka; found by which
+      block each race's scripts load), at 32712 + n (n < 70, plus the old
+      pair 32360 + 2n), 61171 + n (70-139), 87685 + n (140-209), 102029 + n
+      (210-279); checked against every 0x66 in the game whose gesture it
+      then plays. Each block's first file is the race's talk set (tlk0,
+      thk0, pas0..), which scripts load in some earlier event, so every race
+      actor (you too) starts with it (`talkSet`). Motion files given to an
+      actor anywhere in the zone's scripts count, not only its own block
+      (`motionFilesIn`, cached per zone). Emotes: 0x6E's value is low byte
+      emote, high byte a variant (258 = emote 2); Tarutaru have only "Emote
+      Set" (its first five files are the others' "Emote"); race 0 is a
+      stand-in dressed as you. Actions of doors and markers are noted as
+      "zone model action" (doors aren't animated). Gesture scenes 1,320 ->
+      365; 90 more scenes ask for gestures no file in the game holds
+      (dae3 for the Al Zahbi dancers, whose model has dan0-dan3: the game's
+      own typo), scored as "game data" by the scratch health script against
+      a scheduler index of every file. Seen by eye: Zazarg (Galka) thk1 and
+      pas0 in Bastok Markets [S] 359, a Taru emote in Whitegate 2.
+      Scores now: 20,464 of 21,998 raise nothing; quest/mission 4,089 of
+      4,545. Left in gestures: "you" loading motions by a server variable
+      (mab0, orz0, atp0: the number depends on your race), emote numbers
+      past the known files (Taru 40+), model NPCs' missing tags.
       **A clean sweep row is not a correct-looking scene:** check by eye.
     - **Town interiors — added 2026-10-28** (found through stage 2: scenes
       in shops were black). Shop and house insides are separate files the

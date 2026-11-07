@@ -72,7 +72,7 @@ export async function sweepZone(root: string, zoneId: number): Promise<SweepRow[
         }
         row.time = t
         // Shown before it was placed is fine when the scene places it later.
-        for (const [id, p] of run.poses) if (!p.unplaced) notes.delete(`shown, not placed: 0x${id.toString(16).padStart(2, '0')}`)
+        for (const id of run.placed) notes.delete(`shown, not placed: 0x${id.toString(16).padStart(2, '0')}`)
         if (run.view.ended) {
           const n = run.view.note ?? ''
           row.result = /can.t read/.test(n) ? 'unreadable' : /server/.test(n) ? 'server' : 'ended'

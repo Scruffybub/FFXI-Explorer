@@ -130,7 +130,8 @@ export function setCutscenePlayerRace(race: number): void {
 /** The race's emote files (animation-paths.json "Emote"), eight emotes (em00-em07) each. Tarutaru female shares the male's. */
 function emoteFile(race: number, emote: number): string | null {
   const sets = (animationPaths as unknown as Record<string, { name: string; paths: string[] }[]>)[String(race === 6 ? 5 : race)]
-  const paths = sets?.find(s => s.name === 'Emote')?.paths
+  // Tarutaru have only the longer "Emote Set", whose first five files are the other races' first five emote files.
+  const paths = sets?.find(s => s.name === 'Emote')?.paths ?? sets?.find(s => s.name === 'Emote Set')?.paths.slice(0, 5)
   return paths?.[Math.floor(emote / 8)] ?? null
 }
 const listeners = new Set<() => void>()
@@ -404,11 +405,59 @@ interface Thread {
   main: boolean
 }
 
-/** Motion files by number (0x5B: the number's range picks the table; 0x66: you and the player races, 32712 + n, then the old pair). */
+/**
+ * The player races' event motions (0x66) come ten files a race: Hume male
+ * from 32712, Hume female 32722, Elvaan male, Elvaan female, Tarutaru (both),
+ * Mithra, Galka 32772; more blocks follow in the same order. A block's first
+ * file is its talk set (tlk0, thk0, pas0..), which scripts load for the NPC
+ * in some earlier event, so every race actor starts with it.
+ */
+const RACE_BLOCK: Record<number, number> = { 1: 0, 2: 1, 3: 2, 4: 3, 5: 4, 6: 4, 7: 5, 8: 6 }
+const talkSet = (race: number) => (race in RACE_BLOCK ? 32712 + RACE_BLOCK[race] * 10 : null)
+
+/**
+ * The motion files each actor is given anywhere in the zone's scripts
+ * (0x5B/0x66 aimed at it, by its own block or another's), its own first.
+ */
+const zoneMotionFiles = new WeakMap<EventBlock[], Map<number, number[]>>()
+function motionFilesIn(blocks: EventBlock[]): Map<number, number[]> {
+  let map = zoneMotionFiles.get(blocks)
+  if (map) return map
+  map = new Map()
+  const own: [number, number][] = [], others: [number, number][] = []
+  for (const block of blocks) {
+    for (const e of block.events) {
+      for (const s of readEvent(block, e.offset)) {
+        if ((s.op !== 0x5b && s.op !== 0x66) || s.bytes.length < 7) continue
+        const b = s.bytes, x = b[1] | (b[2] << 8)
+        if (!(x & 0x8000)) continue
+        let who = (b[3] | (b[4] << 8) | (b[5] << 16) | (b[6] << 24)) >>> 0
+        if (who === 0x7ffffff8) who = block.actor
+        if (isPlayer(who) || who === ZONE_ACTOR) continue
+        for (const f of motionFileIds(s.op, block.refs[x & 0x7fff] | 0)) (who === block.actor ? own : others).push([who, f])
+      }
+    }
+  }
+  for (const [who, f] of [...own, ...others]) {
+    const list = map.get(who) ?? []
+    if (list.length < 12 && !list.includes(f)) list.push(f)
+    map.set(who, list)
+  }
+  zoneMotionFiles.set(blocks, map)
+  return map
+}
+
+/**
+ * Motion files by number. 0x5B: the number's range picks the table. 0x66
+ * (you and the player races): seventy numbers a table, seven races of ten,
+ * 32712 + n with the old pair for the first, then 61171 + n, 87685 + n and
+ * 102029 + n (found by where the gestures the scripts then play are; the
+ * later tables keep some of their motions at 32712 + n).
+ */
 function motionFileIds(op: number, n: number): number[] {
-  return op === 0x66
-    ? [32712 + n, 32360 + n * 2, 32361 + n * 2]
-    : [n < 512 ? n + 32104 : n < 1024 ? n + 49135 : n < 2048 ? n + 56345 : n < 3072 ? n + 59739 : n + 66339]
+  if (op !== 0x66) return [n < 512 ? n + 32104 : n < 1024 ? n + 49135 : n < 2048 ? n + 56345 : n < 3072 ? n + 59739 : n + 66339]
+  if (n < 70) return [32712 + n, 32360 + n * 2, 32361 + n * 2]
+  return [(n < 140 ? 61171 : n < 210 ? 87685 : 102029) + n, 32712 + n]
 }
 
 export class CutsceneRun {
@@ -431,6 +480,8 @@ export class CutsceneRun {
   private world: CollisionWorld | null = null
   /** Actors the scene has moved, by id (PLAYER for you). */
   readonly poses = new Map<number, ActorPose>()
+  /** Every actor the scene has placed, zone changes or not (the sweep's "shown, not placed" check). */
+  readonly placed = new Set<number>()
   /** Where the camera rests when no scheduler drives it: in front of the event's NPC (CutscenePlayer keeps it out of walls). */
   rest: CameraPose | null = null
   /** The NPC conversation's framings, best first; CutscenePlayer takes the first the walls allow. */
@@ -613,38 +664,25 @@ export class CutsceneRun {
   /**
    * An actor's own gestures (tlk0, hap0, dead, corp..), where the game keeps
    * them: a model NPC's model file, a player race's race file (casting,
-   * kneeling, collapsing), and the motion files the actor's own scripts load
-   * (0x5B/0x66 on itself: an earlier event loads them in the game, and the
-   * scene may come later).
+   * kneeling, collapsing) and its race's talk set, and the motion files the
+   * zone's scripts load for it (0x5B/0x66: an earlier event loads them in the
+   * game, and the scene may come later).
    */
   private own = new Map<number, { libs: Lib[] | null; ready: Promise<Lib[]> }>()
   private ownLib(id: number, look: number | number[] | undefined) {
     if (this.own.has(id)) return
     const files: (number | string)[] = []
     if (typeof look === 'number') files.push(npcModelFileId(look))
-    else if (look && SKELETON_PATHS[look[0]]) files.push(SKELETON_PATHS[look[0]])
-    if (id !== PLAYER) files.push(...this.motionFilesOf(id))
+    else if (look && SKELETON_PATHS[look[0]]) {
+      files.push(SKELETON_PATHS[look[0]])
+      const talk = talkSet(look[0])
+      if (talk !== null) files.push(talk)
+    }
+    if (id !== PLAYER) files.push(...(motionFilesIn(this.r.blocks).get(id) ?? []))
     const ready = this.track(Promise.all(files.map(f => loadEventFile(this.r.root, f)))).then(l => l.filter((x): x is Lib => !!x))
     const entry: { libs: Lib[] | null; ready: Promise<Lib[]> } = { libs: null, ready }
     void ready.then(libs => { entry.libs = libs })
     this.own.set(id, entry)
-  }
-  /** The motion files actor `id`'s block loads on itself, the newest table first, at most twelve. */
-  private motionFilesOf(id: number): number[] {
-    const block = this.r.blocks.find(b => b.actor === id)
-    if (!block) return []
-    const out = new Set<number>()
-    for (const e of block.events) {
-      for (const s of readEvent(block, e.offset)) {
-        if ((s.op !== 0x5b && s.op !== 0x66) || s.bytes.length < 7) continue
-        const b = s.bytes, who = (b[3] | (b[4] << 8) | (b[5] << 16) | (b[6] << 24)) >>> 0
-        const x = b[1] | (b[2] << 8)
-        if ((who !== 0x7ffffff8 && who !== id) || !(x & 0x8000)) continue
-        for (const f of motionFileIds(s.op, block.refs[x & 0x7fff] | 0)) out.add(f)
-        if (out.size >= 12) return [...out]
-      }
-    }
-    return [...out]
   }
   npcPose(index: number): ActorPose | null {
     for (const [id, p] of this.poses) if (id !== PLAYER && (id & 0xfff) === index) return p
@@ -663,6 +701,7 @@ export class CutsceneRun {
     if (yaw !== undefined) p.yaw = yaw
     p.walk = undefined; p.moving = false
     this.poses.set(id, p)
+    this.placed.add(id)
   }
   private floor(x: number, y: number, z: number): number | null {
     if (!this.world) return null
@@ -763,7 +802,7 @@ export class CutsceneRun {
     if (!lib) {
       // Its own files still on their way: again once they're in.
       if (retry && own && !own.libs) {
-        void own.ready.then(() => { if (!this.act(actor, tag, extra, false)) this.startScheduler(tag, actor, 'missing action') })
+        void own.ready.then(() => { if (!this.act(actor, tag, extra, false)) this.startScheduler(tag, actor, this.actionKind(actor)) })
         return true
       }
       return false
@@ -783,6 +822,9 @@ export class CutsceneRun {
     this.running.push({ name: tag, start: this.now, end: t })
     return true
   }
+
+  /** How the sweep files an action it can't find: a door's or marker's moves are the zone model's own (not drawn yet). */
+  private actionKind(actor: number) { return this.poses.get(actor)?.mark ? 'zone model action' : 'missing action' }
 
   /** Loads an actor's motion file (0x5B: the file number's range picks the table; 0x66: you and the player races, 32712 + n). */
   private async loadMotions(th: Thread, actor: number, op: number, n: number) {
@@ -1063,6 +1105,10 @@ export class CutsceneRun {
         th.pc += size
         if (zone === this.st.sceneZone) return 'go'
         if (!zoneById(zone)) { this.probe?.note('unknown zone', String(zone)); return 'go' }
+        // The game deletes every actor as it changes zone: each is back at its post, or unseen, until the scene places it.
+        this.poses.clear()
+        this.fadeOuts = []
+        this.talking = null
         this.out({ sceneZone: zone })
         th.waiting = 'zone'
         return 'yield'
@@ -1076,10 +1122,13 @@ export class CutsceneRun {
       // An emote: the actor's race's emote files list them bow, point, salute, kneel, laugh, cry, no, yes,
       // wave.. eight a file (em00-em07); the scripts count from 1 (1 = bow, their most used).
       case 0x6e: {
-        const actor = this.who(th, 1), n = Math.max(0, this.val(th, 5) - 1)
-        const race = actor === PLAYER ? this.st.playerRace : this.pose(actor)?.race
+        // The low byte is the emote (the high byte a variant the game passes on); race 0 is a stand-in dressed as you.
+        const actor = this.who(th, 1), n = Math.max(0, (this.val(th, 5) & 0xff) - 1)
+        const own = actor === PLAYER ? this.st.playerRace : this.pose(actor)?.race
+        const race = own === 0 ? this.st.playerRace : own
         const path = race ? emoteFile(race, n) : null
         if (path) void this.track(loadEventFile(this.r.root, path)).then(lib => { if (lib) this.act(actor, 'em0' + (n % 8), [lib]); else this.probe?.note('missing file', path) })
+        else if (race) this.probe?.note('missing emote', `${n + 1} (race ${race})`)
         else this.probe?.note('emote with no race', hex(actor))
         break
       }
@@ -1099,7 +1148,7 @@ export class CutsceneRun {
         else { th.pc += size; if (this.pose(th.actor)?.walk) { th.waiting = 'walk'; return 'yield' } return 'go' }
         break
       // An actor's action by name (0x2C); a zone's (0x2D) are scene schedulers.
-      case 0x2c: if (!this.act(this.who(th, 1), this.tag(th, 9))) this.startScheduler(this.tag(th, 9), this.who(th, 1), 'missing action'); break
+      case 0x2c: if (!this.act(this.who(th, 1), this.tag(th, 9))) this.startScheduler(this.tag(th, 9), this.who(th, 1), this.actionKind(this.who(th, 1))); break
       case 0x2d: this.startScheduler(this.tag(th, 9)); break
       // Motion files for an actor, then its action from them ("xxxx" = load only).
       case 0x5b: case 0x66: {
