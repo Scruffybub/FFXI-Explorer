@@ -4676,15 +4676,19 @@ rather than solved.
       names use the zone file: a door's "open" is per door folder, and by
       name the first door in the zone would have played (tried; doors
       went 143 -> 109 falsely, reverted). Camera/fx scenes 389 -> 131;
-      20,631 of 21,998 clean; quest/mission 4,148. **Not seen by eye:**
-      Pso'Xja 5 (fnst at the Fenrir door), Promyvion-Holla Memory Flux
-      (sta1) and Whitegate 69 (1pb1, started on the scene's last line)
-      all post and have particles alive where the zone places them, but
-      hiding those systems changed no pixel; the panel's own Play of
-      t_gu/effe/1pba (70 alive) changed none either. So the wiring
-      matches the existing path, and whether these zone effects draw is
-      the particle renderer's question (next). Census: window.__sceneFx
-      (log, posted), __sceneEffects, __triggerCommands, __playTrigger.
+      20,631 of 21,998 clean; quest/mission 4,148. **Why they first drew
+      nothing (2026-11-09):** with post-processing on, the generator layer
+      (GAMMA_BLEND_LAYER) is drawn only by GammaBlendPass, and PostStack
+      enabled that pass only when zone effects were on; mounted for a
+      cutscene, TriggeredEffects drew into a layer nothing rendered (40x
+      brightness and depthTest off changed 0 pixels). generatorLayer now
+      follows the mount rule (zone effects or a cutscene). Seen by eye:
+      Whitegate 69 leaves a blue magic circle on the platform
+      (t_gu/effe/1pba g0b1/g0c1, an Empty Vessel = BLU unlock); Pso'Xja 5
+      (Three Paths) lights the Fenrir door crystal with rays (fnst). Census:
+      window.__sceneFx (log, posted), __sceneEffects, __triggerCommands,
+      __playTrigger; scratch abnow.sh/fxab.sh diff a shot with and
+      without a folder's particle materials.
       Left: 0pop/4k23 (San d'Oria 30042/3, not in the loaded file),
       1pb1 in other zones (0x35 from Whitegate).
       **A clean sweep row is not a correct-looking scene:** check by eye.

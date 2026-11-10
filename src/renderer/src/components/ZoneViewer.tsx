@@ -5163,7 +5163,8 @@ export default function ZoneViewer({
 
       {/* Zone effects draw on the gamma layer too: without them here, they showed
           only when Generator water or Zone weather happened to switch it on. */}
-      <PostStack post={post} generatorLayer={genSpawn || zoneLight || (scene.zoneEffects && !scene.mapView)} />
+      {/* The generator layer's pass must run whenever TriggeredEffects is mounted (a cutscene's effects too), or they draw to nothing. */}
+      <PostStack post={post} generatorLayer={genSpawn || zoneLight || ((scene.zoneEffects || !!cutscene.request) && !scene.mapView)} />
     </Canvas>
   )
 }
