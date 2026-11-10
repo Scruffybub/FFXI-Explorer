@@ -2,7 +2,7 @@ import * as THREE from 'three'
 import { fileIdPath } from './fileTable'
 import { opSize, readEvent, ZONE_ACTOR, type EventBlock } from './eventScript'
 import { zoneById, type ZoneEntry } from './zoneList'
-import { npcMarks, npcModelFileId, npcStations, sceneActors } from './npcStations'
+import { lsbName, npcMarks, npcModelFileId, npcStations, sceneActors } from './npcStations'
 import type { CollisionWorld } from './CollisionWorld'
 import { parseAnimationDat, SKELETON_PATHS, type ParsedAnimation } from './ffxi-dat'
 import animationPaths from '../../../../resources/animation-paths.json'
@@ -658,7 +658,7 @@ export class CutsceneRun {
 
   private name(id: number): string | null {
     if (id === PLAYER) return 'You'
-    return this.r.names.get(id & 0xfff) ?? null
+    return this.r.names.get(id & 0xfff) ?? (id >>> 24 === 1 ? lsbName((id >> 12) & 0xfff, id & 0xfff) : null)
   }
 
   /** A speaker's name; the sweep hears of the ones it has none for. */

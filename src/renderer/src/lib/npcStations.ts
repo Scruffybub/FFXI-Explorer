@@ -1,6 +1,7 @@
 import rawStations from '../../../../resources/npc-stations.json'
 import rawActors from '../../../../resources/npc-actors.json'
 import rawMarks from '../../../../resources/npc-marks.json'
+import rawLsbNames from '../../../../resources/npc-names-lsb.json'
 import { parseAnimationDat, parseDatFile, parseZoneFile, SKELETON_PATHS, type ParsedAnimation, type ParsedDatFile, type ParsedZone } from './ffxi-dat'
 import { composeCharacter, loadMovementClips } from './characterModel'
 import { appearancePath, raceFilePath } from './equipTable'
@@ -53,6 +54,12 @@ const MARKS = rawMarks as unknown as Record<string, NpcMark[]>
 export type NpcMark = [number, number, number, number, number, string?]
 export function npcMarks(zoneId: number): NpcMark[] {
   return MARKS[String(zoneId)] ?? []
+}
+
+/** A cutscene-only NPC's name from LandSandBoat, for the ones the game's own list leaves out. */
+const LSB_NAMES = rawLsbNames as unknown as Record<string, Record<string, string>>
+export function lsbName(zoneId: number, index: number): string | null {
+  return LSB_NAMES[String(zoneId)]?.[String(index)] ?? null
 }
 
 export function sceneActors(zoneId: number): NpcStation[] {

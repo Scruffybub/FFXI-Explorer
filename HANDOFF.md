@@ -4747,6 +4747,15 @@ rather than solved.
       opens _gi2, the council chamber's double door, and the council walks
       in through the open doorway. Door scenes 149 -> 118 (the rest are the
       stand-ins' gestures). Real motion: still unknown.
+      **Names — 2026-11-09.** Of 428 unnamed speakers (249 scenes), 379
+      are LandSandBoat "blank" invisible markers (model 52) the server
+      dresses and names: nothing to recover. The rest are cutscene-only NPCs
+      the game's name list leaves out (Beaucedine [S] Cait Sith, Rosulatia,
+      Kupofried): resources/npc-names-lsb.json (build-npc-stations, 8,009
+      names) is the fallback in CutsceneRun.name(). Name scenes 249 -> 229;
+      20,933 of 22,002 clean; quest/mission 4,236. Zones (137): unchanged
+      since the 2026-11-06 notes above (701 41 scenes, 735 24, 700 23, 0 20,
+      737 11).
       **A clean sweep row is not a correct-looking scene:** check by eye.
     - **Town interiors — added 2026-10-28** (found through stage 2: scenes
       in shops were black). Shop and house insides are separate files the

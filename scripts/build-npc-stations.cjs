@@ -45,6 +45,10 @@ const NO_BODY = new Set(['door', 'elevator', 'ship'])
 
 const out = {}
 const actors = {}
+// Cutscene-only NPCs' names, for speakers the game's own name list leaves
+// out (Beaucedine [S]'s Cait Sith, Kupofried): "blank" ones are dressed and
+// named by the server, door ids start with "_".
+const names = {}
 const marks = {}
 const skipped = {}
 const skip = why => { skipped[why] = (skipped[why] || 0) + 1 }
@@ -55,6 +59,9 @@ for (const zone of fs.readdirSync(dir).sort()) {
   for (const [key, e] of Object.entries(npcs)) {
     const id = Number(key)
     const look = e.render?.look
+    const named = String(e.display_name ?? e.script ?? '')
+    if (e.status === 'cutscene_only' && named && named !== 'blank' && !named.startsWith('_') && !named.startsWith('NPC['))
+      (names[(id >> 12) & 0xfff] ??= {})[id & 0xfff] = named.replace(/_/g, ' ')
     const shown = !!e.at && SHOWN.has(e.status)
     if (!shown) skip('status ' + (e.status ?? 'none'))
     const mark = () => {
@@ -91,6 +98,9 @@ console.log('skipped', JSON.stringify(skipped))
 const actorsFile = path.join(__dirname, '..', 'resources', 'npc-actors.json')
 fs.writeFileSync(actorsFile, JSON.stringify(actors))
 console.log(Object.values(actors).reduce((n, v) => n + v.length, 0), 'scene-only actors,', fs.statSync(actorsFile).size, 'bytes')
+const namesFile = path.join(__dirname, '..', 'resources', 'npc-names-lsb.json')
+fs.writeFileSync(namesFile, JSON.stringify(names))
+console.log(Object.values(names).reduce((n, v) => n + Object.keys(v).length, 0), 'cutscene-only names,', fs.statSync(namesFile).size, 'bytes')
 const marksFile = path.join(__dirname, '..', 'resources', 'npc-marks.json')
 fs.writeFileSync(marksFile, JSON.stringify(marks))
 console.log(Object.values(marks).reduce((n, v) => n + v.length, 0), 'marks,', fs.statSync(marksFile).size, 'bytes')
