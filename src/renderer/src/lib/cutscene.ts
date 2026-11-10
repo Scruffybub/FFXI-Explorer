@@ -7,6 +7,7 @@ import type { CollisionWorld } from './CollisionWorld'
 import { parseAnimationDat, SKELETON_PATHS, type ParsedAnimation } from './ffxi-dat'
 import animationPaths from '../../../../resources/animation-paths.json'
 import { sceneName } from './sceneNames'
+import { sceneEffects } from './triggeredEffects'
 
 /**
  * Cutscenes -> Events -> Play in zone: runs an event script in its zone.
@@ -153,6 +154,7 @@ const hex = (n: number) => '0x' + n.toString(16).padStart(2, '0')
 /** Asks the app to open the zone and play the event there. */
 export function requestCutscene(r: CutsceneRequest): void {
   current = null
+  sceneEffects.clear = true
   set({ request: r, view: null, sceneZone: r.zone.id, sceneHour: null, sceneMusic: null, sceneVolume: 1, cast: sceneCast(r) })
 }
 
@@ -219,6 +221,7 @@ export function cutsceneRun(): CutsceneRun | null {
 }
 export function stopCutscene(): void {
   current = null
+  sceneEffects.clear = true
   set({ request: null, view: null, handover: state.handover + 1, sceneZone: null, sceneHour: null, sceneMusic: null, sceneVolume: 1 })
 }
 export function advanceCutscene(): void { current?.advance() }
@@ -229,7 +232,7 @@ const fileCache = new Map<number | string, Promise<Lib | null>>()
 export function clearCutsceneFiles(): void { fileCache.clear() }
 
 /** A file's cameras, schedulers (by name) and animations: event files, motion files, emote files (by path). */
-function loadEventFile(root: string, id: number | string): Promise<Lib | null> {
+function loadEventFile(root: string, id: number | string, withClips = true): Promise<Lib | null> {
   let p = fileCache.get(id)
   if (!p) {
     p = (async () => {
@@ -247,7 +250,7 @@ function loadEventFile(root: string, id: number | string): Promise<Lib | null> {
         at += size
       }
       let clips: ParsedAnimation[] = []
-      try { clips = parseAnimationDat(buf) } catch { /* none */ }
+      if (withClips) try { clips = parseAnimationDat(buf) } catch { /* none */ }
       return { cameras, schedulers, clips }
     })().catch(() => null)
     fileCache.set(id, p)
@@ -467,6 +470,15 @@ export class CutsceneRun {
   private threads: Thread[] = []
   private order = 0
   private files: Lib[] = []
+  /**
+   * The scene zones' own files (their model files): the effects their scene
+   * actions start. The newest first; a zone opened with 0x35 keeps the one
+   * before (Wajaom's 511 plays Whitegate's 1pb1 from there).
+   */
+  private zoneLibs: Lib[] = []
+  private keepZone = false
+  private zoneFileId = -1
+  private zoneFileReady: Promise<void> = Promise.resolve()
   /** Motion files loaded for each actor (0x5B, 0x66): where its actions are found first. */
   private libs = new Map<number, Lib[]>()
   /** Scene seconds (cutsceneMotion reads it). */
@@ -514,6 +526,8 @@ export class CutsceneRun {
       th.tag = tag
       this.threads.push(th)
     }
+    for (const th of this.threads) th.waiting = 'load'
+    void this.loadZoneFile(r.zone.id).then(() => { for (const th of this.threads) if (th.waiting === 'load') th.waiting = null })
     if (r.block.actor !== ZONE_ACTOR) {
       const st = npcStations(r.zone.id).find(s => s[0] === (r.block.actor & 0xfff))
       if (st) {
@@ -521,6 +535,18 @@ export class CutsceneRun {
         this.standYou()
       }
     }
+  }
+
+  /** Reads zone `id`'s own file for its schedulers (once a zone; the scene waits for it). `keep`: the zone before's stay too. */
+  private loadZoneFile(id: number, keep = false): Promise<void> {
+    if (id !== this.zoneFileId) {
+      this.zoneFileId = id
+      const before = keep ? this.zoneLibs : []
+      if (!keep) this.zoneLibs = []
+      const z = zoneById(id)
+      this.zoneFileReady = z ? this.track(loadEventFile(this.r.root, z.modelPath, false)).then(l => { if (this.zoneFileId === id) this.zoneLibs = [...(l ? [l] : []), ...before] }) : Promise.resolve()
+    }
+    return this.zoneFileReady
   }
 
   /** An NPC conversation's NPC: where it stands and faces. */
@@ -846,6 +872,18 @@ export class CutsceneRun {
       const f = this.files[i]
       if (f?.schedulers.has(name)) { cmds = f.schedulers.get(name); cams = f.cameras; lib = f }
     }
+    // Else the zone's own: its effects, which TriggeredEffects plays. Not a
+    // door's or an NPC's action: each door has its own "open", and by name
+    // alone the first door in the zone would play it.
+    const zl = !cmds && kind === 'missing scheduler' ? this.zoneLibs.find(l => l.schedulers.has(name)) : undefined
+    if (zl) {
+      lib = zl
+      cmds = lib.schedulers.get(name)
+      cams = lib.cameras
+      // An earlier zone's: kept for its timing, but the viewer shows one zone, so it isn't drawn.
+      if (zl !== this.zoneLibs[0]) this.probe?.note(kind, name + ' (earlier zone)')
+      else if (!this.probe && sceneEffects.start.length < 64) sceneEffects.start.push(name)
+    }
     if (!cmds) {
       if (name && name !== 'xxxx') this.probe?.note(kind, name)
       return
@@ -895,7 +933,7 @@ export class CutsceneRun {
   /** The zone the scene asked for (0x34/0x35) is up: scripts waiting for it go on. */
   zoneReady(zoneId: number) {
     if (this.st.sceneZone !== zoneId) return
-    for (const th of this.threads) if (th.waiting === 'zone') th.waiting = null
+    void this.loadZoneFile(zoneId, this.keepZone).then(() => { for (const th of this.threads) if (th.waiting === 'zone') th.waiting = null })
   }
 
   /** Actors fading out (0x6C to alpha 0): hidden when the fade ends. */
@@ -1109,6 +1147,8 @@ export class CutsceneRun {
         this.poses.clear()
         this.fadeOuts = []
         this.talking = null
+        if (!this.probe && op === 0x34) sceneEffects.clear = true
+        this.keepZone = op === 0x35
         this.out({ sceneZone: zone })
         th.waiting = 'zone'
         return 'yield'
@@ -1163,7 +1203,7 @@ export class CutsceneRun {
         if (op in LOADERS) {
           const tag = this.tag(th, 11)
           let n = this.val(th, 1)
-          if (op === 0x45) n = n >= 600 ? n + 39643 : n >= 300 ? n + 25937 : n
+          if (op === 0x45) n = n >= 900 ? n + 77797 : n >= 600 ? n + 39643 : n >= 300 ? n + 25937 : n
           const id = LOADERS[op] + n
           th.pc += size
           const actor = this.who(th, 3)
@@ -1181,6 +1221,7 @@ export class CutsceneRun {
 
   private stopScheduler(name: string, actor?: number) {
     this.running = this.running.filter(x => x.name !== name)
+    if (!this.probe && this.zoneLibs.some(l => l.schedulers.has(name)) && sceneEffects.stop.length < 64) sceneEffects.stop.push(name)
     const p = actor !== undefined ? this.poses.get(actor) : undefined
     if (p?.action?.name === name) p.action = undefined
   }

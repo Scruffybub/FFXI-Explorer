@@ -5153,7 +5153,8 @@ export default function ZoneViewer({
           effectRange={scene.zoneEffects ? scene.effectRange : null}
         />
       )}
-      {scene.zoneEffects && !scene.mapView && <TriggeredEffects zone={zoneData} range={scene.effectRange} />}
+      {/* A cutscene's zone effects play with zone effects off, too: they only run when the scene starts them. */}
+      {(scene.zoneEffects || !!cutscene.request) && !scene.mapView && <TriggeredEffects zone={zoneData} range={scene.effectRange} />}
       {footsteps && !character && <FootstepCadence body={walkBody} footsteps={footsteps} />}
       {!scene.mapView && soundVolume > 0 && <AmbientSoundPlayer zone={zoneData} volume={soundVolume} />}
 

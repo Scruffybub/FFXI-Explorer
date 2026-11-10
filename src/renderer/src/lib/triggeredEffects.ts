@@ -77,3 +77,15 @@ export function triggerLabel(dir: string): string {
   for (const [re, name] of NAMES) if (re.test(dir)) return `${name} (${rel})`
   return rel
 }
+
+/**
+ * A cutscene's zone effects: the scene actions (0x2D) found in the zone's own
+ * file are effect routines there (Whitegate's 1pb1 starts the sparkles g0c1
+ * and g0b1 in t_gu/effe/1pba). The cutscene queues them by name and
+ * TriggeredEffects takes the queue each frame and plays them where the zone
+ * places their generators. `clear` ends them all (the scene ended or moved).
+ */
+export const sceneEffects: { start: string[]; stop: string[]; clear: boolean } = { start: [], stop: [], clear: false }
+if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('census')) {
+  Object.assign(window, { __sceneEffects: sceneEffects, __triggerCommands: triggerCommands, __playTrigger: playTrigger })
+}

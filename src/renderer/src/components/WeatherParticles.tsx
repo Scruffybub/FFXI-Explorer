@@ -3,6 +3,7 @@ import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 import type { ParsedZone } from '../lib/ffxi-dat'
 import type { GeneratorSpawn } from '../lib/ffxi-dat/types'
+import type { EffectRoutine } from '../lib/ffxi-dat/EffectRoutineParser'
 import { sampleKeyFrames } from '../lib/ffxi-dat/GeneratorParser'
 import { applySpawnStages, setSubtractive, untexturedTexel } from '../lib/spawnStages'
 import { GAMMA_BLEND_LAYER } from '../lib/GammaBlendPass'
@@ -10,7 +11,7 @@ import { HAZE_LAYER, HAZE_FRAGMENT, HAZE_PARS, hazeUniforms } from '../lib/HazeP
 import { spreadOffset } from './SkyLayers'
 import { childEvents, pruneChildEvents } from '../lib/weatherEvents'
 import { curveStart, rotationOrder } from '../lib/ximRules'
-import { setTriggerGroups, triggerCommands, triggerLabel, triggerStore } from '../lib/triggeredEffects'
+import { sceneEffects, setTriggerGroups, triggerCommands, triggerLabel, triggerStore } from '../lib/triggeredEffects'
 
 /**
  * The weather's sprite particles: rain, and the splashes and ripples that go
@@ -44,6 +45,7 @@ import { setTriggerGroups, triggerCommands, triggerLabel, triggerStore } from '.
  */
 
 const EFFECT_FPS = 60
+const CENSUS = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('census')
 /** Retail's weather emission thinning; see above. */
 const WEATHER_EMIT_SCALE = 0.3
 const MAX_PARTICLES = 2000
@@ -625,6 +627,77 @@ export function TriggeredEffects({ zone, range }: { zone: ParsedZone; range: num
     return () => setTriggerGroups([])
   }, [groups])
   const running = useSyncExternalStore(triggerStore.subscribe, () => triggerStore.get().running)
+  // A cutscene's zone effects (sceneEffects), run as the spell browser runs a
+  // routine: each command `delay` frames after the one before; a generator
+  // posts an emission every `every` frames for its duration (one for 0),
+  // where the zone places it (posted at the origin: its own position is
+  // added); a call joins in. Names are looked for in the routine's folder first.
+  const sceneFx = useMemo(() => {
+    const routines = new Map<string, EffectRoutine[]>()
+    for (const r of zone.routines ?? []) routines.set(r.name, [...(routines.get(r.name) ?? []), r])
+    const spawns = new Map<string, GeneratorSpawn[]>()
+    for (const sp of zone.spawns ?? []) spawns.set(sp.generator, [...(spawns.get(sp.generator) ?? []), sp])
+    const pick = <T extends { dir: string }>(list: T[] | undefined, dir: string) => list?.find(x => x.dir === dir) ?? list?.[0]
+    return {
+      routine: (name: string, dir: string) => pick(routines.get(name), dir),
+      /** Every routine of the name: a scene's (Garlaige's kill stops two folders' effects). */
+      routines: (name: string) => routines.get(name) ?? [],
+      spawn: (name: string, dir: string) => pick(spawns.get(name), dir),
+      seqs: [] as { routine: EffectRoutine; name: string; index: number; cursor: number }[],
+      emits: [] as { spawn: GeneratorSpawn; name: string; next: number; until: number }[],
+      posted: new Set<string>(),
+      /** Census: the names started, and whether the zone had them. */
+      log: [] as string[],
+    }
+  }, [zone])
+  useEffect(() => () => { sceneEffects.start.length = 0; sceneEffects.stop.length = 0 }, [sceneFx])
+  if (CENSUS) (window as unknown as { __sceneFx?: unknown }).__sceneFx = sceneFx
+  useFrame(({ clock }) => {
+    const fx = sceneFx, now = clock.getElapsedTime() * EFFECT_FPS
+    // Ended: its particles go too (a singleton would stay for good).
+    const end = (keep: (name: string) => boolean) => {
+      fx.seqs = fx.seqs.filter(s => keep(s.name))
+      fx.emits = fx.emits.filter(e => keep(e.name))
+      for (const s of systems) for (const e of s.emitters) {
+        if (!fx.posted.has(e.spawn.dir + '|' + e.spawn.generator) || fx.emits.some(x => x.spawn === e.spawn)) continue
+        for (let i = e.first; i < e.first + e.capacity; i++) { s.born[i] = -Infinity; s.expired[i] = 1 }
+      }
+    }
+    if (sceneEffects.clear) { sceneEffects.clear = false; end(() => false); fx.posted.clear() }
+    for (const name of sceneEffects.stop.splice(0)) end(n => n !== name)
+    for (const name of sceneEffects.start.splice(0)) {
+      end(n => n !== name)
+      if (CENSUS) fx.log.push(name + ':' + fx.routines(name).length)
+      for (const r of fx.routines(name)) fx.seqs.push({ routine: r, name, index: 0, cursor: now })
+    }
+    for (let k = 0; k < fx.seqs.length; k++) {
+      const seq = fx.seqs[k], cmds = seq.routine.commands
+      while (seq.index < cmds.length) {
+        const cmd = cmds[seq.index]
+        if (seq.cursor + cmd.delay > now) break
+        seq.cursor += cmd.delay
+        seq.index++
+        if (cmd.kind === 'end') seq.index = cmds.length
+        else if (cmd.kind === 'generator') {
+          const sp = fx.spawn(cmd.ref, seq.routine.dir)
+          if (sp) fx.emits.push({ spawn: sp, name: seq.name, next: seq.cursor, until: seq.cursor + cmd.duration })
+        } else if (cmd.kind === 'routine' || cmd.kind === 'link') {
+          const r = fx.routine(cmd.ref, seq.routine.dir)
+          if (r && fx.seqs.length < 64) fx.seqs.push({ routine: r, name: seq.name, index: 0, cursor: seq.cursor })
+        } else if (cmd.kind === 'stop') fx.emits = fx.emits.filter(e => e.name !== seq.name || e.spawn.generator !== cmd.ref)
+        else if (cmd.kind === 'stopRoutine') for (const s of fx.seqs) if (s.name === seq.name && s.routine.name === cmd.ref && s !== seq) s.index = s.routine.commands.length
+      }
+    }
+    fx.seqs = fx.seqs.filter(s => s.index < s.routine.commands.length)
+    for (const e of fx.emits) {
+      while (e.next <= now && e.next <= e.until) {
+        childEvents.push({ name: e.spawn.generator, dir: e.spawn.dir, frame: e.next, at: new THREE.Vector3() })
+        fx.posted.add(e.spawn.dir + '|' + e.spawn.generator)
+        e.next += Math.max(1, e.spawn.emission.every)
+      }
+    }
+    fx.emits = fx.emits.filter(e => e.next <= e.until)
+  })
   useFrame(({ camera, controls, scene }) => {
     for (let k = childEvents.length - 1; k >= 0; k--) {
       const ev = childEvents[k]

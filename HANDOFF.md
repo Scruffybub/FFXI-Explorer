@@ -4656,6 +4656,37 @@ rather than solved.
       4,545. Left in gestures: "you" loading motions by a server variable
       (mab0, orz0, atp0: the number depends on your race), emote numbers
       past the known files (Taru 40+), model NPCs' missing tags.
+      **Scene effects — 2026-11-07.** Two causes of "missing scheduler":
+      (1) 0x45's file number has a fourth range the 2022 XiEvents notes
+      lack: n >= 900 is file 30704 + n + 77797 (found by matching every
+      0x45's scheduler names against the scheduler index; s000.. of
+      Ru'Lude/Pso'Xja missions). (2) Zone scene actions (0x2D) name effect
+      routines in the zone's own model file (Whitegate 1pb1 in
+      t_gu/effe/1pba starts g0c1/g0b1; Promyvion sta1 starts pik1). The run
+      reads the scene zone's model file for its schedulers (`zoneLibs`,
+      clips skipped; the scene waits for it at start and on each zone
+      change; 0x35 keeps the zone before's, noted "(earlier zone)" since
+      the viewer shows one zone) and queues the name in
+      `sceneEffects` (lib/triggeredEffects). TriggeredEffects runs it like
+      the spell runner: delays in order, generators posted to childEvents
+      at the origin (their placed position is added), calls joined, stops
+      honoured; every routine of the name runs (Pso'Xja's kill spans two
+      folders). TriggeredEffects now mounts during any cutscene, zone
+      effects on or off (it only plays what is started). Only 0x2D/loader
+      names use the zone file: a door's "open" is per door folder, and by
+      name the first door in the zone would have played (tried; doors
+      went 143 -> 109 falsely, reverted). Camera/fx scenes 389 -> 131;
+      20,631 of 21,998 clean; quest/mission 4,148. **Not seen by eye:**
+      Pso'Xja 5 (fnst at the Fenrir door), Promyvion-Holla Memory Flux
+      (sta1) and Whitegate 69 (1pb1, started on the scene's last line)
+      all post and have particles alive where the zone places them, but
+      hiding those systems changed no pixel; the panel's own Play of
+      t_gu/effe/1pba (70 alive) changed none either. So the wiring
+      matches the existing path, and whether these zone effects draw is
+      the particle renderer's question (next). Census: window.__sceneFx
+      (log, posted), __sceneEffects, __triggerCommands, __playTrigger.
+      Left: 0pop/4k23 (San d'Oria 30042/3, not in the loaded file),
+      1pb1 in other zones (0x35 from Whitegate).
       **A clean sweep row is not a correct-looking scene:** check by eye.
     - **Town interiors — added 2026-10-28** (found through stage 2: scenes
       in shops were black). Shop and house insides are separate files the
