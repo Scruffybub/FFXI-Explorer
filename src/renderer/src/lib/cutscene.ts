@@ -120,8 +120,15 @@ interface State {
   sceneVolume: number
   /** The unplaced scene actors the scene's scripts name (sceneCast): NpcStations loads these. */
   cast: Set<number>
+  /**
+   * The doors the scene has open, by the id their zone model carries (MZB
+   * +0x34, "_4i5"): the zone hides them until closed. How the game moves a
+   * door (swing, slide, rise) isn't in the files read so far (2026-11-09).
+   */
+  openDoors: ReadonlySet<string>
 }
-let state: State = { request: null, view: null, handover: 0, sceneZone: null, sceneHour: null, sceneMusic: null, sceneVolume: 1, playerRace: 1, cast: new Set() }
+const NO_DOORS: ReadonlySet<string> = new Set()
+let state: State = { request: null, view: null, handover: 0, sceneZone: null, sceneHour: null, sceneMusic: null, sceneVolume: 1, playerRace: 1, cast: new Set(), openDoors: NO_DOORS }
 
 /** App tells the scene which race you are (the Character builder's). */
 export function setCutscenePlayerRace(race: number): void {
@@ -155,7 +162,7 @@ const hex = (n: number) => '0x' + n.toString(16).padStart(2, '0')
 export function requestCutscene(r: CutsceneRequest): void {
   current = null
   sceneEffects.clear = true
-  set({ request: r, view: null, sceneZone: r.zone.id, sceneHour: null, sceneMusic: null, sceneVolume: 1, cast: sceneCast(r) })
+  set({ request: r, view: null, sceneZone: r.zone.id, sceneHour: null, sceneMusic: null, sceneVolume: 1, cast: sceneCast(r), openDoors: NO_DOORS })
 }
 
 /**
@@ -222,7 +229,7 @@ export function cutsceneRun(): CutsceneRun | null {
 export function stopCutscene(): void {
   current = null
   sceneEffects.clear = true
-  set({ request: null, view: null, handover: state.handover + 1, sceneZone: null, sceneHour: null, sceneMusic: null, sceneVolume: 1 })
+  set({ request: null, view: null, handover: state.handover + 1, sceneZone: null, sceneHour: null, sceneMusic: null, sceneVolume: 1, openDoors: NO_DOORS })
 }
 export function advanceCutscene(): void { current?.advance() }
 export function chooseCutscene(i: number): void { current?.choose(i) }
@@ -325,6 +332,8 @@ export interface ActorPose {
   shown?: boolean
   /** Nothing to draw: a marker, door or ship the scene only points at. */
   mark?: boolean
+  /** A door's id (its zone model's, MZB +0x34). */
+  door?: string
   /** A player race (1-8) for an NPC dressed as one, or you: emotes come from the race's files. */
   race?: number
   /** The action it plays (tlk0, thk1..): its motions in turn. */
@@ -675,7 +684,7 @@ export class CutsceneRun {
       const at = st ?? actor
       const mark = at ? null : npcMarks(this.r.zone.id).find(s => s[0] === (id & 0xfff))
       if (mark) {
-        p = { x: mark[1], y: mark[2], z: mark[3], yaw: Math.max(0, mark[4] / 256) * Math.PI * 2, moving: false, hidden: true, mark: true, unplaced: mark[4] === -1 }
+        p = { x: mark[1], y: mark[2], z: mark[3], yaw: Math.max(0, mark[4] / 256) * Math.PI * 2, moving: false, hidden: true, mark: true, unplaced: mark[4] === -1, ...(mark[5] && { door: mark[5] }) }
         this.poses.set(id, p)
         return p
       }
@@ -850,6 +859,22 @@ export class CutsceneRun {
     if (segments.length) p.action = { name: tag, segments }
     this.running = this.running.filter(x => x.name !== tag)
     this.running.push({ name: tag, start: this.now, end: t })
+    return true
+  }
+
+  /**
+   * A door opening or closing (0x4C/0x4D, or its "open"/"clos" action): the
+   * zone hides it while open. True if `actor` is a door.
+   */
+  private door(actor: number, open: boolean): boolean {
+    const id = this.pose(actor)?.door
+    if (!id) return false
+    if (this.st.openDoors.has(id) !== open) {
+      const next = new Set(this.st.openDoors)
+      if (open) next.add(id)
+      else next.delete(id)
+      this.out({ openDoors: next })
+    }
     return true
   }
 
@@ -1128,6 +1153,8 @@ export class CutsceneRun {
       case 0x48: case 0x49: this.say(this.val(th, op === 0x48 ? 1 : 5), null); break
       case 0xb0: if (!sub) this.say(this.val(th, 10), this.speaker(this.who(th, 2)), this.who(th, 6)); break
       case 0x23: th.pc += size; th.waiting = 'read'; return 'yield'
+      // Open and close the event's own door (XiEvents: its status 8 / 9).
+      case 0x4c: case 0x4d: this.door(th.actor, op === 0x4c); break
       case 0x24: this.say(this.val(th, 1), null); break
       case 0x25: case 0x7f: th.pc += size; th.waiting = 'choice'; return 'yield'
       // Other actors' events: 0x27 starts one, 0x28 and 0x29 start one and wait for it.
@@ -1166,6 +1193,7 @@ export class CutsceneRun {
         this.fadeOuts = []
         this.talking = null
         if (!this.probe && op === 0x34) sceneEffects.clear = true
+        this.out({ openDoors: NO_DOORS })
         this.keepZone = op === 0x35
         this.out({ sceneZone: zone })
         th.waiting = 'zone'
@@ -1206,7 +1234,8 @@ export class CutsceneRun {
         else { th.pc += size; if (this.pose(th.actor)?.walk) { th.waiting = 'walk'; return 'yield' } return 'go' }
         break
       // An actor's action by name (0x2C); a zone's (0x2D) are scene schedulers.
-      case 0x2c: if (!this.act(this.who(th, 1), this.tag(th, 9))) this.startScheduler(this.tag(th, 9), this.who(th, 1), this.actionKind(this.who(th, 1))); break
+      case 0x2c: if ((this.tag(th, 9) === 'open' || this.tag(th, 9) === 'clos') && this.door(this.who(th, 1), this.tag(th, 9) === 'open')) break
+        if (!this.act(this.who(th, 1), this.tag(th, 9))) this.startScheduler(this.tag(th, 9), this.who(th, 1), this.actionKind(this.who(th, 1))); break
       case 0x2d: this.startScheduler(this.tag(th, 9)); break
       // Motion files for an actor, then its action from them ("xxxx" = load only).
       case 0x5b: case 0x66: {

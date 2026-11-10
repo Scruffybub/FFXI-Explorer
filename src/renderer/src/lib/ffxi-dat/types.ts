@@ -143,6 +143,8 @@ export interface ZoneMeshInstance {
   transform: number[]     // 4x4 matrix (16 floats, row-major)
   /** Point-light generators lighting this placement (MZB, up to four). */
   lights?: string[]
+  /** A door's id (MzbParser), for opening it in cutscenes. */
+  door?: string
 }
 
 /**

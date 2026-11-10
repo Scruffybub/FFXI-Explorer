@@ -4035,13 +4035,16 @@ export default function ZoneViewer({
     const normalGroups = new Map<number, THREE.Matrix4[]>()
     const mirroredGroups = new Map<number, THREE.Matrix4[]>()
     const groupLamps = new Map<THREE.Matrix4[], number[]>()
+    // Each placement's door id (MzbParser), for cutscenes that open doors.
+    const groupDoors = new Map<THREE.Matrix4[], (string | undefined)[]>()
     for (const inst of zoneData.instances) {
       if (!geoMap.has(inst.meshIndex)) continue
       const matrix = new THREE.Matrix4().fromArray(inst.transform)
       const target = matrix.determinant() < 0 ? mirroredGroups : normalGroups
       let arr = target.get(inst.meshIndex)
-      if (!arr) { arr = []; target.set(inst.meshIndex, arr); groupLamps.set(arr, []) }
+      if (!arr) { arr = []; target.set(inst.meshIndex, arr); groupLamps.set(arr, []); groupDoors.set(arr, []) }
       arr.push(matrix)
+      groupDoors.get(arr)!.push(inst.door)
       groupLamps.get(arr)!.push(...lampSlots(inst.lights, lamps.index))
     }
     // Every zone geometry carries aLamps, zeros unless a group sets its own:
@@ -4088,6 +4091,8 @@ export default function ZoneViewer({
       mesh.userData.prefabIdx = meshIdx
       for (let i = 0; i < matrices.length; i++) mesh.setMatrixAt(i, matrices[i])
       mesh.instanceMatrix.needsUpdate = true
+      const doors = groupDoors.get(matrices)
+      if (doors?.some(Boolean)) { mesh.userData.doors = doors; mesh.userData.placed = matrices }
       cullPlaced(mesh)
       instancedMeshes.push(mesh)
     }
@@ -4102,6 +4107,8 @@ export default function ZoneViewer({
       mesh.userData.prefabIdx = meshIdx
       for (let i = 0; i < matrices.length; i++) mesh.setMatrixAt(i, matrices[i])
       mesh.instanceMatrix.needsUpdate = true
+      const doors = groupDoors.get(matrices)
+      if (doors?.some(Boolean)) { mesh.userData.doors = doors; mesh.userData.placed = matrices }
       cullPlaced(mesh)
       instancedMeshes.push(mesh)
     }
@@ -4713,6 +4720,20 @@ export default function ZoneViewer({
     const fx = scene.zoneEffects && !scene.mapView
     for (const m of instancedMeshes) if (m.userData.zoneFx) m.visible = !fx
   }, [instancedMeshes, scene.zoneEffects, scene.mapView])
+
+  // Doors a cutscene has open: hidden until it closes them (how the game
+  // moves each door isn't known yet; Ryan chose hiding, 2026-11-09).
+  const openDoors = cutscene.openDoors
+  useEffect(() => {
+    const gone = new THREE.Matrix4().makeScale(0, 0, 0)
+    for (const m of instancedMeshes) {
+      const doors = m.userData.doors as (string | undefined)[] | undefined
+      if (!doors) continue
+      const placed = m.userData.placed as THREE.Matrix4[]
+      doors.forEach((d, i) => m.setMatrixAt(i, d && openDoors.has(d) ? gone : placed[i]))
+      m.instanceMatrix.needsUpdate = true
+    }
+  }, [instancedMeshes, openDoors])
 
   // Exactly one weather state is visible at a time, switched by a per-mesh flag
   // so changing it costs nothing. Meshes with no weatherState tag are ordinary

@@ -33,6 +33,12 @@ export interface MzbInstance {
    * fills at run time; a zero name ends it (xim ZoneDefParser, format only).
    */
   lights: string[]
+  /**
+   * A door's id: four characters at record +0x34 ("_4i5"), the same as the
+   * door actor's name in the event files and LandSandBoat's door_id. Only
+   * read when it looks like one (an underscore and three printable bytes).
+   */
+  door?: string
 }
 
 /** The block's point-light table: generator names, in index order. */
@@ -82,6 +88,9 @@ export function parseMzbBlock(data: Uint8Array): MzbInstance[] {
     if (end === -1) end = 16
     const name = textDecoder.decode(idBytes.subarray(0, end)).trim()
 
+    const d = data.subarray(offset + 0x34, offset + 0x38)
+    const door = d[0] === 0x5f && d.every(c => c > 0x20 && c < 0x7f) ? String.fromCharCode(...d) : undefined
+
     // Read transform components
     const fTransX = view.getFloat32(offset + 16, true)
     const fTransY = view.getFloat32(offset + 20, true)
@@ -117,7 +126,7 @@ export function parseMzbBlock(data: Uint8Array): MzbInstance[] {
       if (idx > 0 && idx <= lightTable.length) lights.push(lightTable[idx - 1])
     }
 
-    instances.push({ name, transform, lights })
+    instances.push({ name, transform, lights, ...(door && { door }) })
   }
 
   return instances

@@ -414,6 +414,7 @@ export function parseZoneFile(
               meshIndex: mapping.startIdx + m,
               transform: inst.transform,
               ...(inst.lights.length && { lights: inst.lights }),
+              ...(inst.door && { door: inst.door }),
             })
           }
         }

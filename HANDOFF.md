@@ -4726,6 +4726,27 @@ rather than solved.
       because a misread script crashed (La Theine 102:225,
       Castle Zvahl Keep 162:125: now they loop on timers). Left: 35 "server loop" (the
       script polls for the server's answer), timer loops.
+      **Doors — 2026-11-09 (Ryan chose: hide while open).** A door actor
+      links to its zone model by a 4-character id: MZB record +0x34 holds it
+      (Castle Zvahl Keep door2 at -18.75,0,70 has "_4i5"), the same as
+      LandSandBoat's door script name and door_id (896087135 = 0x3569345F,
+      "_4i5" little-endian). Record +0x38..+0x40 hold 10, 100, 1000
+      (floats), then 1 and two small ids (0x84, 0x85): meaning unknown.
+      0x4C/0x4D only set the door entity's status to 8 (open) / 9 (close);
+      the engine moves it, and how (swing, slide, rise) is not in anything
+      decoded so far. "open"/"clos" (55 scenes) are those motions; the
+      rest of the "zone model action" notes (tlk0, dead, hap0..) are
+      gestures asked of invisible-marker actors the server dresses.
+      Built: MzbParser reads the id (an underscore and three printable
+      bytes) onto each placement; npc-marks.json carries each door's id
+      (6th element, from door_id; 3,601 doors); the run keeps `openDoors`
+      (0x4C/0x4D on the event's own actor, or an "open"/"clos" action on a
+      door; cleared on a zone change and at the end), and ZoneViewer sets
+      those placements' instance matrices to zero scale until closed.
+      Seen: Meeting of the Minds (Eastern Adoulin 1500, in scene area 584)
+      opens _gi2, the council chamber's double door, and the council walks
+      in through the open doorway. Door scenes 149 -> 118 (the rest are the
+      stand-ins' gestures). Real motion: still unknown.
       **A clean sweep row is not a correct-looking scene:** check by eye.
     - **Town interiors — added 2026-10-28** (found through stage 2: scenes
       in shops were black). Shop and house insides are separate files the

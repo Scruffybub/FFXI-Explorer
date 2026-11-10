@@ -59,7 +59,10 @@ for (const zone of fs.readdirSync(dir).sort()) {
     if (!shown) skip('status ' + (e.status ?? 'none'))
     const mark = () => {
       const [x, y, z, rot = 0] = e.at ?? [0, 0, 0, -1]
-      ;(marks[(id >> 12) & 0xfff] ??= []).push([id & 0xfff, +x.toFixed(2), +y.toFixed(2), +z.toFixed(2), rot])
+      // A door's id, the 4 characters its zone model carries (MZB +0x34).
+      const door = look?.type === 'door' && e.render?.door_id ? Buffer.alloc(4) : null
+      if (door) door.writeUInt32LE(e.render.door_id >>> 0)
+      ;(marks[(id >> 12) & 0xfff] ??= []).push([id & 0xfff, +x.toFixed(2), +y.toFixed(2), +z.toFixed(2), rot, ...(door ? [door.toString('latin1')] : [])])
     }
     let l
     if (look?.type === 'standard') {

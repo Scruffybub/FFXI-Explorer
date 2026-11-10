@@ -49,8 +49,8 @@ const MARKS = rawMarks as unknown as Record<string, NpcMark[]>
  * The zone's scene-only NPCs (cutscene-only and hidden in LandSandBoat's
  * data): hidden in the town, shown only when a scene shows them.
  */
-/** Actors with nothing to draw (markers, doors, ships): index, x, y, z, facing (-1 for no position). */
-export type NpcMark = [number, number, number, number, number]
+/** Actors with nothing to draw (markers, doors, ships): index, x, y, z, facing (-1 for no position), and a door's id (MZB +0x34). */
+export type NpcMark = [number, number, number, number, number, string?]
 export function npcMarks(zoneId: number): NpcMark[] {
   return MARKS[String(zoneId)] ?? []
 }
