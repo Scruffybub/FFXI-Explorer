@@ -394,6 +394,8 @@ interface Thread {
   locals: Map<number, number>
   /** Walk speed set by 0x32, units a second. */
   speed: number
+  /** The last instruction run (the sweep's note when a script runs off its end). */
+  last?: number
   waitUntil: number
   waiting: 'read' | 'choice' | 'load' | 'walk' | 'thread' | 'zone' | null
   /** 0x28/0x29: the thread this one waits for. */
@@ -952,9 +954,14 @@ export class CutsceneRun {
     if (this.view.ended) return
     // One script an actor at a time, as the game's request stack runs: the
     // most urgent (lowest priority number), the oldest of equals.
+    // A script waiting on another (0x28/0x29) gives up its actor's turn: the
+    // one it waits for is often the same actor's (a zone scene asks the
+    // zone's event 51 and waits for it), and holding the turn deadlocked
+    // them (Riverne B01 32001, 2026-11-09).
+    for (const th of this.threads) if (th.waiting === 'thread' && th.waitFor?.done) th.waiting = null
     const turn = new Map<number, Thread>()
     for (const th of this.threads) {
-      if (th.done) continue
+      if (th.done || th.waiting === 'thread') continue
       const cur = turn.get(th.actor)
       if (!cur || th.priority < cur.priority || (th.priority === cur.priority && th.order < cur.order)) turn.set(th.actor, th)
     }
@@ -965,8 +972,16 @@ export class CutsceneRun {
         if (th.waiting === 'thread' && th.waitFor?.done) th.waiting = null
         if (th.waiting || t < th.waitUntil) break
         const code = th.block.code
+        // A whole last instruction and then the code's end: the file's zero
+        // padding follows, which reads as End (doors' 0x4D, Windurst Woods 70).
+        if (th.pc === code.length && th.last !== undefined && th.last + opSize(code, th.last) === code.length) {
+          th.done = true
+          if (th.main) return this.end(null)
+          break
+        }
         if (th.pc >= code.length || !opSize(code, th.pc)) {
           this.probe?.note('unreadable op', (th.pc >= code.length ? 'past the end' : hex(code[th.pc])) + (th.main ? '' : ' (another actor)'))
+          if (this.probe && th.last !== undefined) this.probe.note('ran off after', hex(code[th.last]) + ' at ' + th.last.toString(16) + ' in ' + hex(th.actor & 0xfff))
           if (th.main) return this.end('The script stopped on something this player can’t read yet.')
           th.done = true
           break
@@ -1008,6 +1023,7 @@ export class CutsceneRun {
   private step(th: Thread): 'go' | 'yield' | 'end' {
     const code = th.block.code
     const op = code[th.pc], sub = code[th.pc + 1]
+    th.last = th.pc
     const size = opSize(code, th.pc)
     const goTo = (target: number) => {
       if (target <= th.pc && ++th.loops > LOOP_LIMIT) {

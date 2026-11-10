@@ -25,8 +25,11 @@ const FIXED = [
   0, 2, 17, 3, 11, 11, 15, 5, 1, 4, 7, 9, 9, 7, 7, 1, 1, 0, 0, 11, 2, 0, 5, 5, 1, 0, 0, 5, 6, 3, 0, 1,
   5, 6, 7, 3, 1, 1, 6, 2, 2, 3, 1, 25, 0, 5, 1, 1, 1, 3, 6, 3, 6, 3, 1, 5, 1, 5, 1, 1, 3, 0, 2, 17,
   15, 15, 15, 15, 2, 2, 0, 0, 6, 3, 17, 0, 0, 12, 0, 8, 12, 4, 0, 0, 0, 4, 0, 0, 27, 8, 13, 17, 15, 15, 3, 0,
-  3, 5, 0, 7, 11, 17, 15, 15, 7, 1, 0, 0, 0, 17, 15, 15, 17, 15, 15, 6, 0, 17, 15, 15, 0, 2,
+  3, 5, 0, 7, 12, 17, 15, 15, 7, 1, 0, 0, 0, 17, 15, 15, 17, 15, 15, 6, 0, 17, 15, 15, 0, 2,
 ]
+// 0xC4 is 12, not the notes' 11: it runs 0x73's helper with one extra byte
+// (ExecPointer += 11 + 1). At 11 its last byte (7F) was read as a wait for
+// a choice, and Misareaux 17 ran off the end of its script.
 
 /** Variable sizes by sub-code; `d` covers the sub-codes not listed. */
 const VARIABLE: Record<number, Record<number, number> & { d?: number }> = {

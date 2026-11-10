@@ -4710,6 +4710,22 @@ rather than solved.
       73 shown, never placed (e.g. the [S] zones' event 260 pairs, shown by
       their own 0x22 and placed by nothing in the files: the server's), 76
       with actors LandSandBoat doesn't list (no look to draw).
+      **Stops — 2026-11-09.** (1) Deadlock: one script runs per actor, and
+      a script waiting on another (0x28/0x29) kept its actor's turn; zone
+      scenes ask the zone block's own event (the player's 0x7FFFFFF0 maps to
+      it, Riverne B01 32001 asks 51) and waited for a script that could
+      never run (115 scenes). A thread waiting on a thread now gives up the
+      turn. (2) 0xC4 is 12 bytes, not XiEvents' 11: it runs 0x73's helper
+      with param 1 (ExecPointer += 11 + 1); its last byte (7F) was read as
+      "wait for the choice" and scripts drifted off their ends (Misareaux
+      17). The Events panel's reader shares the table. (3) A whole last
+      instruction then the code's end is End (zero padding follows). The
+      sweep now notes "ran off after" (op, offset, actor) when a script
+      leaves its code. Stops 253 -> 90; 20,920 of 22,002 clean (4 scenes
+      readable now); quest/mission 4,231. Two scenes ended before only
+      because a misread script crashed (La Theine 102:225,
+      Castle Zvahl Keep 162:125: now they loop on timers). Left: 35 "server loop" (the
+      script polls for the server's answer), timer loops.
       **A clean sweep row is not a correct-looking scene:** check by eye.
     - **Town interiors — added 2026-10-28** (found through stage 2: scenes
       in shops were black). Shop and house insides are separate files the
