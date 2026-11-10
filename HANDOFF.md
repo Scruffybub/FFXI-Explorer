@@ -4756,6 +4756,17 @@ rather than solved.
       20,933 of 22,002 clean; quest/mission 4,236. Zones (137): unchanged
       since the 2026-11-06 notes above (701 41 scenes, 735 24, 700 23, 0 20,
       737 11).
+      **Race gestures — 2026-11-09.** "You" (and NPCs dressed as a race)
+      load motions with 0x66 by a number the server sets, so mab0, atp0,
+      orz0, run0.. were missing. They are in the race's own block of the
+      four tables (mab0: 87825 + block x 10; atp0: 61241 + block x 10). A
+      race actor's action missing from its loaded files is now searched in
+      its race block's 40 files (32712, 61241, 87825, 102239 + block x 10 +
+      0..9), read one at a time until one has the tag (raceMotionLib, cached
+      per block and tag; cleared with the file cache). Gesture scenes
+      366 -> 214; 21,018 of 22,002 clean; quest/mission 4,268. Seen:
+      Batallia Downs [S] 701, you play atp1 under the Cavernous Maw (small
+      in frame: found and playing, pose not judged).
       **A clean sweep row is not a correct-looking scene:** check by eye.
     - **Town interiors — added 2026-10-28** (found through stage 2: scenes
       in shops were black). Shop and house insides are separate files the

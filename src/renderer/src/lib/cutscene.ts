@@ -236,7 +236,7 @@ export function chooseCutscene(i: number): void { current?.choose(i) }
 
 const fileCache = new Map<number | string, Promise<Lib | null>>()
 /** Lets the parsed files go (the sweep, between zones). */
-export function clearCutsceneFiles(): void { fileCache.clear() }
+export function clearCutsceneFiles(): void { fileCache.clear(); raceSearch.clear() }
 
 /** A file's cameras, schedulers (by name) and animations: event files, motion files, emote files (by path). */
 function loadEventFile(root: string, id: number | string, withClips = true): Promise<Lib | null> {
@@ -428,6 +428,31 @@ interface Thread {
  */
 const RACE_BLOCK: Record<number, number> = { 1: 0, 2: 1, 3: 2, 4: 3, 5: 4, 6: 4, 7: 5, 8: 6 }
 const talkSet = (race: number) => (race in RACE_BLOCK ? 32712 + RACE_BLOCK[race] * 10 : null)
+
+/**
+ * The race block's motion files in all four 0x66 tables (32712, 61241,
+ * 87825, 102239 + block x 10, ten each), searched in order for an action;
+ * each file is read only when the ones before it lack the tag.
+ */
+const RACE_TABLES = [32712, 61241, 87825, 102239]
+const raceSearch = new Map<string, Promise<Lib | null>>()
+function raceMotionLib(root: string, block: number, tag: string): Promise<Lib | null> {
+  const key = block + '|' + tag
+  let p = raceSearch.get(key)
+  if (!p) {
+    p = (async () => {
+      for (const base of RACE_TABLES) {
+        for (let j = 0; j < 10; j++) {
+          const lib = await loadEventFile(root, base + block * 10 + j)
+          if (lib?.schedulers.has(tag)) return lib
+        }
+      }
+      return null
+    })()
+    raceSearch.set(key, p)
+  }
+  return p
+}
 
 /**
  * The motion files each actor is given anywhere in the zone's scripts
@@ -841,7 +866,17 @@ export class CutsceneRun {
     if (!lib) {
       // Its own files still on their way: again once they're in.
       if (retry && own && !own.libs) {
-        void own.ready.then(() => { if (!this.act(actor, tag, extra, false)) this.startScheduler(tag, actor, this.actionKind(actor)) })
+        void own.ready.then(() => { if (!this.act(actor, tag, extra, true)) this.startScheduler(tag, actor, this.actionKind(actor)) })
+        return true
+      }
+      // A race actor (you, or an NPC dressed as a race): its race's motion
+      // files. Scripts load the right one with 0x66 by a number the server
+      // sets (mab0, atp0, orz0 for "you"), so the player searches them.
+      const race = actor === PLAYER || p.race === 0 ? this.st.playerRace : p.race
+      if (retry && race !== undefined && race in RACE_BLOCK) {
+        void this.track(raceMotionLib(this.r.root, RACE_BLOCK[race], tag)).then(found => {
+          if (!found || !this.act(actor, tag, [found], false)) this.startScheduler(tag, actor, this.actionKind(actor))
+        })
         return true
       }
       return false
