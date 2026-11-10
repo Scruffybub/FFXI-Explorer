@@ -60,10 +60,10 @@ function table(root: string): Promise<DataView | null> {
   return cached.table
 }
 
-/** Body type in the table for a look's race: 1-8 as is, the children 29-31 at 9-11. */
+/** Body type in the table for a look's race: 1-8 as is, the children 29-31 at 9-11, the chocobos 32-36 at 12-16. */
 export function bodyType(race: number): number | null {
   if (race >= 1 && race <= 8) return race
-  if (race >= 29 && race <= 31) return race - 20
+  if (race >= 29 && race <= 36) return race - 20
   return null
 }
 

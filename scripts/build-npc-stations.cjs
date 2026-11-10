@@ -67,6 +67,12 @@ for (const zone of fs.readdirSync(dir).sort()) {
       l = look.model
     } else if (look?.type === 'equipped') {
       l = [look.race, look.face, ...SLOTS.map(s => (look[s] ?? 0) & 0xfff)]
+    } else if (look?.type === 'chocobo') {
+      // LandSandBoat's "face" byte is the chocobo's race in the game's tables
+      // (32-36: race file ROM/169/11, body types 12-16); its parts are gear.
+      l = [look.face, 0, ...SLOTS.map(s => (look[s] ?? 0) & 0xfff)]
+    } else if (look?.type === 'automaton') {
+      l = look.model
     } else { skip('look ' + look?.type); if (NO_BODY.has(look?.type)) mark(); continue }
     const [x, y, z, rot = 0] = e.at ?? [0, 0, 0, -1]
     if (!e.at) skip('unplaced (scene actor)')

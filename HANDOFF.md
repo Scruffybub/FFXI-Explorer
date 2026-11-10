@@ -4691,6 +4691,25 @@ rather than solved.
       without a folder's particle materials.
       Left: 0pop/4k23 (San d'Oria 30042/3, not in the loaded file),
       1pb1 in other zones (0x35 from Whitegate).
+      **People — 2026-11-09.** (1) Chocobos (106 scenes: Chocobo Circuit,
+      stables, [S] war birds): LandSandBoat's chocobo look puts the race
+      (32-36) in "face"; build-npc-stations writes [race, 0, parts..] and
+      bodyType maps 32-36 to the table's 12-16, so they go through the
+      children's path (race file ROM/169/11 for skeleton and idle). Parts 1
+      are barding (an armoured war bird). Seen in Chocobo Circuit 212. A
+      dark grey patch under the tail is a dithered-alpha texture drawn solid
+      (modelBuild's rule for every model); compare with the game. (2)
+      "automaton" looks are model numbers (Al Zahbi 8: Mamool Ja standards).
+      Both also join npc-stations.json, so town chocobos show with Scene ->
+      NPCs. (3) The loaders (0x45 etc.) read their actor after moving pc,
+      i.e. from the next instruction: values like 0xf0801552 ("52 15 80 f0",
+      a Stop action) noted as missing actors, and those schedulers' motions
+      went nowhere. The sweep now notes "odd actor operand" (op @ offset) for
+      any actor operand that isn't 0x01zzziii or 0x7FFFFFxx: 4 left. People
+      scenes 370 -> 160; 20,788 of 21,998 clean; quest/mission 4,216. Left:
+      73 shown, never placed (e.g. the [S] zones' event 260 pairs, shown by
+      their own 0x22 and placed by nothing in the files: the server's), 76
+      with actors LandSandBoat doesn't list (no look to draw).
       **A clean sweep row is not a correct-looking scene:** check by eye.
     - **Town interiors — added 2026-10-28** (found through stage 2: scenes
       in shops were black). Shop and house insides are separate files the

@@ -640,6 +640,8 @@ export class CutsceneRun {
   private who(th: Thread, i: number): number {
     const id = this.u32(th, i)
     if (id === 0x7ffffff8) return th.actor
+    // Not an actor id at all (0x01zzziii, or the 0x7FFFFFxx stand-ins): the sweep hears which instruction read it.
+    if (id >>> 24 !== 0x01 && id >>> 8 !== 0x7fffff) this.probe?.note('odd actor operand', hex(th.block.code[th.pc]) + ' @' + i + ' in ' + hex(th.block.actor & 0xfff) + (th.main ? '' : ' (another)'))
     return isPlayer(id) ? PLAYER : id
   }
 
@@ -1205,8 +1207,9 @@ export class CutsceneRun {
           let n = this.val(th, 1)
           if (op === 0x45) n = n >= 900 ? n + 77797 : n >= 600 ? n + 39643 : n >= 300 ? n + 25937 : n
           const id = LOADERS[op] + n
-          th.pc += size
+          // Its actor before moving on: read after, it came from the next instruction's bytes.
           const actor = this.who(th, 3)
+          th.pc += size
           void this.load(th, id).then(() => this.startScheduler(tag, actor))
           return 'yield'
         }

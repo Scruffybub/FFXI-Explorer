@@ -28,10 +28,12 @@ import { clipsForMotion } from './motions'
  *
  * The face and gear files come from the game's own table (equipTable).
  *
- * Children (races 29-31) take their skeleton and idle from their race file
- * (equipTable raceFilePath).
+ * Children (races 29-31) and chocobos (32-36, LandSandBoat's "face" byte;
+ * their parts are gear in body types 12-16) take their skeleton and idle from
+ * their race file (equipTable raceFilePath). LandSandBoat's "automaton" looks
+ * are model numbers (Al Zahbi's Mamool Ja standards).
  *
- * Not yet (2026-10-25): chocobos and automatons as looks of their own, effects
+ * Not yet: effects
  * NPC files start from a routine rather than by themselves, sitting and
  * other poses from the table's animation numbers.
  */
