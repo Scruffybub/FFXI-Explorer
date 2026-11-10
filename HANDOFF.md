@@ -4767,6 +4767,13 @@ rather than solved.
       366 -> 214; 21,018 of 22,002 clean; quest/mission 4,268. Seen:
       Batallia Downs [S] 701, you play atp1 under the Cavernous Maw (small
       in frame: found and playing, pose not judged).
+      **Scene effects left (134 scenes), 2026-11-09:** 1pb1 22 (Whitegate's,
+      played after 0x35 into another zone: noted "(earlier zone)"); 0pop
+      and 4k23 20 each (the mog tablet scene 30042/3 in every town: after
+      0x34 to zone 735, the scene's actor is an LSB model-52 stand-in the
+      server dresses; 0pop lives in NPC model files 100018/100019, iro_/npc_
+      folders, so it's the dressed model's own effect); then 1-7 scenes
+      each. Nothing left here that the files alone can fix in bulk.
       **A clean sweep row is not a correct-looking scene:** check by eye.
     - **Town interiors — added 2026-10-28** (found through stage 2: scenes
       in shops were black). Shop and house insides are separate files the
