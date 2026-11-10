@@ -1,4 +1,4 @@
-**Work in progress** — the rough edges as of 0.1.13:
+**Work in progress** — the rough edges as of 0.1.14:
 
 **Water (beta)** - Scene → Generator water draws the game's own water, waves and foam. Most zones match the game; Foret de Hennetiel's sea and rivers do not yet. It is off by default.
 
@@ -16,6 +16,8 @@
 
 **Export** - glTF files have been checked by reading them back, not yet in Blender itself. Zone exports leave out the sky, weather, water and effects, and two-bone joints on models use the standard glTF approximation.
 
+**Cutscenes** - In a sweep of every scene, about 21,000 of the game's 22,000 cutscenes play through without a problem the player can detect, but that is not the same as looking right: check by eye. Characters the game's server dresses when a scene starts are not shown, a few scenes wait for answers only the server gives, doors vanish while open rather than swinging, and some gestures are still missing.
+
 **Model viewer** - Some names in the model list (it comes from a community catalogue) may still be wrong, a few models draw untextured, and motions without a known name show the game's code for them.
 
 
@@ -28,7 +30,7 @@ Everything is read straight out of your own local FFXI installation. Nothing is
 uploaded, and no server or account is involved. The only network request it ever
 makes is an optional check for a newer version — see [Updates](#updates).
 
-![Version](https://img.shields.io/badge/version-0.1.13-blue) ![Platform](https://img.shields.io/badge/platform-Windows-lightgrey)
+![Version](https://img.shields.io/badge/version-0.1.14-blue) ![Platform](https://img.shields.io/badge/platform-Windows-lightgrey)
 
 ---
 
@@ -81,7 +83,9 @@ and fades. The characters take their places, turn and walk as the scene says, yo
 included (in the character you built), and flashbacks go where they happen, in
 their sepia tone. They talk (their mouths move as they speak, and everyone blinks), think, gesture
 and bow with the game's own motions,
-and the scene's music plays. Quest and mission scenes carry their names
+and the scene's music plays. The scene's own effects play (the Fenrir crystal's rays,
+a Blue Mage's magic circle), doors open, and chocobos and Mamool Ja standards
+take part. Quest and mission scenes carry their names
 (5,541 of them, e.g. "Puppetmaster Blues · Aht Urhgan quest"), and **Only quest
 and mission scenes** narrows a zone's list to them. The game's files only number
 their scenes; the names come from LandSandBoat's server scripts.
